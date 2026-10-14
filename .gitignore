@@ -1,0 +1,42 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.vite/
+*.tsbuildinfo
+.eslintcache
+
+# Rust build artifacts
+target/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Runtime data and temporary files
+*.log
+.tmp/
+tmp/
+.cache/
+*.sqlite
+*.sqlite3
+*.db
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+
+# Local Claude Code worktrees
+.claude/
+
+# Private challenge bundles never enter git
+private-bundles/
