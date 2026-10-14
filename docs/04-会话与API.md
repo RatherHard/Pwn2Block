@@ -35,8 +35,6 @@
 
 MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送请求即可，“刷新页面”通过 `GET` 当前状态恢复。
 
-MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送请求即可，“刷新页面”通过 `GET` 当前状态恢复。
-
 ## 2. 动作
 
 | 动作 | 参数 | 类别 |
@@ -44,6 +42,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `write_bytes` | `addr`, `hex` | 写原语 |
 | `push` / `pop` | `value` / — | 写原语 |
 | `call` / `ret` | `addr` / — | 写原语：直接操纵栈与 ip，**不执行指令** |
+| `feed` | `hex` | 往 stdin 缓冲追加字节，**不执行指令**，见 02 §5.3 |
 | `block` | `id`, `args` | 出题人积木，服务端展开为上面几类原子动作 |
 | `step` | `count?` | 执行 N 条指令，默认 1 |
 | `run` | `maxSteps?` | 连续执行，直到程序退出、异常或达到步数上限 |
@@ -56,9 +55,11 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
   - 代价是循环类题目不好观察：单步太慢，`run` 会冲过头。所以 `step` 带 `count`，`run` 带 `maxSteps`，界面上暴露成“运行 N 步”。
   - 断点原本用来“停在 ret 之前”。现在的替代手段是冲过去再 `step_back` 倒回来，见 §3。
 - 写原语在执行前做校验：
-  - 地址必须完全落在可见、可写的 VMA 内。
+  - 写入的地址段必须完全落在已映射、非隐藏、可写的 VMA 内。
+  - `pop` / `ret` 会从栈上读值，所以读取的栈槽同样必须落在已映射、非隐藏、可读的 VMA 内。否则 `pop` 就成了读隐藏内容的通道。
   - 不满足时**拒绝**（`rejected`），状态不变，不压快照。
-  - 拒绝时，隐藏地址与未映射地址返回同一个错误码 `inaccessible_address`。
+  - 错误码：未映射或越权为 `inaccessible_address`，落在隐藏 VMA 为 `hidden_address`。布局是公开的，区分二者不泄露任何内容，反而有教学价值。
+- `feed` 后 stdin 缓冲累计超过 4KB 时拒绝。
 - 已执行的动作若触发指令异常，实例进入 `failed`。
 
 ## 3. 回退
@@ -94,16 +95,18 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `status` | 实例状态，见 §1.1 |
 | `steps` | 已执行指令数 |
 | `failures` | 被拒绝 + 失败的动作计数，用于解锁提示 |
-| `registers` | 非秘密寄存器，值为 hex 字符串；另含 `flags: {ZF, CF, SF}` |
-| `vmas[]` | 仅可见 VMA：`{id, kind, label, start, size, perm, hex}` |
-| `disasm[]` | 服务端对可见 `x` 区域线性反汇编：`{addr, bytes, text, target?}` |
+| `registers` | 全部寄存器，值为 hex 字符串；另含 `flags: {ZF, CF, SF}` |
+| `vmas[]` | 全部 VMA 的布局 `{id, kind, label, start, size, perm, hidden}`；仅非隐藏的带 `hex` |
+| `stdin` | `{hex, pos}`：已 `feed` 的全部字节和当前读位置。题目未声明 stdin 时省略 |
+| `stdout` | `{hex}`：程序写到 stdout 的全部字节。题目未声明 stdout 时省略 |
+| `disasm[]` | 服务端对非隐藏的 `x` 区域线性反汇编：`{addr, bytes, text, target?}` |
 | `lastStop` | `{reason: exit\|exception\|limit\|step, addr?}` |
 | `error?` | `{code, message, note}`，message 来自模板，note 来自题目 `errorNotes` |
 
 - 投影里**没有 flag**。flag 只在提交判胜时由 `/submit` 返回，见 §5.1。
 - 题目加载时校验可见字节总量上限（建议 256KB），保证全量投影代价可控。
-- 寄存器值可以指向隐藏区域。这只泄露地址、不泄露内容，可以接受。
-- 隐藏 VMA、秘密寄存器、`interfaces`、`win`/`fail` 永不出现在任何响应中。
+- 被 `reveal` 的 VMA 在投影里变为 `hidden: false` 并带上 `hex`。
+- 隐藏 VMA 的内容、虚拟文件内容、`win`/`fail` 永不出现在任何响应中。它们只能经由程序执行“获取”，见 02 §3。
 - 断点没了之后 `limit` 从边缘情况变成常态：“运行 N 步”正常停下来就是这个原因。
 
 ## 5. REST API
