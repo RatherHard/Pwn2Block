@@ -14,10 +14,9 @@
   | `exited` | 程序已结束但未判胜。若题目声明了 `fail`，会落到 `failed` |
 
 - 处于 `won`、`failed` 或 `exited` 时，执行类动作会被拒绝，只有 `undo` 和 `reset` 可用。这样学习者可以回退后继续探索。
-  - StackMaster 规定终态禁止一切动作，MVP 为教学放宽了这一点。
 - 空闲 30 分钟的会话会被回收。
 
-StackMaster 的 revision、baseRevision、幂等键和 clientSeq 在 MVP 中舍弃。前端串行发送请求即可，“刷新页面”通过 `GET` 当前状态恢复。
+MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送请求即可，“刷新页面”通过 `GET` 当前状态恢复。
 
 ## 2. 动作
 
@@ -34,7 +33,7 @@ StackMaster 的 revision、baseRevision、幂等键和 clientSeq 在 MVP 中舍�
 
 - 题目通过 `allowedActions` 限定可用动作。`undo` 和 `reset` 始终可用。
 - **断点由权威会话原生支持**：作为 `run` 的参数传入，由服务端在每条指令取指前检查。
-  - 断点本身不泄露秘密，所以 MVP 不需要 StackMaster 的“调试克隆通道”。
+  - 断点本身不泄露秘密，所以不需要单独的调试通道。
 - 写原语在执行前做校验：
   - 地址必须完全落在可见、可写的 VMA 内。
   - 不满足时**拒绝**（`rejected`），状态不变，不压快照。
@@ -103,5 +102,5 @@ StackMaster 的 revision、baseRevision、幂等键和 clientSeq 在 MVP 中舍�
 - 后端：单一服务，同时承担 VM 引擎、API 和前端静态托管。二选一：
   - Rust（axum），引擎与服务同进程。
   - TypeScript（Fastify），引擎以进程内模块实现。
-- 前端：Vite + Lit + Blockly，沿用 StackMaster 的选型。
+- 前端：Vite + Lit + Blockly。
 - 编码表与题目 `public.json` 类型放在前后端共享的公开包中。

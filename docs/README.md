@@ -1,6 +1,6 @@
 # Pwn2Block 需求文档（MVP）
 
-Pwn2Block 是 StackMaster 的 MVP 重做版。本目录的需求从 `F:\StackMaster\docs` 中整理出来，只保留首个教学闭环需要的内容。
+本目录是 Pwn2Block 的 MVP 需求文档，只保留首个教学闭环需要的内容。
 
 ## 一句话定位
 
@@ -18,7 +18,7 @@ Pwn2Block 是 StackMaster 的 MVP 重做版。本目录的需求从 `F:\StackMas
 | [04-会话与API.md](04-会话与API.md) | 会话生命周期、动作、undo/reset、投影、REST 接口 |
 | [05-前端交互.md](05-前端交互.md) | 整页布局、四种内存视图、payload 积木窗口、提示与错误解释 |
 
-## 相对 StackMaster 的主要取舍
+## MVP 主要取舍
 
 保留的部分：
 
