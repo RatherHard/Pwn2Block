@@ -8,10 +8,8 @@ coverage/
 *.tsbuildinfo
 .eslintcache
 
-# Rust build artifacts
-target/
-
 # Local environment and secrets
+# Flag values live here only; challenge packages reference them as "env:FLAG_<ID>"
 .env
 .env.*
 !.env.example
@@ -37,6 +35,3 @@ Desktop.ini
 
 # Local Claude Code worktrees
 .claude/
-
-# Private challenge bundles never enter git
-private-bundles/

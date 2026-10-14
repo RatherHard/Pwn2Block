@@ -42,10 +42,11 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 
 ## 3. undo / reset
 
-- 每个**已执行**的写原语、`block`、`step`、`run` 和 `reset`，都会在执行前压入一份 COW 快照。
-  - 一次 `run` 只压一份快照，无论它执行了多少条指令。
-  - 一次 `block` 也只压一份快照。
-- `undo` 弹出栈顶快照并恢复。它自身不压栈，所以连续 undo 会沿历史持续后退。MVP 不做 redo。
+- 快照以**请求**为粒度：每个 `actions` 请求在执行第一个动作前压入一份 COW 快照。
+  - 一次提交整个 payload（N 个动作）只压一份快照，`undo` 一次就回到 payload 之前。
+  - 这与学习者的心智模型一致：一份 payload 是一次尝试，撤销就是撤销这次尝试。
+  - 需要更细的粒度时用单步提交：一个请求一个动作，于是一次 undo 回退一个动作。
+- `undo` 弹出栈顶快照并恢复。它自身不压栈，否则无法连续后退。`reset` 压栈，因此可被撤销。MVP 不做 redo。
 - 历史为空时 undo 被拒绝。超出快照上限时丢弃最旧的快照。
 - **P1**：`checkpoint` 命名快照和时间线拖动。
 
@@ -63,6 +64,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `disasm[]` | 服务端对可见 `x` 区域线性反汇编：`{addr, bytes, text, target?}` |
 | `lastStop` | `{reason: breakpoint\|exit\|exception\|limit\|step, addr?}` |
 | `error?` | `{code, message, note}`，message 来自模板，note 来自题目 `errorNotes` |
+| `flag?` | 仅在 `status = won` 时出现，取自私有包的 `flag` |
 
 - 题目加载时校验可见字节总量上限（建议 256KB），保证全量投影代价可控。
 - 寄存器值可以指向隐藏区域。这只泄露地址、不泄露内容，可以接受。
@@ -83,9 +85,12 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 
 - 按顺序执行，遇到第一个被拒绝的动作、进入终态或命中断点即停止，后续动作不执行。
 - 返回 `{results: [{ok, error?}], executed, projection}`，`executed` 为实际执行的动作数。
-- 一批动作中的每个动作各自压快照，undo 一次只回退一个动作。
+- 整批只压一份快照，见 §3。
 
-不设单独的“提交”接口：`won` 由服务端在每个动作后判定。**P1**：进入 `won` 时返回 flag 或签名令牌，用于接入 CTF 平台。
+不设单独的“提交”接口：`won` 由服务端在每个动作后判定。进入 `won` 时，响应中附带本题 flag（私有包的 `flag` 字段），学习者拿它到 CTF 平台提交。
+
+- flag 是每题固定值，不按会话生成。这意味着一旦有人公开 flag，其他人可以不做题直接提交。MVP 接受这个代价：新生赛的目标是学会，不是防串题。
+- **P1**：按会话签名的一次性 token，用于真正需要防串题的场合。
 
 ## 6. 安全说明
 
@@ -95,12 +100,12 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
   - 请求体大小上限、单批动作数上限、`run` 的 `maxSteps` 上限。
   - 按 IP 限流；全局与每 IP 的并发会话数上限。
   - 错误响应不包含内部堆栈、文件路径或私有包字段。
-- 私有题目包只在服务端读取，不放进静态资源目录，也不进入 git（`private-bundles/`）。
+- `private.json` 只在服务端读取，不放进静态资源目录。它本身进 git，但 flag 真值不进：`flag` 字段写 `"env:FLAG_<ID>"`，部署时由环境变量注入，见 [07](07-工程约定.md) §7。
 
 ## 7. 技术栈建议
 
-- 后端：单一服务，同时承担 VM 引擎、API 和前端静态托管。二选一：
-  - Rust（axum），引擎与服务同进程。
-  - TypeScript（Fastify），引擎以进程内模块实现。
+全栈 TypeScript，单一服务同时承担 VM 引擎、API 和前端静态托管。详见 [07](07-工程约定.md)。
+
+- 选择全 TS 而非 Rust 引擎的理由：指令集是小的封闭集，步数上限只有一万，Rust 的性能优势在这里用不上；而单一工具链和前后端共享类型能明显降低协作成本。
 - 前端：Vite + Lit + Blockly。
-- 编码表与题目 `public.json` 类型放在前后端共享的公开包中。
+- 编码表、`public.json` 与投影的类型定义放在前后端共享的包里，是单一事实来源。
