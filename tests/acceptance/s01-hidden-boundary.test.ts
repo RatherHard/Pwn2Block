@@ -27,9 +27,11 @@ import type {
 import {
   collectKeys,
   expectNoInternalLeak,
+  findSecretLeaks,
   jsonOf,
   makeChallengeRoot,
   removeChallengeRoot,
+  secretForms,
   stateFieldsOf,
   stateFingerprint,
 } from './support';
@@ -891,5 +893,136 @@ describe('S01 真实 HTTP：投影 / 错误 / 录像 / 响应正文都不含隐�
     const keys = [...collectKeys(body)];
     for (const forbidden of FORBIDDEN_KEYS) expect(keys).not.toContain(forbidden);
     for (const predicate of PREDICATE_KEYS) expect(keys).not.toContain(predicate);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 五、多形态泄露扫描：隐藏内容不以任何编码形式出现在任何响应里
+// ---------------------------------------------------------------------------
+
+/**
+ * 必须永远不下发的秘密（04 §4「隐藏 VMA 的内容、虚拟文件内容、win/fail 永不出现在任何响应中」）。
+ *
+ * 这里按**字节**登记，扫描时展开成 hex 大小写 / 原始 ASCII / base64 四种形态：
+ * 只扫 hex 会漏掉 ASCII 与 base64 两种同样算泄露的形式（D3 的独立复核也是这么扫的，本用例把它固化下来）。
+ */
+const HIDDEN_SECRETS: Readonly<Record<string, Uint8Array>> = {
+  '隐藏栈内容': asciiToBytes(STACK_SECRET),
+  '隐藏代码区内容': asciiToBytes(CODE_SECRET),
+  '虚拟文件内容': asciiToBytes(FILE_SECRET),
+  'flag 哨兵真值': asciiToBytes(TEST_FLAG_SENTINEL),
+};
+
+/** 一次真实 HTTP 调用与它的用途说明。 */
+interface ScannedResponse {
+  readonly what: string;
+  readonly response: Awaited<ReturnType<App['inject']>>;
+}
+
+describe('S01 多形态泄露扫描：隐藏内容不以任何编码形式出现在任何响应里', () => {
+  it('扫描器正对照：每个秘密的每种编码形态都能被命中（否则下面的零命中是空转）', () => {
+    for (const [label, bytes] of Object.entries(HIDDEN_SECRETS)) {
+      const forms = secretForms(bytes);
+      // ascii / base64 / hex / hex 大写：去重后至少三种，且都够长到不是随机命中。
+      expect(forms.length, label).toBeGreaterThanOrEqual(3);
+      for (const form of forms) {
+        expect(findSecretLeaks(`{"x":"${form}"}`, HIDDEN_SECRETS), `${label} 的 ${form}`).toEqual([
+          { label, form },
+        ]);
+      }
+    }
+    // 反面对照：不含秘密的正文零命中。
+    expect(findSecretLeaks('{"status":"ready","steps":0}', HIDDEN_SECRETS)).toEqual([]);
+  });
+
+  it('全流程每一个响应正文都零命中：列表 / 公开包 / 建会话 / 投影 / 动作错误 / 录像 / 404', async () => {
+    const sessionId = await createSession();
+
+    const scanned: ScannedResponse[] = [
+      { what: '题目列表', response: await app.inject({ method: 'GET', url: '/api/challenges' }) },
+      {
+        what: '题目公开包',
+        response: await app.inject({ method: 'GET', url: '/api/challenges/hidden-lab' }),
+      },
+      {
+        what: '创建会话',
+        response: await app.inject({
+          method: 'POST',
+          url: '/api/sessions',
+          payload: { challengeId: 'hidden-lab' },
+        }),
+      },
+      {
+        what: '当前投影',
+        response: await app.inject({ method: 'GET', url: `/api/sessions/${sessionId}` }),
+      },
+      {
+        what: '动作被拒的错误正文（隐藏 VMA 写入）',
+        response: await app.inject({
+          method: 'POST',
+          url: `/api/sessions/${sessionId}/actions`,
+          payload: { actions: [{ type: 'write_bytes', addr: '0x600000', hex: '41' }] },
+        }),
+      },
+      {
+        what: '动作被拒的错误正文（隐藏栈槽 pop）',
+        response: await app.inject({
+          method: 'POST',
+          url: `/api/sessions/${sessionId}/actions`,
+          payload: { actions: [{ type: 'pop' }] },
+        }),
+      },
+      {
+        what: '出题人积木被拒的错误正文',
+        response: await app.inject({
+          method: 'POST',
+          url: `/api/sessions/${sessionId}/actions`,
+          payload: { actions: [{ type: 'block', id: 'poke_hidden', args: { data: '41' } }] },
+        }),
+      },
+      {
+        what: '提交录像（含逐帧 diff）',
+        response: await app.inject({
+          method: 'POST',
+          url: `/api/sessions/${sessionId}/submit`,
+          payload: {
+            actions: [
+              { type: 'write_bytes', addr: '0x500000', hex: '4142' },
+              { type: 'pop' },
+            ],
+          },
+        }),
+      },
+      {
+        what: '未知会话的 404 正文',
+        response: await app.inject({
+          method: 'GET',
+          url: '/api/sessions/00000000000000000000000000000000',
+        }),
+      },
+      {
+        what: '未知题目的 404 正文',
+        response: await app.inject({
+          method: 'POST',
+          url: '/api/sessions',
+          payload: { challengeId: 'no-such-lab' },
+        }),
+      },
+    ];
+
+    for (const { what, response } of scanned) {
+      expect(findSecretLeaks(response.body, HIDDEN_SECRETS), `${what} 的响应正文命中隐藏内容`).toEqual(
+        [],
+      );
+      expectNoInternalLeak(response.body, mustNeverAppear());
+    }
+
+    // 非空断言：扫描的确实是**有内容**的响应正文，而不是一串空体或全 404。
+    const projectionBody = scanned.find((item) => item.what === '当前投影')?.response.body ?? '';
+    expect(projectionBody).toContain('aa'.repeat(8));
+    expect(projectionBody).toContain('0x600000');
+    const replayBody = scanned.find((item) => item.what === '提交录像（含逐帧 diff）')?.response.body ?? '';
+    expect(replayBody).toContain('4142');
+    expect(scanned.filter((item) => item.response.statusCode === 200).length).toBeGreaterThanOrEqual(8);
   });
 });

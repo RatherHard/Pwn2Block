@@ -20,6 +20,7 @@ import type {
 import {
   expectApiError,
   expectNoInternalLeak,
+  expectProjectionFieldsUnchanged,
   makeChallengeRoot,
   removeChallengeRoot,
   stateFieldsOf,
@@ -361,6 +362,44 @@ describe('S03 请求边界 · 真实 REST 路径（G2 · D4）', () => {
     expect(stateFieldsOf(after.projection)).toBe(stateFieldsOf(before.projection));
     expect(after.projection.failures).toBe(rejected.length);
     expect(after.history).toEqual(before.history);
+  });
+
+  it('被拒绝的请求逐字段比对：投影每个字段（含每个 VMA 的 hex）单独断言不变（04 §2）', async () => {
+    const sessionId = await newSession();
+    const before = await getState(sessionId);
+
+    // 一、**引擎级拒绝**（HTTP 200、动作 `ok: false`）：请求进了引擎，`failures` 按 04 §3 +1。
+    const engineRejections: readonly { readonly why: string; readonly actions: readonly unknown[] }[] = [
+      { why: '未允许的动作', actions: [{ type: 'write_bytes', addr: '0x500000', hex: '41' }] },
+      { why: '未声明的积木 id', actions: [{ type: 'block', id: 'nope', args: {} }] },
+      { why: '空历史的 step_back', actions: [{ type: 'step_back' }] },
+      { why: '空历史的 undo', actions: [{ type: 'undo' }] },
+    ];
+    let expectedFailures = before.projection.failures;
+    for (const item of engineRejections) {
+      const { body } = await actOk(sessionId, item.actions);
+      expect(body.results[0]?.ok, item.why).toBe(false);
+      expectedFailures += 1;
+
+      const after = await getState(sessionId);
+      // 逐字段：status / steps / registers / roles / flags / vmas（含每个 VMA 的 hex）/
+      // stdin / stdout / disasm / lastStop / error —— 一个都不许变。
+      expectProjectionFieldsUnchanged(before.projection, after.projection);
+      expect(after.projection.failures, item.why).toBe(expectedFailures);
+      expect(after.history, item.why).toEqual(before.history);
+      expect(body.projection.steps, item.why).toBe(0);
+    }
+
+    // 二、**Schema 层拒绝**（HTTP 400）：请求根本没进引擎，逐字段不变且 `failures` 也不动（09 §8 第 3 条）。
+    for (const extra of [{ verdict: 'won' }, { snapshot: {} }, { state: {} }]) {
+      const response = await postActions(sessionId, [{ type: 'step' }], extra);
+      expectApiError(response, 'invalid_request');
+
+      const after = await getState(sessionId);
+      expectProjectionFieldsUnchanged(before.projection, after.projection);
+      expect(after.projection.failures).toBe(expectedFailures);
+      expect(after.history).toEqual(before.history);
+    }
   });
 
   it('允许集内的动作照常生效；`block` 始终可用，不受 allowedActions 约束', async () => {
