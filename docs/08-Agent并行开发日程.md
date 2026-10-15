@@ -238,6 +238,41 @@
 | 编译上限 | 循环 256、表达式 4096（一次编译累计）、产物动作数复用 `MAX_SUBMIT_ACTIONS`；本轮不做列表与带返回值函数 | 05 §3.1/§4、09 §3.2 |
 | 服务端与引擎的判定分工 | `allowedActions` 只有一个判定点（引擎的提交动作筛查）；服务端不重复判定、不预展开积木 | 09 §3.3 |
 
+### D2 / 日终
+
+- **基线提交**：D1 全部工作已集成（见 §9.1）。D2 工作按 owner 分提交，见下。
+- **已验收任务与证据**：
+  - **G02 验收**：`engine/src/io/**`（`createIo`、`createSyscallIo(env)`，stdin/stdout 缓冲、虚拟文件偏移、`MAX_IO_BYTES` / `MAX_SYSCALL_COUNT` 上限）与 `src/snapshots/**`（`createSnapshotApi(memory)`）实现完毕，46 条新单测；引擎覆盖率 **94.39% stmts / 87.93% branch / 97.9% funcs / 97.23% lines**（`src/io` 97.05%，`src/snapshots` 100%），≥80% 达标。
+  - **B 接线**：I/O 与快照接入实例与动作流（`instance.ts` / `actions.ts` / `index.ts`），`engine/test/g02-wiring.test.ts` 覆盖接线；引擎 20 文件 / 369 通过。
+  - **C02 部分验收**：投影携带 `roles`（sp/bp/ip，从 `priv.roles` 白名单取值，`public.json` 不含、前端不硬编码）、录像帧不变式测试、请求 Schema 边界测试；server 6 文件 / 74 通过。
+  - **H01 验收**：`blocks/definitions.ts`（由 `BLOCK_SPECS` 生成真实 Blockly 定义，含字段名、影子默认值、唯一开始块容量）与 `blocks/mount.ts`（inject / 归一化 / 编辑事件过滤 / 高亮 / dispose）；用真实 Blockly 13.4 在 jsdom 下 23 条新用例覆盖「真实画布拼程序 → 归一化 → 编译出 `{ok, actions, origins}`」「两个开始积木被容量判定与编译期双重拦住」「变量字段归一到名字而不是 id」「高亮与卸载」。
+  - **D02 部分验收**：I/O 视图行投影与 `pwn2block-io-view` 组件；`web/test/io.test.ts` 20 条，含「隐藏 VMA 内容与虚拟文件内容不出现」的键白名单正面断言；web 21 文件 / 261 通过。
+  - **E01 验收**：`asm` 汇编器（643 行）与 `asm → private.json` 初始化回写；`check` 新增 `program.asm` 与代码 VMA `init` 的一致性比对（这条检查当场抓到 `new` 模板的 `init` 占位 bug）；`challenges/ret2win/` 变为真实题目包（`public.json` 76 项 remove + `0x11` syscall、`private.json` 真实 init 与栈初值、`program.asm`、`solution.md`），`challenge:check` 与 `challenge:solve` 对真实包通过。
+  - **F01 验收**：S01 隐藏内容边界 28 条、S03 请求边界 14 条改用真实引擎 + 真实 HTTP；S02/S04/S05/S06 共 38 条仍如实标注为 todo（本轮延期，不计入完成率）。
+  - **A03 集成**：`tests/integration/disk-challenge-end-to-end.test.ts` 用磁盘上的真实 `challenges/ret2win` 走通「加载 → 判胜 → 下发 flag → 调试实例不发 flag → 隐藏内容不出现在响应里」4 条。
+- **基础检查**（D2 收工前实测）：`pnpm typecheck` 0 错；`pnpm lint` 0 错；`pnpm test` **63 文件 / 933 通过**、38 todo、0 失败；`pnpm build` 通过（`index-*.js` 176.70 kB / gzip 52.95 kB）；`FLAG_RET2WIN` 注入后 `pnpm challenge:check --all`（`ok`）与 `pnpm challenge:solve --all`（期望 won / 实际 won）均退出 0。
+- **进行中 / owner**：D02 剩下的运行菜单接线与「编辑后产物过期」交互（D，D3）、C02 的静态托管（C，D4–D5）、S02/S04/S05/S06 验收（F，D4）。
+- **待集成 / 提交号**：D2 全部工作已集成到 `main`，按 owner 分提交（G、B、角色投影与前端消费、CI 哨兵、H 的来源表、H 的积木定义与挂载桥、D 的 I/O 视图、E 的 asm 与首题包、F 的验收、A 的磁盘题目包集成测试、文档）。
+- **阻塞 / 解决人 / 下次检查点**：
+  1. **D1 的 `roles` 公开来源缺口已关闭**：`Projection.roles` 成为必填字段，服务端从私有包取值下发，前端只读投影（D1 记录的 `SAMPLE_ROLES` 已删除）。
+  2. **Blockly 的容量限制不是安全边界**：`maxInstances` 只拦工具箱拖出、粘贴与复制，`workspace.newBlock()` 不查容量——所以「唯一开始积木」必须同时有编译期兜底（已实现并有测试）。这条已写进 05 §3.1 实现备忘与 09 §3.2。
+  3. **Blockly 的变更事件只覆盖用户手势**：程序化装载程序之后不会自动触发重编译，D3 接线时必须主动调一次。同样已写进 05 §3.1 与 09 §3.2。
+  4. **Playwright chromium 版本仍缺**（D1 遗留）：`pnpm e2e` 需要 `pnpm exec playwright install chromium`，属 D5 前的环境准备，不影响本轮单测与构建。
+- **当前关卡 / 是否放行**：**G1、G2 的引擎与契约条件已达成**（首题判胜、隐藏内容边界、投影 roles、I/O 与快照）；浏览器闭环仍是 G2 的判据，未勾选。放行 D3。
+- **下一批可并行任务**：D 的运行菜单/程序区接线与录像定位（D3）、C 的静态托管与发布边界（D4）、F 的 S02/S04 真实对象验收（D4）、E 的第二道题（按考点排期）。
+- **安全专项债务 / owner / 预计补测时间**：S02/S04（判胜与 payload 边界）→ F，D4；S05/S06（flag 与发布边界）→ F/A，D5；T01–T06 全部照旧延期，不计入完成率。
+- **是否仍能在 D7 达到候选门槛 / 调整后的估算**：能。D2 把引擎、服务端契约、首题包与前端编译/画布四条线同时推到可验收状态，剩余风险集中在浏览器闭环（D3–D4）与静态发布边界（D5），与 D1 的估算一致。
+
+### D2 契约决策（当天定稿，已同步文档）
+
+| 决策 | 结论 | 同步位置 |
+|---|---|---|
+| `roles` 进投影 | `ProjectionSchema.roles` 必填（sp/bp/ip），服务端从 `priv.roles` 白名单取值；不进 `public.json`，前端不硬编码 | 04 §4、07 §7、09 §3.2/§4 |
+| 动作来源表 | 前端本地 `ActionOrigin {index, blockId}` + `ACTION_ORIGIN_VERSION`，`CompileResult.ok` 增加 `origins` / `originsVersion`，与 `actions` 等长同序；循环展开指向循环积木本身；**不进网络 payload** | 09 §3.4、08 §9.2 |
+| 录像帧与提交动作关联 | 不新增字段：`replay.initial` 是初态，第 k 个 `kind === 'action'` 帧对应第 k 个提交动作，`instruction` 帧归属前一个动作帧，`frames[i].index` 是帧序号 | 09 §3.4、08 §9.2 |
+| 录像帧的反汇编 | 本轮不给 `ReplayFrame` 加 `disasm`：只有没有任何 `changedVmas` 条目的 `perm` 含 `x` 时才显示 `replay.initial.disasm`，否则显示「不可用」而不是过期反汇编 | 09 §3.4、08 §9.2 |
+| Blockly 容量与事件语义 | 唯一开始积木 = `maxInstances`（只拦工具箱/粘贴/复制）+ 编译期错误兜底；变更事件只覆盖用户手势，程序化装载后要主动重编译 | 05 §3.1 实现备忘、09 §3.2 |
+
 ## 9. 设计交付后的下一批并行安排（2026-10-15）
 
 本节在原七天日程上细化下一批任务，不重置 D1、不增加第九个长期角色，也不把设计完成计作 D02/H01/H02 或 G3 通过。D1–D7 仍是开发工作日；当前没有足够的新联调证据重新承诺 D7 必然完成。
@@ -255,9 +290,9 @@ D/H 迁移布局、token、交互状态和说明，不复制预设执行逻辑�
 | 项目 | 当前事实 / 决策 | owner 与交付 | 阻塞范围 / 放行证据 |
 |---|---|---|---|
 | 公开 sp/bp/ip 角色 | **D1 已定：增加 Projection.roles**，不放入 public.json，不让前端读取私有包；当前 shared 与服务端投影代码尚未实现 | A 改 shared 及契约文档；C 填充投影；D 使用公开角色；F 同步白名单守卫。由 A 集成完整消费者适配 | 阻塞真实 sp/bp/ip 锚点与跟随。投影/回放初态均有角色，支持非示例寄存器命名，无额外私有信息泄露；D4 前完成 |
-| 编译成功动作到积木的映射 | CompileResult 成功分支只有 actions；错误 blockId 已有。原型 action.blockId 不是合法 API 字段 | A/H/D 确定前端独立来源表的类型、索引、版本与所有者；H 在独占目录实现，D 消费。冻结接口有变更时按 09 同步 | 阻塞成功动作及回放动作定位；不阻塞现有编译错误定位。验证循环展开、author block、重新编译和提交后编辑；网络 payload 不含来源元数据 |
-| 录像帧与提交动作关联 | 当前 C 的 projectReplay 把 init 拆到 initial，再为剩余 frames 从 0 编号；原型 UI 的“初态=0、动作从1起”不能直接充当 API 索引规则 | C/B 先核对真实 run/step/block/拒绝/失败录像；A 明确编号和关联约定，D/H 按约定绑定提交快照。优先用已有契约，不先假定需要新字段 | 阻塞准确的动作/积木定位。真实录像逐例证明对应关系；无法确定关联时不错误定位。若需字段，A 同批适配全部消费者 |
-| 代码变化后的回放 disasm | initial 有 disasm；ReplayFrame 无 disasm 更新，修改/揭示代码后不能确认旧指令仍有效 | A/C/B 确认现有支持范围和公开表示；C 提供正确投影信息，D 消费；F 加针对用例。需要 shared 变更仍由 A 负责 | 阻塞相关帧正确的指令显示。前端不能解码；未解决前相关指令区明确不可用，不能据此将录像 P0/G2/G3 判完成 |
+| 编译成功动作到积木的映射 | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：前端本地 `ActionOrigin {index, blockId}` + `ACTION_ORIGIN_VERSION`，`CompileResult.ok` 增加 `origins` / `originsVersion`，与 `actions` 等长同序；循环展开指向循环积木本身；**不进网络 payload**。原型 action.blockId 不是合法 API 字段，因此不改成网络字段 | A 定契约与文档；H 在独占目录实现（含测试）；D 消费。冻结接口有变更时按 09 同步 | 阻塞成功动作及回放动作定位；不阻塞现有编译错误定位。验证循环展开、author block、重新编译和提交后编辑；网络 payload 不含来源元数据 |
+| 录像帧与提交动作关联 | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：不新增字段。`replay.initial` 是初态；`frames` 里 `kind === 'action'` 的第 k 个对应第 k 个提交动作（1-based）；两个 `action` 帧之间的 `instruction` 帧属于前一个动作；`frames[i].index` 是帧序号而不是动作下标。原型 UI 的“初态=0、动作从1起”不作为 API 索引规则 | A 定编号与关联约定；C 用真实录像核对并补不变式测试（`results.length` 等于 `action` 帧数、第 k 帧 `label` 等于 `results[k].action`）；D/H 按约定绑定提交快照 | 阻塞准确的动作/积木定位。真实录像逐例证明对应关系；无法确定关联时不错误定位。核对与真实行为不符时报 A 改 04 §5.1，不为迁就断言改实现 |
+| 代码变化后的回放 disasm | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：本轮**不给 `ReplayFrame` 加 `disasm`**。录像播放显示 `replay.initial.disasm`，且仅当 `frames[].changedVmas` 中没有 `perm` 含 `x` 的 VMA 内容变化时才可用；代码被改写就显示「录像中代码已变化，指令视图不可用」，不许显示过期反汇编。前端不解码 | A 定规则并写入 09；D 实现可用性判定；F 补针对用例。将来要逐帧正确反汇编需给 `ReplayFrame` 加字段，由 A 同批适配全部消费者 | 阻塞相关帧正确的指令显示。未解决前相关指令区明确不可用，不能据此将录像 P0/G2/G3 判完成 |
 
 以上仅登记工作与依赖；本轮文档更新没有修改生产代码或冻结类型。`roles` 是执行已定决策；另外三项先补可验证的接口约定，再实施必要改动。A 不必让所有角色等待全部约定完成，只暂停受影响的接线文件与功能。
 
