@@ -17,6 +17,16 @@ import { describe, it } from 'vitest';
  * 验收关卡：G2 · D4。真实对象：真实服务端题目加载 + 首题 `challenges/ret2win` + 环境变量注入与缺失两种路径。
  * 说明：shared 层已有该语义的单测（`packages/shared/test/challenge.test.ts` 的「flag 真值泄露检查」），
  * 但**服务端加载路径**仍是未验收状态。
+ *
+ * 本轮（D2 / F01-a）阻塞原因（如实记录：保留 todo，不改空体、不用 mock 顶替）：
+ * 1. **真实首题未落盘**：`challenges/` 目录本批不存在（E02 未交付），而 S05 的验收对象是真实
+ *    `challenges/ret2win` 的加载路径（本目录 README §2）。「缺环境变量」与「内容含哨兵真值」两类题目
+ *    只能在临时目录里自造，算服务端加载路径的部分证据，不能替代真实首题。
+ * 2. **`challenges/**` 的 flag 约定无法核对**（下面第 8 条 todo）：题目包还不存在，
+ *    「`flag` 字段只写 `env:FLAG_<ID>`」只能等 E02 落盘后逐题检查。
+ * 3. 加载实现本身已经就位（`packages/server/src/challenges.ts` 的 `loadChallengeDir` / `resolveFlag`
+ *    + shared 的 `checkChallengePair` / `validateFlagNotLeaked`），所以这一项**下一批（F02 · D4）
+ *    在首题落盘后即可真实执行**；本轮不勉强。
  */
 describe.skip('S05 flag 边界 · 待真实题目加载（G2 · D4）', () => {
   it.todo('缺失 FLAG_<ID> 环境变量：该题拒绝加载，服务仍能启动并给出可诊断的告警（C）');

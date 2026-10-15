@@ -17,6 +17,17 @@ import { describe, it } from 'vitest';
  *
  * D1 状态：**未验收**（骨架）。以下条件全部是 `it.todo`，验收通过前一律不勾选（见本目录 README §0/§3）。
  * 验收关卡：G2 · D4。真实对象：真实 `POST /api/sessions/:id/submit` + 判题实例（B03 纯回放）+ 首题 ret2win。
+ *
+ * 本轮（D2 / F01-a）阻塞原因（如实记录：保留 todo，不改空体、不用 mock 顶替）：
+ * 1. **验收对象是真实首题**：08 §3 D4 行与本目录 README §2 把 S02 的对象定为「真实 `/submit` + 判题实例 +
+ *    首题 `challenges/ret2win`」，而本批 `challenges/` 目录**尚不存在**（E02 未交付）。用临时目录自造题目包
+ *    只能算服务端判题路径的部分证据，不能替代「真实首题」这一条，所以本批不派发 S02。
+ * 2. **「不记录通过」缺可观察接口**：`packages/server/src/sessions.ts` 只在 submit 路径上调用
+ *    `recordSubmit`，会话响应（`GET /api/sessions/:id`）不返回任何提交数或通过记录。于是
+ *    「调试实例不记录通过」目前只能靠「投影/会话响应的字段集合里没有通过字段」间接验证。
+ *    需要 C 给出一个可断言的观察点，或由 A 在 04 §1.1/§5.1 写明该条件的验证口径（契约缺口，非实现缺陷）。
+ * 3. `tests/integration/ret2win-end-to-end.test.ts` 已覆盖部分语义（调试 `satisfied` 不发 flag、
+ *    submit 不改动调试实例），但那是 A03 的日常集成测试，**不计入** S02 验收（08 §1：前置证据不算验收）。
  */
 describe.skip('S02 判题边界 · 待真实服务端与判题实例（G2 · D4）', () => {
   it.todo('调试实例命中成功条件后 status 只变 satisfied，投影里没有 flag 字段（B/C）');

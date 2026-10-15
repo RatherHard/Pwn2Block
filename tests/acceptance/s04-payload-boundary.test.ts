@@ -17,6 +17,19 @@ import { describe, it } from 'vitest';
  *
  * D1 状态：**未验收**（骨架）。以下条件全部是 `it.todo`，验收通过前一律不勾选（见本目录 README §0/§3）。
  * 验收关卡：G2 · D4。真实对象：真实服务端展开路径 + H 编译器的真实编译产物 + 首题 ret2win。
+ *
+ * 本轮（D2 / F01-a）阻塞原因（如实记录：保留 todo，不改空体、不用 mock 顶替）：
+ * 1. **`reads_state` 不在服务端，也不在引擎**：全仓只有 `packages/shared/src/errors.ts` 的错误码定义与
+ *    `packages/web/src/compiler/types.ts` 的注释命中；`packages/engine/src/**` 与 `packages/server/src/**`
+ *    里没有任何 `reads_state` 拒绝路径。原因是线上动作集（04 §2 的 12 个动作）**根本无法表达**「读当前状态」：
+ *    地址与值都是客户端给的十六进制字面量。所以 07 §5 第 13 条在服务端只能按「线上格式无法表达读状态」
+ *    这一更强的性质验证，真正的守卫在 H 的编译器（05 §4）。**口径需要 A 明确**（契约缺口，非实现缺陷）。
+ * 2. **编译器侧无法在验收测试里直接导入**：根 `tsconfig.json` 明确 `exclude: ["packages/web/**"]`，
+ *    `tests/acceptance/**` 一旦 import `packages/web/src/compiler` 就会破坏 `pnpm typecheck`。
+ *    需要 A 决定（单开 tsconfig / 加 paths / 由 H 的单测承担并经 F 复核）后再落地。
+ * 3. H 的读状态积木是**保留类型名**（`packages/web/src/compiler/types.ts` 的 `state_read_reg` 等），
+ *    编译期就报错，所以「真实编译产物里的 reads_state」这个东西按设计不存在；第 6–8 条 todo 需要按
+ *    上面的口径重写，属于下一批（F02 · D4）与 A/H 一起定的事。
  */
 describe.skip('S04 payload 边界 · 待真实服务端与编译器产物（G2 · D4）', () => {
   it.todo('block 只接受 {id, args}：带 expand/actions/resolved 等字段的请求被 strictObject 拒绝（C）');
