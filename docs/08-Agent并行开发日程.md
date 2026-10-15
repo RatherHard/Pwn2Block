@@ -356,7 +356,7 @@
 - **已验收任务与证据**（勾选见 §4 / §5）：
   - **C04 达标（原排 D5–D6，提前落地）**：`static.ts` + `app.ts` 的 `staticRoot`/`serveStatic`、`/api` 优先、403→404、**无 SPA 回退**、不列目录；18 条用例（含 2 条**真实产物**用例）。**CI 改成先 build 再 test**——否则那两条会因 `dist` 缺席被静默 skip，等于把"没测"当"通过"。
   - **E03 / E04 达标**：小端序与 push/pop 两道新题，四件套齐全、id 与目录名一致、`allowedActions` 最小化、参考解法自足且从初态回放判胜；`FLAG_ENDIAN` / `FLAG_PUSHPOP` 在**同一个提交**里登记进 `.env.example` 与 CI（漏登记会让 `--all` 因缺 env 拒绝加载该题——那是设计的正确行为，不是 CI 故障）。
-  - **H02（D4 部分）**：动作→积木来源映射逐条审计（`origins.audit.test.ts` 18 条，**映射实现本身未发现缺陷**）、编辑后产物过期通知（`mount.load.test.ts` 10 条 + `artifact.test.ts` +4 条）、定位桥 `compiler/locate.ts`（14 条）、`bridge.loadProgram()`；compiler+blocks 16/242 → **19 文件 / 288 条**。
+  - **H02（D4 部分）**：动作→积木来源映射逐条审计（`origins.audit.test.ts` 18 条，**映射实现本身未发现缺陷**）、编辑后产物过期通知（`mount.load.test.ts` 10 条 + `artifact.test.ts` +4 条）、定位桥 `compiler/locate.ts`（14 条）、`bridge.loadProgram()`；compiler+blocks 16/242 → **19 文件 / 288 条**。**来源元数据不进网络**（09 §3.4）这条也复核过：`packages/web/src/api.ts` 只经 `validate(ActionsRequestSchema, { actions })` / `validate(SubmitRequestSchema, { actions })` 构造请求体，`origins` 只作为**前端本地**字段存在（`viewmodel/controller.ts` 的本地接口与 `verdict` 视图模型），从不进入请求。
   - **D02（D4 部分）**：两处终态盲区收口到 `isExitedProjection()`，并**同族延伸**到 `failed`（`terminalReasonOf()` 一个字段承载原因，两种来路文案分开）；512 分片的跨片停止不再多发一片撞 `not_executable`、不再白记 `failures`；接线 `Retry-After` 与「换题先 `DELETE` 旧会话」；D03 的提示逐级揭示 + 本地进度提前落地。web 37/451 → **39 文件 / 489 条**。
   - **F02（D4 部分）**：S01/S03/S04 逐条复核 + `api-lifecycle.test.ts` 20 条（假时钟会话回收、三层回退、四种 verdict 终态、`exited` vs `failed` 边界）。acceptance 真实执行 **70 → 104**、`todo` **13 → 5**（剩下 5 条**全是口径/运维项，不属于任何一组条件**）、**`it.fails` 归零**。
   - **F03（D5 提前）**：S06 八条 `it.todo` 全部转真实断言（真实 `dist` + 真实静态 HTTP，**8 executed / 0 skipped**）。
