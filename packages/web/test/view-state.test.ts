@@ -162,6 +162,25 @@ describe('页面状态与状态栏文案（05 §1、§6）', () => {
     expect(statusTextOf(SAMPLE_PROJECTION_START, 'verdict').text).toContain('判题结果模式');
   });
 
+  it('satisfied 且已退出时状态栏两件事都说（04 §1.1：退出事实不能被 status 抹掉）', () => {
+    const satisfiedExit = statusTextOf(
+      makeProjection({ status: 'satisfied', steps: 12, lastStop: { reason: 'exit', addr: '0x400003' } }),
+      'debug',
+    );
+    expect(satisfiedExit.tone).toBe('ok');
+    expect(satisfiedExit.text).toContain('已满足成功条件');
+    expect(satisfiedExit.text).toContain('程序已经退出');
+    expect(satisfiedExit.text).toContain('执行类动作会被拒绝');
+
+    // 停因不是 exit 就不加这句话：satisfied 本身不限制任何动作。
+    const satisfiedAlive = statusTextOf(
+      makeProjection({ status: 'satisfied', lastStop: { reason: 'step' } }),
+      'debug',
+    );
+    expect(satisfiedAlive.text).not.toContain('程序已经退出');
+    expect(satisfiedAlive.text).toContain('不发 flag');
+  });
+
   it('状态栏同时给出符号与模式名（05 §7：颜色不是唯一信息载体）', () => {
     expect(statusLine(SAMPLE_PROJECTION_START, 'debug')).toBe('调试模式 · 可继续执行');
     expect(statusLine(SAMPLE_PROJECTION_START, 'verdict')).toBe('判题结果 · 可继续执行');

@@ -38,6 +38,7 @@ import { defaultPosition } from './replay';
 import {
   applyProjection,
   createPageState,
+  isExitedProjection,
   setMode,
   type PageMode,
   type PageState,
@@ -141,6 +142,8 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   const listeners = new Set<(state: ControllerState) => void>();
 
   let sessionId: string | undefined;
+  /** 换题 / 重新开始时被替换掉的会话：先 DELETE 掉它，见 `releaseRetiredSession()`。 */
+  let retiredSessionId: string | undefined;
   let cursorStack: readonly number[] = [];
   let debugSnapshot: DebugSnapshot | undefined;
   let lastIntent: Intent | undefined;
@@ -196,8 +199,9 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
   /** 门禁的唯一来源：与组件渲染的是同一张按钮表（05 §1 两处菜单等价）。 */
   function menuInput(): RunMenuInput {
+    const page = state.page;
     return {
-      mode: state.page?.mode ?? 'debug',
+      mode: page?.mode ?? 'debug',
       hasSession: hasSession(),
       sessionExpired: state.sessionExpired,
       artifact: tracker.state.artifact,
@@ -206,6 +210,8 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       history: state.history,
       cursor: state.cursor,
       allowedActions: state.challenge?.allowedActions ?? [],
+      // 退出信息来自调试实例的投影（04 §1.1）：`satisfied` 与「已退出」可以同时成立。
+      exited: page === undefined ? false : isExitedProjection(page.projection),
     };
   }
 
@@ -228,9 +234,24 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       });
       return;
     }
+    if (command !== undefined) lastIntent = { kind: 'run', command };
+    // 429 是唯一「等一下再来」的错误码（04 §6）：带上服务端给的等待秒数，而不是让用户盲试。
+    if (error instanceof ApiClientError && error.code === 'rate_limited') {
+      const seconds = error.retryAfterSeconds;
+      patch({
+        notice: {
+          tone: 'error',
+          text:
+            seconds === undefined
+              ? `请求过于频繁：${error.message}。这是服务端的限流，稍后点「重试」重新发送。`
+              : `请求过于频繁：服务端要求 ${seconds} 秒后再试。到时间点「重试」重新发送。`,
+          action: 'retry',
+        },
+      });
+      return;
+    }
     const network = error instanceof ApiClientError && error.network;
     const message = error instanceof ApiClientError ? error.message : '未知错误';
-    if (command !== undefined) lastIntent = { kind: 'run', command };
     patch({
       notice: {
         tone: 'error',
@@ -282,14 +303,19 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
   /**
    * 批量停止条件（04 §5、09 §3.4）：服务端「遇到第一个被拒绝的动作就停」的语义要在客户端
-   * **跨分片保持**——某片出现被拒绝、该片实际生效数少于提交数、或实例已经 failed / exited，
+   * **跨分片保持**——某片出现被拒绝、该片实际生效数少于提交数、或实例已经 `failed` / 已退出，
    * 就不再发后续分片。`executed` 与 `results.length` 是两个口径（09 §8），两个都要看。
+   *
+   * 终止态里的「已退出」用 `isExitedProjection`（`lastStop.reason === 'exit'`）：退出恰好落在
+   * 512 分片边界时该片全部成功、`status` 仍是 `satisfied`，只看 `status` 会多发一片，
+   * 整片撞 `not_executable` 并白记 `failures`（09 §8 第 10 条）。
+   * 反过来不许用「`satisfied` 就停」代替：`satisfied` 本身不限制动作（04 §1.1）。
    */
   function stopped(response: ActionsResponse, submitted: number): boolean {
     if (response.results.length < submitted) return true;
     if (response.results.some((result) => !result.ok)) return true;
     if (response.executed < submitted) return true;
-    return response.projection.status === 'failed' || response.projection.status === 'exited';
+    return response.projection.status === 'failed' || isExitedProjection(response.projection);
   }
 
   function nextCursor(command: RunCommand, response: ActionsResponse): number {
@@ -395,7 +421,33 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     }
   }
 
-  async function openChallenge(id: string): Promise<void> {
+  /** 换题 / 重新开始前的交接：旧会话摘下来，等真正要建新会话时再释放。 */
+  function retireSession(): void {
+    if (sessionId !== undefined) retiredSessionId = sessionId;
+    sessionId = undefined;
+  }
+
+  /**
+   * 主动结束被替换掉的会话（04 §5 的 DELETE）。
+   *
+   * 存活会话有每 IP / 全局上限（04 §6），换题与重新开始必须把旧的还回去，否则一次试用
+   * 会攒下一串空闲会话，把配额耗到 30 分钟回收为止。**先释放再建新的**：正好在上限上时，
+   * 这样新会话才建得起来。清理失败不算错——会话可能已被空闲回收（404）、或网络抖动——
+   * 所以只记不抛，绝不挡住新会话。
+   */
+  async function releaseRetiredSession(): Promise<void> {
+    const id = retiredSessionId;
+    retiredSessionId = undefined;
+    if (id === undefined) return;
+    try {
+      await api.endSession(id);
+    } catch {
+      // 有意忽略：这是尽力而为的清理，不是用户请求；失败原因已在上面注释里说明。
+    }
+  }
+
+  async function openSession(id: string): Promise<void> {
+    await releaseRetiredSession();
     const challenge: PublicChallenge = await api.getChallenge(id);
     const session = await api.createSession(id);
     sessionId = session.sessionId;
@@ -420,9 +472,11 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   }
 
   function open(id: string): void {
+    // 换题：旧会话不再被引用，等这一轮排队任务开始时先 DELETE 掉（04 §5/§6）。
+    retireSession();
     lastIntent = { kind: 'open', id };
-    patch({ phase: 'opening', challengeId: id, notice: undefined });
-    enqueue(() => openChallenge(id));
+    patch({ phase: 'opening', challengeId: id, notice: undefined, sessionId: undefined });
+    enqueue(() => openSession(id));
   }
 
   function start(): void {
@@ -484,7 +538,9 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
     restart(): void {
       const id = state.challengeId;
-      sessionId = undefined;
+      // 重新开始也要把旧会话还回去：它可能还活着（只是被判题结果 / 编辑折腾过），
+      // 而存活会话有配额（04 §6）。已经被回收的会话 DELETE 会回 404，忽略即可。
+      retireSession();
       debugSnapshot = undefined;
       cursorStack = [];
       tracker.clear();

@@ -47,6 +47,12 @@ export interface RunMenuInput {
   readonly history: HistoryDepthView;
   readonly cursor: number;
   readonly allowedActions: readonly string[];
+  /**
+   * 程序已退出（04 §1.1）。调用方用 `viewmodel/session.ts` 的 `isExitedProjection()` 派生：
+   * `lastStop.reason === 'exit'` **并上** `status === 'exited'`——判胜那一刻程序已经结束时
+   * `status` 是 `satisfied`，只看 `status` 会漏判（09 §8 第 10 条）。
+   */
+  readonly exited: boolean;
 }
 
 interface Gate {
@@ -78,6 +84,14 @@ function artifactBlocked(input: RunMenuInput): string | undefined {
 function debugBlocked(input: RunMenuInput): string | undefined {
   if (input.mode === 'verdict') return '判题结果模式看的是录像：先点「回到调试」再继续调试';
   return undefined;
+}
+
+/** 已退出 = 终止态（04 §1.1）：执行类动作会被服务端拒绝，回退类与「提交判题」不受影响。 */
+export const MESSAGE_EXITED =
+  '程序已退出：执行类动作会被服务端拒绝，请用「后退一步」「撤销」「重置」重来，或直接「提交判题」';
+
+function terminalBlocked(input: RunMenuInput): string | undefined {
+  return input.exited ? MESSAGE_EXITED : undefined;
 }
 
 function firstReason(...reasons: readonly (string | undefined)[]): string | undefined {
@@ -136,6 +150,7 @@ const SPECS: readonly Spec[] = [
       firstReason(
         sessionBlocked(input),
         debugBlocked(input),
+        terminalBlocked(input),
         artifactBlocked(input),
         fallbackBlocked(input, 'run'),
       ),
@@ -148,6 +163,7 @@ const SPECS: readonly Spec[] = [
       firstReason(
         sessionBlocked(input),
         debugBlocked(input),
+        terminalBlocked(input),
         artifactBlocked(input),
         fallbackBlocked(input, 'step'),
       ),
@@ -160,6 +176,7 @@ const SPECS: readonly Spec[] = [
       firstReason(
         sessionBlocked(input),
         debugBlocked(input),
+        terminalBlocked(input),
         input.allowedActions.includes('step') ? undefined : '本题不允许 step 动作',
       ),
   },

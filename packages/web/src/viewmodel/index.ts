@@ -8,6 +8,7 @@ export * from './controller';
 export * from './diff';
 export * from './disasm';
 export * from './format';
+export * from './hints';
 export * from './io';
 export * from './keymap';
 export * from './labels';

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
-import { buttonModel, disabledReasons, runMenuModel, type RunMenuInput } from '../src/viewmodel/toolbar';
+import { isExitedProjection } from '../src/viewmodel/session';
+import {
+  MESSAGE_EXITED,
+  buttonModel,
+  disabledReasons,
+  runMenuModel,
+  type RunButtonModel,
+  type RunMenuInput,
+} from '../src/viewmodel/toolbar';
 import { makeArtifact, repeatedActions } from './fake-api';
+import { makeProjection } from './helpers';
 
 const ACTIONS = [{ type: 'ret' }, { type: 'ret' }] as const;
 const CHALLENGE_ACTIONS = ['write_bytes', 'push', 'pop', 'call', 'ret', 'step', 'run'] as const;
@@ -17,6 +26,7 @@ function input(overrides: Partial<RunMenuInput> = {}): RunMenuInput {
     history: { undo: 0, stepBack: 0 },
     cursor: 0,
     allowedActions: CHALLENGE_ACTIONS,
+    exited: false,
     ...overrides,
   };
 }
@@ -125,5 +135,100 @@ describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () =
     );
     expect(buttonModel(model, 'submit')?.enabled).toBe(true);
     expect(buttonModel(model, 'trial-run')?.enabled).toBe(true);
+  });
+});
+
+/** 八按钮可用性矩阵：id → 是否可用。 */
+function enabledMatrix(model: readonly RunButtonModel[]): Readonly<Record<string, boolean>> {
+  return Object.fromEntries(model.map((button) => [button.id, button.enabled]));
+}
+
+describe('「已退出」是终止态：执行类禁用、回退类与提交不受影响（04 §1.1、05 §6、09 §8 第 10 条）', () => {
+  /**
+   * 判胜那一刻程序已经结束：`status` 是 `satisfied`，只有 `lastStop.reason === 'exit'`
+   * 记得它退出了。这就是工具栏原来的盲区。
+   */
+  const SATISFIED_EXIT = makeProjection({
+    status: 'satisfied',
+    steps: 12,
+    lastStop: { reason: 'exit', addr: '0x400003' },
+  });
+  /** 满足条件但程序还活着（停因是 `step`）：执行类动作必须照常可用。 */
+  const SATISFIED_STEP = makeProjection({
+    status: 'satisfied',
+    steps: 9,
+    lastStop: { reason: 'step', addr: '0x400002' },
+  });
+
+  it('派生口径与引擎 isExited() 一致：lastStop 的 exit 与 status 的 exited 都算', () => {
+    expect(isExitedProjection(SATISFIED_EXIT)).toBe(true);
+    expect(isExitedProjection(SATISFIED_STEP)).toBe(false);
+    expect(isExitedProjection(makeProjection({ status: 'exited', lastStop: { reason: 'exit' } }))).toBe(true);
+    // `lastStop` 是可选的：只看 status 的那条路径也不能丢。
+    expect(isExitedProjection(makeProjection({ status: 'exited' }))).toBe(true);
+    expect(isExitedProjection(makeProjection({ status: 'ready' }))).toBe(false);
+    expect(isExitedProjection(makeProjection({ status: 'failed', error: { code: 'memory_fault', message: '越权' } }))).toBe(false);
+  });
+
+  it('satisfied + lastStop.reason=exit：执行类三个按钮禁用，其余五个可用', () => {
+    const model = runMenuModel(
+      input({ history: { undo: 2, stepBack: 5 }, exited: isExitedProjection(SATISFIED_EXIT) }),
+    );
+    expect(enabledMatrix(model)).toEqual({
+      compile: true,
+      'trial-run': false,
+      step: false,
+      'run-n': false,
+      'step-back': true,
+      undo: true,
+      reset: true,
+      submit: true,
+    });
+    for (const id of ['trial-run', 'step', 'run-n'] as const) {
+      expect(buttonModel(model, id)?.disabledReason).toBe(MESSAGE_EXITED);
+    }
+    // 禁用原因写出来而不只是置灰（05 §6）。
+    expect(disabledReasons(model)).toEqual([
+      `试运行：${MESSAGE_EXITED}`,
+      `单步：${MESSAGE_EXITED}`,
+      `运行 N 步：${MESSAGE_EXITED}`,
+    ]);
+  });
+
+  it('satisfied + lastStop.reason=step：八个按钮全部可用（satisfied 本身不限制动作）', () => {
+    const model = runMenuModel(
+      input({ history: { undo: 2, stepBack: 5 }, exited: isExitedProjection(SATISFIED_STEP) }),
+    );
+    expect(enabledMatrix(model)).toEqual({
+      compile: true,
+      'trial-run': true,
+      step: true,
+      'run-n': true,
+      'step-back': true,
+      undo: true,
+      reset: true,
+      submit: true,
+    });
+    expect(disabledReasons(model)).toEqual([]);
+  });
+
+  it('已退出优先于产物类原因：重编译也换不回执行权，但提交仍按产物口径说明', () => {
+    const model = runMenuModel(input({ stale: true, exited: true }));
+    expect(buttonModel(model, 'trial-run')?.disabledReason).toBe(MESSAGE_EXITED);
+    expect(buttonModel(model, 'step')?.disabledReason).toBe(MESSAGE_EXITED);
+    expect(buttonModel(model, 'run-n')?.disabledReason).toBe(MESSAGE_EXITED);
+    expect(buttonModel(model, 'submit')?.disabledReason).toBe(MESSAGE_STALE);
+    expect(buttonModel(model, 'reset')?.enabled).toBe(true);
+
+    // 没有产物时同理：先说清「程序已经退出」，而不是误导成「点编译就好」。
+    const noArtifact = runMenuModel(input({ artifact: undefined, compileErrorCount: 0, exited: true }));
+    expect(buttonModel(noArtifact, 'step')?.disabledReason).toBe(MESSAGE_EXITED);
+    expect(buttonModel(noArtifact, 'compile')?.enabled).toBe(true);
+  });
+
+  it('判题结果模式的原因优先于已退出：先告诉用户「回到调试」', () => {
+    const model = runMenuModel(input({ mode: 'verdict', exited: true }));
+    expect(buttonModel(model, 'step')?.disabledReason).toContain('回到调试');
+    expect(buttonModel(model, 'submit')?.enabled).toBe(true);
   });
 });

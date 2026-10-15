@@ -117,6 +117,43 @@ describe('API 客户端（04 §5、05 §6）', () => {
     expect(error.code).toBe('rate_limited');
     expect(error.status).toBe(429);
     expect(error.message).toBe('提交过于频繁');
+    // 会话容量型 429 不带 Retry-After（04 §6）：没有秒数就不编造。
+    expect(error.retryAfterSeconds).toBeUndefined();
+  });
+
+  it('时间窗口型 429 的 Retry-After 解析成秒数，日期形态与非法值一律不猜', async () => {
+    const withHeader = stubFetch(
+      () =>
+        new Response(JSON.stringify({ code: 'rate_limited', message: '请求过于频繁' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '7' },
+        }),
+    );
+    const timed = await captureError(createApiClient({ fetchImpl: withHeader.fetchImpl }).listChallenges());
+    expect(timed.code).toBe('rate_limited');
+    expect(timed.retryAfterSeconds).toBe(7);
+
+    const dateForm = stubFetch(
+      () =>
+        new Response(JSON.stringify({ code: 'rate_limited', message: '请求过于频繁' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT' },
+        }),
+    );
+    expect(
+      (await captureError(createApiClient({ fetchImpl: dateForm.fetchImpl }).listChallenges())).retryAfterSeconds,
+    ).toBeUndefined();
+
+    const zero = stubFetch(
+      () =>
+        new Response(JSON.stringify({ code: 'rate_limited', message: '请求过于频繁' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '0' },
+        }),
+    );
+    expect(
+      (await captureError(createApiClient({ fetchImpl: zero.fetchImpl }).listChallenges())).retryAfterSeconds,
+    ).toBeUndefined();
   });
 
   it('错误响应不是 JSON 时给出兜底文案，不泄露细节', async () => {

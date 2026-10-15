@@ -6,6 +6,7 @@ import type { Pwn2BlockApp } from '../src/components/app-shell';
 import { BLOCK_TYPES, MESSAGE_NO_START_BLOCK } from '../src/compiler/types';
 import { MESSAGE_REPLAY_DISASM_STALE } from '../src/viewmodel/replay';
 import { CHANGED_CODE_VMA, createFakeApi, makeReplay, makeSubmitResponse, type FakeApi } from './fake-api';
+import { makeProjection } from './helpers';
 
 /**
  * 单页骨架的端到端接线（D02）：真实控制器 + 假后端 + 真实 Blockly。
@@ -170,6 +171,44 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
     expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
   });
+
+  it('调试实例已退出（satisfied + lastStop exit）：执行类按钮禁用并写出原因，提交与回退仍可用', async () => {
+    // 判胜那一刻程序已经结束：status 是 satisfied，退出事实只在 lastStop 上（04 §1.1）。
+    const api = createFakeApi({
+      projection: makeProjection({
+        status: 'satisfied',
+        steps: 12,
+        lastStop: { reason: 'exit', addr: '0x400003' },
+      }),
+    });
+    const { app } = await mountApp(api);
+    const workspace = panelOf(app).workspace;
+    if (workspace === undefined) throw new Error('画布没挂上');
+    const start = workspace.newBlock(BLOCK_TYPES.start);
+    const step = workspace.newBlock(BLOCK_TYPES.actionStep);
+    const next = start.nextConnection;
+    const previous = step.previousConnection;
+    if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
+    next.connect(previous);
+    // 先编译出产物，排除「没有产物」这个同样会禁用执行按钮的原因。
+    clickRun(app, '编译');
+    await settle(app);
+
+    const buttonOf = (label: string) => runButtons(app).find((each) => each.textContent?.trim() === label);
+    expect(buttonOf('试运行')?.disabled).toBe(true);
+    expect(buttonOf('单步')?.disabled).toBe(true);
+    expect(buttonOf('运行 N 步')?.disabled).toBe(true);
+    expect(buttonOf('重置')?.disabled).toBe(false);
+    expect(buttonOf('提交判题')?.disabled).toBe(false);
+    // 原因写在界面上，而不是只置灰（05 §6）。
+    expect(textOf(runMenuOf(app))).toContain('程序已退出');
+    expect(app.renderRoot.querySelector('.status')?.textContent).toContain('程序已经退出');
+
+    // 点「单步」不会发请求：组件渲染与控制器门禁用的是同一张表（05 §1）。
+    clickRun(app, '单步');
+    await settle(app);
+    expect(api.calls.some((call) => call.method === 'actions')).toBe(false);
+  });
 });
 
 describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
@@ -237,5 +276,21 @@ describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
     expect(submit?.disabled).toBe(false);
     expect(step?.disabled).toBe(true);
     expect(textOf(runMenuOf(app))).toContain('回到调试');
+  });
+
+  it('题面面板拿到题目的 hints 与调试实例的 failures：达标条目自动解锁（05 §5）', async () => {
+    // failures 是调试实例的：判题结果模式里也不许拿录像的帧去覆盖它（05 §5、§6）。
+    const api = createFakeApi({
+      projection: makeProjection({ status: 'satisfied', failures: 3, lastStop: { reason: 'step' } }),
+    });
+    const { app } = await mountApp(api);
+
+    const panel = app.renderRoot.querySelector('pwn2block-briefing-panel');
+    const root = shadowOf(panel);
+    expect(root).toBeDefined();
+    // ret2win 的第 3 条提示带 unlockAfterFailures: 3：failures 达标 ⇒ 三条一起揭示。
+    expect(root?.querySelectorAll('li .text')).toHaveLength(3);
+    expect(root?.querySelectorAll('.tag')).toHaveLength(3);
+    expect(root?.querySelector('[role="status"]')?.textContent).toContain('自动解锁第 1、2、3 条提示');
   });
 });

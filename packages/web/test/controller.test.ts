@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiClientError } from '../src/api';
 import { createSessionController, type SessionController } from '../src/viewmodel/controller';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
+import { MESSAGE_EXITED } from '../src/viewmodel/toolbar';
 import {
   FAKE_SESSION_ID,
   createFakeApi,
@@ -283,6 +284,163 @@ describe('会话控制器：试运行与分块（04 §5、05 §3）', () => {
   });
 });
 
+describe('会话控制器：已退出即终止态（04 §1.1/§5、09 §8 第 10 条）', () => {
+  /** 600 个动作 = 512 + 88：退出落在第一片末尾时，就是「退出恰好落在分片边界」。 */
+  async function exitAtChunkBoundary(
+    projection: ReturnType<typeof makeProjection>,
+  ): Promise<Harness & { readonly firstChunkCalls: () => number }> {
+    const harness = await open();
+    compileInto(harness.tracker, harness.controller, repeatedActions(600));
+    harness.api.setActionsResponse((actions) => ({
+      // 该片每个动作都成功、executed 等于提交数：只看得见 status 的判据会认为还可以继续。
+      results: actions.map((action) => ({ ok: true, action: action.type })),
+      executed: actions.length,
+      projection,
+      history: { undo: 1, stepBack: 64 },
+    }));
+    harness.controller.run({ kind: 'trial-run' });
+    await until(() => actionsCalls(harness.api).length === 1, '第一片发出');
+    await until(() => !harness.controller.state.busy, '第一片结束');
+    await flush();
+    return { ...harness, firstChunkCalls: () => actionsCalls(harness.api).length };
+  }
+
+  it('退出落在 512 分片边界：不再发第二片，也不产生任何拒绝', async () => {
+    const { api, controller, firstChunkCalls } = await exitAtChunkBoundary(
+      // 判胜那一刻程序已经退出：status 仍是 satisfied，终止事实只在 lastStop 上。
+      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'exit', addr: '0x400003' } }),
+    );
+
+    expect(firstChunkCalls()).toBe(1);
+    expect(actionsCalls(api)[0]?.actions).toHaveLength(512);
+    expect(controller.state.cursor).toBe(512);
+    // 没有多发片 ⇒ 没有 not_executable 的拒绝、failures 也没有被白记一次。
+    expect(controller.state.results).toHaveLength(512);
+    expect(controller.state.results.every((result) => result.ok)).toBe(true);
+    expect(controller.state.page?.projection.failures).toBe(0);
+  });
+
+  it('status 为 exited（没有 lastStop）时停止行为不回归', async () => {
+    const { api, controller, firstChunkCalls } = await exitAtChunkBoundary(
+      makeProjection({ status: 'exited', steps: 512 }),
+    );
+    expect(firstChunkCalls()).toBe(1);
+    expect(actionsCalls(api)).toHaveLength(1);
+    expect(controller.state.cursor).toBe(512);
+  });
+
+  it('satisfied 但停因是 step（未退出）时继续发后续分片', async () => {
+    const { controller } = await exitAtChunkBoundary(
+      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'step', addr: '0x400002' } }),
+    );
+    // satisfied 本身不限制动作（04 §1.1）：第二片照发，游标走完 600。
+    await until(() => controller.state.cursor === 600, '两片跑完');
+    expect(controller.state.cursor).toBe(600);
+  });
+
+  it('已退出后执行类命令被门禁拦住，回退类与「提交判题」仍放行（05 §6）', async () => {
+    const { api, controller } = await exitAtChunkBoundary(
+      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'exit' } }),
+    );
+
+    controller.run({ kind: 'step' });
+    controller.run({ kind: 'run-n', count: 3 });
+    await flush();
+    expect(controller.state.notice?.text).toBe(MESSAGE_EXITED);
+    expect(actionsCalls(api)).toHaveLength(1);
+
+    // 回退类不受影响：reset 照发。
+    controller.run({ kind: 'reset' });
+    await until(() => actionsCalls(api).length === 2, '重置发出');
+    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'reset' }]);
+
+    // 「提交判题」不受影响：提交走判题实例，与调试实例是否退出无关。
+    controller.run({ kind: 'submit' });
+    await until(() => controller.state.verdict !== undefined, '提交完成');
+    expect(api.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  });
+});
+
+describe('会话控制器：限流与旧会话释放（04 §5/§6）', () => {
+  it('时间窗口型 429 把 Retry-After 的秒数说出来，点「重试」真的重发同一条命令', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, [{ type: 'ret' }]);
+
+    api.failNext(new ApiClientError('rate_limited', '请求过于频繁', { status: 429, retryAfterSeconds: 7 }));
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.notice?.action === 'retry', '限流提示');
+    expect(controller.state.notice?.text).toContain('服务端要求 7 秒后再试');
+    expect(controller.state.cursor).toBe(0);
+    expect(controller.state.sessionExpired).toBe(false);
+
+    controller.retry();
+    await until(() => controller.state.cursor === 1, '重试生效');
+    expect(actionsCalls(api)).toHaveLength(2);
+    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'ret' }]);
+    expect(controller.state.notice).toBeUndefined();
+  });
+
+  it('会话容量型 429（没有 Retry-After）只提示稍后重试，不编造等待时间', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, [{ type: 'ret' }]);
+
+    api.failNext(new ApiClientError('rate_limited', '本机存活会话数已达上限', { status: 429 }));
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.notice?.action === 'retry', '限流提示');
+    expect(controller.state.notice?.text).toContain('本机存活会话数已达上限');
+    expect(controller.state.notice?.text).not.toContain('秒后再试');
+  });
+
+  async function twoChallenges(): Promise<Harness> {
+    const api = createFakeApi({
+      challenges: [
+        { id: 'a', title: '题 A' },
+        { id: 'b', title: '题 B' },
+      ],
+    });
+    const tracker = createFakeTracker();
+    const controller = createSessionController({ api: api.client, tracker: tracker.tracker });
+    controller.start();
+    await until(() => controller.state.phase === 'choosing', '进入选题');
+    controller.choose('a');
+    await until(() => controller.state.phase === 'ready', '第一题就绪');
+    expect(methods(api)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
+    return { api, tracker, controller };
+  }
+
+  it('换题与重新开始都先 DELETE 旧会话，再建新会话（存活配额不泄漏）', async () => {
+    const { api, controller } = await twoChallenges();
+
+    controller.choose('b');
+    await until(() => controller.state.challengeId === 'b' && controller.state.phase === 'ready', '第二题就绪');
+    expect(methods(api).slice(3)).toEqual(['endSession', 'getChallenge', 'createSession']);
+    expect(api.calls[3]?.sessionId).toBe(FAKE_SESSION_ID);
+
+    controller.restart();
+    await until(
+      () => controller.state.challengeId === 'b' && controller.state.phase === 'ready',
+      '重新开始就绪',
+    );
+    expect(methods(api).slice(6)).toEqual(['endSession', 'getChallenge', 'createSession']);
+    expect(api.calls.filter((call) => call.method === 'endSession')).toHaveLength(2);
+    expect(api.calls.filter((call) => call.method === 'createSession')).toHaveLength(3);
+  });
+
+  it('旧会话已经不存在（DELETE 404）时新会话照常建立，不误报会话失效', async () => {
+    const { api, controller } = await twoChallenges();
+    // 下一个请求就是那次清理：会话可能已被空闲回收（04 §1），或网络抖动。
+    api.failNext(
+      new ApiClientError('session_expired', '会话不存在', { status: 404, sessionExpired: true }),
+    );
+
+    controller.choose('b');
+    await until(() => controller.state.challengeId === 'b' && controller.state.phase === 'ready', '第二题就绪');
+    expect(controller.state.notice).toBeUndefined();
+    expect(controller.state.sessionExpired).toBe(false);
+    expect(api.calls.filter((call) => call.method === 'createSession')).toHaveLength(2);
+  });
+});
+
 describe('会话控制器：会话失效与网络错误（05 §6）', () => {
   it('会话失效：提示重新开始、门禁全关，restart 后拿到新会话', async () => {
     const { api, tracker, controller } = await open();
@@ -374,6 +532,18 @@ describe('会话控制器：提交与「回到调试」（05 §6）', () => {
 
     controller.run({ kind: 'submit' });
     await until(() => api.calls.filter((call) => call.method === 'submit').length === 2, '可以再提交一次');
+  });
+
+  it('判题录像只是判题模式的数据源：拖时间线不碰调试实例的投影（05 §5/§6）', async () => {
+    const { controller, debugProjection } = await submitted();
+    // 提交不改动调试实例，切到判题结果也不许用录像覆盖它——恢复路径的地基。
+    expect(controller.state.page?.mode).toBe('verdict');
+    expect(controller.state.page?.projection).toBe(debugProjection);
+
+    controller.selectPosition(1);
+    controller.selectPosition(0);
+    expect(controller.state.verdict?.position).toBe(0);
+    expect(controller.state.page?.projection).toBe(debugProjection);
   });
 
   it('「回到调试」恢复提交前的调试状态，视图显隐保持不变', async () => {

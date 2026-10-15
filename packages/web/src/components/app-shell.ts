@@ -14,7 +14,7 @@
  * 它自己负责把事件接对、把 `aria-live` 播报区放对。
  */
 import { LitElement, css, html } from 'lit';
-import type { Projection, PublicChallenge } from '@pwn2block/shared';
+import type { Hint, Projection, PublicChallenge } from '@pwn2block/shared';
 import { createApiClient, type ApiClient } from '../api';
 import { createViewContext } from '../viewmodel/context';
 import {
@@ -25,7 +25,7 @@ import {
 import { diffProjections } from '../viewmodel/diff';
 import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
-import { statusLine, statusMarker, statusTextOf, type PageMode } from '../viewmodel/session';
+import { statusLine, statusMarker, statusTextOf, isExitedProjection, type PageMode } from '../viewmodel/session';
 import { runMenuModel, type RunCommand } from '../viewmodel/toolbar';
 import { verdictModel } from '../viewmodel/verdict';
 import {
@@ -51,6 +51,9 @@ interface ActiveView {
   readonly previous?: Projection;
   readonly disasmNotice?: string;
 }
+
+/** 题目没声明提示时的稳定空表：避免每次渲染都新建数组，让子组件的属性判定不抖动。 */
+const EMPTY_HINTS: readonly Hint[] = [];
 
 export class Pwn2BlockApp extends LitElement {
   static override styles = [
@@ -236,9 +239,11 @@ export class Pwn2BlockApp extends LitElement {
         ? ''
         : html`<div class="briefing">
             <pwn2block-briefing-panel
+              .challengeId=${challenge.id}
               .challengeTitle=${challenge.title}
               .briefing=${challenge.briefing}
-              .hintCount=${(challenge.hints ?? []).length}
+              .hints=${challenge.hints ?? EMPTY_HINTS}
+              .failures=${state.page?.projection.failures ?? 0}
             ></pwn2block-briefing-panel>
           </div>`}
       ${this.renderNotice(state)} ${mode === 'verdict' ? this.renderVerdict(state) : ''} ${this.renderBody(state)}
@@ -389,8 +394,9 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   private runModel(state: ControllerState) {
+    const page = state.page;
     return runMenuModel({
-      mode: state.page?.mode ?? 'debug',
+      mode: page?.mode ?? 'debug',
       hasSession: state.sessionId !== undefined && state.challenge !== undefined,
       sessionExpired: state.sessionExpired,
       artifact: state.artifact.artifact,
@@ -399,6 +405,9 @@ export class Pwn2BlockApp extends LitElement {
       history: state.history,
       cursor: state.cursor,
       allowedActions: state.challenge?.allowedActions ?? [],
+      // 退出信息与控制器取同一份派生（04 §1.1）：`satisfied` + `lastStop.reason === 'exit'`
+      // 也是终止态，执行类按钮必须禁用并写出原因（05 §6）。
+      exited: page === undefined ? false : isExitedProjection(page.projection),
     });
   }
 

@@ -43,6 +43,18 @@ export function setMode(state: PageState, mode: PageMode): PageState {
   return mode === state.mode ? state : { ...state, mode };
 }
 
+/**
+ * 「程序已退出」的唯一派生口径（04 §1.1、09 §8 第 10 条）。
+ *
+ * 与引擎的 `isExited()`（`packages/engine/src/state.ts`）同一判据：`status === 'exited'`，
+ * 或**退出那一刻同时满足成功条件**——后者的 `status` 是 `satisfied`，只有
+ * `lastStop.reason === 'exit'` 能说明程序已经结束。只看 `status` 会有两处盲区：
+ * 工具栏放行了注定被拒的执行类动作，512 分片在退出落在片边界时多发一片（都会白记 failures）。
+ */
+export function isExitedProjection(projection: Projection): boolean {
+  return projection.status === 'exited' || projection.lastStop?.reason === 'exit';
+}
+
 export type StatusTone = 'ok' | 'warn' | 'error' | 'info';
 
 export interface StatusText {
@@ -66,10 +78,17 @@ function debugText(projection: Projection): StatusText {
   const failureNote = projection.failures > 0 ? `（已失败 ${projection.failures} 次）` : '';
   switch (projection.status) {
     case 'satisfied':
-      return {
-        tone: 'ok',
-        text: '当前状态已满足成功条件。调试模式不发 flag：确认 payload 自足后再点「提交判题」。',
-      };
+      // 退出与满足可以同时成立（04 §1.1）：这时执行类动作已被服务端拒绝，
+      // 状态栏只说「已满足」会让用户不明白按钮为什么点不动。
+      return isExitedProjection(projection)
+        ? {
+            tone: 'ok',
+            text: '当前状态已满足成功条件，且程序已经退出：执行类动作会被拒绝，可继续「提交判题」，或用回退类动作重来。',
+          }
+        : {
+            tone: 'ok',
+            text: '当前状态已满足成功条件。调试模式不发 flag：确认 payload 自足后再点「提交判题」。',
+          };
     case 'failed': {
       const note = projection.error?.note === undefined ? '' : `（${projection.error.note}）`;
       const message = projection.error?.message ?? '运行时异常';
