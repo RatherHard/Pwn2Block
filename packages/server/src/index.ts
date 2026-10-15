@@ -5,6 +5,7 @@ import type { BuildAppOptions } from './app';
 
 export { buildApp };
 export type { BuildAppOptions };
+export { defaultStaticRoot } from './static';
 export type { RateLimitOptions, RateLimitConfig, SessionLimits, WindowLimit } from './limits';
 
 /**
