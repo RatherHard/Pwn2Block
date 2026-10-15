@@ -42,13 +42,18 @@ export interface SolveOptions extends CheckOptions {
   readonly replay?: ReplayFn;
 }
 
-/** 默认回放：真引擎的纯提交回放（B03）。引擎未就绪时明确失败，不返回假 verdict。 */
+/**
+ * 默认回放：真引擎的纯提交回放（B03）。引擎未就绪时明确失败，不返回假 verdict。
+ *
+ * 必须把 `definition.lookup` 交给引擎：题目的 `encoding` 写成 `{preset, add, remove}` 时，
+ * 引擎不做文件 IO，自己展开不了那张表（03 §1、shared 的 `RuntimeOptions`）。
+ */
 export function defaultReplay(
   definition: ChallengeDefinition,
   actions: readonly Action[],
 ): ReplayResult {
   try {
-    const runtime = createRuntime(definition.pub, definition.priv);
+    const runtime = createRuntime(definition.pub, definition.priv, { lookup: definition.lookup });
     const outcome = runtime.replaySubmit(actions);
     return { ok: true, verdict: outcome.verdict };
   } catch (error) {

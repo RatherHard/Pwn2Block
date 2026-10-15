@@ -1,0 +1,131 @@
+{
+  "id": "ret2win",
+  "title": "回到胜利",
+  "briefing": "这道题的程序只有四条指令。它停在 `vuln` 的 `leave` 之前，等你接手。\n\n- `vuln`（0x400000）：`leave` + `ret`，`ret` 会从栈上取出返回地址。\n- `win`（0x400002）：`syscall 99`，把 `FLAG` 置为 1 并结束程序。\n- `lose`（0x400003）：`syscall 60`，直接退出。\n\n当前栈上的返回地址指向 `lose`。用工具箱里的 `gets(buf)` 往栈上写字节，把它改成 `win` 的地址，再单步执行，让程序返回到 `win`。\n\n栈视图里已经标出了 `buf`、saved rbp 和 ret addr 三段的位置：写入的字节从 `buf` 开始连续覆盖，写多了就会碰到返回地址。地址按小端序存放。",
+  "archBits": 64,
+  "encoding": {
+    "preset": "x86ish",
+    "remove": [
+      "0xb8",
+      "0xb9",
+      "0xba",
+      "0xbb",
+      "0xbc",
+      "0xbd",
+      "0xbe",
+      "0xbf",
+      "0x88",
+      "0x89",
+      "0x8a",
+      "0x8b",
+      "0x8d",
+      "0x8e",
+      "0x8f",
+      "0x86",
+      "0x87",
+      "0x50",
+      "0x51",
+      "0x52",
+      "0x53",
+      "0x54",
+      "0x55",
+      "0x56",
+      "0x57",
+      "0x68",
+      "0x58",
+      "0x59",
+      "0x5a",
+      "0x5b",
+      "0x5c",
+      "0x5d",
+      "0x5e",
+      "0x5f",
+      "0x00",
+      "0x01",
+      "0x02",
+      "0x04",
+      "0x03",
+      "0x28",
+      "0x29",
+      "0x2a",
+      "0x2b",
+      "0x38",
+      "0x39",
+      "0x3a",
+      "0x3b",
+      "0x20",
+      "0x21",
+      "0x24",
+      "0x08",
+      "0x09",
+      "0x0c",
+      "0x30",
+      "0x31",
+      "0x34",
+      "0xc0",
+      "0xc1",
+      "0xd2",
+      "0xd3",
+      "0xc4",
+      "0xc5",
+      "0xd6",
+      "0xd7",
+      "0xe9",
+      "0xff",
+      "0x26",
+      "0x74",
+      "0x75",
+      "0x72",
+      "0x73",
+      "0xe8",
+      "0x9a",
+      "0x10",
+      "0x0f",
+      "0x90"
+    ],
+    "add": [
+      { "opcode": "0x11", "op": "syscall", "operands": ["const:99"], "mnemonic": "syscall win" }
+    ]
+  },
+  "syscallAbi": { "nr": "RAX", "args": ["RDI"], "ret": "RAX" },
+  "syscalls": [
+    { "nr": 60, "name": "exit", "kind": "exit", "doc": "exit(code)" },
+    {
+      "nr": 99,
+      "name": "win",
+      "kind": "custom",
+      "doc": "置 FLAG=1 并退出",
+      "effects": [
+        { "type": "set_reg", "reg": "FLAG", "value": "0x1" },
+        { "type": "exit" }
+      ]
+    }
+  ],
+  "labels": [
+    { "name": "vuln", "addr": "0x400000", "size": 2, "kind": "func" },
+    { "name": "win", "addr": "0x400002", "size": 1, "kind": "func" },
+    { "name": "lose", "addr": "0x400003", "size": 1, "kind": "func" },
+    { "name": "buf", "addr": "0x7fffff00", "size": 16, "kind": "buffer" },
+    { "name": "saved rbp", "addr": "0x7fffff10", "size": 8, "kind": "saved_bp" },
+    { "name": "ret addr", "addr": "0x7fffff18", "size": 8, "kind": "ret_addr" }
+  ],
+  "allowedActions": ["step", "run", "undo", "reset"],
+  "authorBlocks": [
+    {
+      "id": "gets",
+      "label": "gets(buf)",
+      "tooltip": "从 buf 起写入任意长度字节，不检查边界",
+      "params": [{ "name": "data", "type": "bytes" }],
+      "expand": [{ "type": "write_bytes", "addr": "0x7fffff00", "hex": "$data" }]
+    }
+  ],
+  "hints": [
+    { "text": "先看栈视图：buf、saved rbp、ret addr 三段是连在一起的。" },
+    { "text": "gets 从 buf 开始写，中间少写一个字节，返回地址就会错位。" },
+    { "text": "覆盖 ret addr 的是 8 个字节，地址低位在前。", "unlockAfterFailures": 3 }
+  ],
+  "errorNotes": {
+    "memory_fault": "程序访问了没映射或没权限的地址。gets 固定写到 buf（0x7fffff00），它本身不会出错。",
+    "invalid_ip": "返回地址指向了不可执行的地址。检查你覆盖 ret addr 的那 8 个字节：地址要按小端序写，目标是 0x400002。"
+  }
+}

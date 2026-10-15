@@ -10,4 +10,5 @@ export * from './check';
 export * from './new-challenge';
 export * from './paths';
 export * from './presets';
+export * from './private-init';
 export * from './solve';

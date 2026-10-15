@@ -109,7 +109,13 @@ function renderPublicTemplate(id: string): string {
 `;
 }
 
-/** 私有包模板：寄存器、栈布局、判胜谓词、环境变量 flag 引用。 */
+/**
+ * 私有包模板：寄存器、栈布局、判胜谓词、环境变量 flag 引用。
+ *
+ * `text` 的 `init` 必须等于 `renderAsmTemplate()` 汇编出来的字节（`leave` `ret`
+ * `syscall 99` `syscall 60` → `c9c3110e`）：`challenge:check` 会拿 `program.asm`
+ * 重新汇编一遍做比对，模板开箱就得是自洽的。改了模板里的程序，就同步改这里。
+ */
 function renderPrivateTemplate(id: string): string {
   const envVar = flagEnvVarName(id);
   return `{
@@ -124,7 +130,7 @@ function renderPrivateTemplate(id: string): string {
       "size": "0x1000",
       "perm": "rx",
       "hidden": false,
-      "init": [{ "at": "0x400000", "hex": "c9c3" }]
+      "init": [{ "at": "0x400000", "hex": "c9c3110e" }]
     },
     {
       "id": "stack",
@@ -147,8 +153,10 @@ function renderPrivateTemplate(id: string): string {
 
 /** `program.asm` 骨架：`.vma` 段、标签、三种内置作用各来一条。 */
 function renderAsmTemplate(): string {
-  return `; TODO：写程序。汇编器（challenge:asm）在 D2–D3 接通，现在也可以直接手写 private.json 的 init。
+  return `; TODO：写程序。写完跑 pnpm challenge:asm <id>，把字节写回 private.json 的 init。
 ; 约定：jmp / call 的目标写标签，汇编器算出绝对地址（06 §2.2）。
+; 下面的程序汇编出来是 c9c3110e，与 private.json 模板里的 text 段 init 一致；
+; 改了这里就要重跑 challenge:asm。
 
 .vma text
 vuln:

@@ -1,11 +1,19 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ret2winPrivate, ret2winPublic } from '@pwn2block/shared';
 import { checkAllChallenges, checkChallenge, loadChallengeDefinition } from '../src/check';
 import { readChallengeFiles } from '../src/challenge-files';
 import { clearPresetCache } from '../src/presets';
-import { FIXTURES, OK_ROOT, REPO_ROOT, SENTINEL, makeTempRepo, writeFile } from './helpers';
+import {
+  FIXTURES,
+  OK_ROOT,
+  REPO_ROOT,
+  SENTINEL,
+  makeRet2winRepo,
+  makeTempRepo,
+  writeFile,
+} from './helpers';
 
 /** 读夹具题目包的原文；`okwin` 在全绿夹具根下。 */
 function fixtureText(id: string, name: string): string {
@@ -168,6 +176,65 @@ describe('check：编码表增删', () => {
     });
     expect(report.ok).toBe(false);
     expect(report.issues.some((item) => item.path === 'presets/x86ish.json')).toBe(true);
+  });
+});
+
+describe('check：program.asm 与 private.json 的 init 必须同步', () => {
+  /** 夹具 ret2win 的最新 init 是 program.asm 汇编出的 `c9c30f0e`。 */
+  function ret2winRepoWithInitText(replacement: string): string {
+    const root = makeRet2winRepo();
+    const path = join(root, 'challenges', 'ret2win', 'private.json');
+    writeFileSync(path, readFileSync(path, 'utf8').replace('"c9c30f0e"', replacement), 'utf8');
+    return root;
+  }
+
+  it('一致时 check 通过（夹具走的就是这条路）', () => {
+    const report = checkChallenge('ret2win', { root: makeRet2winRepo(), env: ret2winEnv });
+    expect(report).toEqual({ id: 'ret2win', ok: true, issues: [] });
+  });
+
+  it('init 陈旧一个字节就报 private.json 并把命令写给出来', () => {
+    const report = checkChallenge('ret2win', {
+      root: ret2winRepoWithInitText('"ffffffff"'),
+      env: ret2winEnv,
+    });
+    expect(report.ok).toBe(false);
+    const first = report.issues[0];
+    expect(first?.path).toBe('private.json');
+    expect(first?.message).toContain('「text」段的 init 与 program.asm 的汇编结果不一致');
+    expect(first?.message).toContain('pnpm challenge:asm ret2win');
+    expect(first?.message).toContain('c9c30f0e');
+  });
+
+  it('init 比程序多出字节 / init 整个缺失都算不一致', () => {
+    const longer = ret2winRepoWithInitText('"c9c30f0e9090"');
+    expect(checkChallenge('ret2win', { root: longer, env: ret2winEnv }).ok).toBe(false);
+
+    const missing = ret2winRepoWithInitText('"00000000"');
+    expect(checkChallenge('ret2win', { root: missing, env: ret2winEnv }).ok).toBe(false);
+  });
+
+  it('program.asm 编译不过时报在 program.asm 上，并带上行号', () => {
+    const root = makeRet2winRepo();
+    writeFileSync(join(root, 'challenges', 'ret2win', 'program.asm'), '.vma text\n    jmp nowhere\n', 'utf8');
+    const report = checkChallenge('ret2win', { root, env: ret2winEnv });
+    expect(report.ok).toBe(false);
+    expect(report.issues[0]?.path).toBe('program.asm');
+    expect(report.issues[0]?.message).toContain('伪汇编编译失败');
+    expect(report.issues[0]?.message).toContain('第 2 行');
+  });
+
+  it('没有 program.asm 的题目包跳过这条检查（老包行为不变）', () => {
+    const root = makeTempRepo({
+      'challenges/okwin/public.json': fixtureText('okwin', 'public.json'),
+      'challenges/okwin/private.json': fixtureText('okwin', 'private.json'),
+      'presets/x86ish.json': readFileSync(join(REPO_ROOT, 'presets', 'x86ish.json'), 'utf8'),
+    });
+    expect(checkChallenge('okwin', { root, env: { FLAG_OKWIN: SENTINEL } })).toEqual({
+      id: 'okwin',
+      ok: true,
+      issues: [],
+    });
   });
 });
 

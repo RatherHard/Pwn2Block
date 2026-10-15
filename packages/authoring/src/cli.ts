@@ -1,10 +1,13 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { flagEnvVarName, parsePrivatePackage, type ChallengeIssue } from '@pwn2block/shared';
-import { assembleProgram } from './asm';
-import { checkAllChallenges, checkChallenge, type CheckOptions } from './check';
-import { CHALLENGE_FILE_NAMES, listChallengeIds, readChallengeFiles } from './challenge-files';
+import { flagEnvVarName, type ChallengeIssue } from '@pwn2block/shared';
+import { assembleProgram, type AsmListingEntry } from './asm';
+import { checkAllChallenges, checkChallenge, loadChallengeDefinition, type CheckOptions } from './check';
+import { CHALLENGE_FILE_NAMES, listChallengeIds } from './challenge-files';
 import { createChallenge } from './new-challenge';
 import { repoRoot } from './paths';
+import { applyInitPatches } from './private-init';
 import { solveAllChallenges, solveChallenge, type ReplayFn, type SolveOptions } from './solve';
 
 /**
@@ -23,8 +26,8 @@ export const USAGE = `用法：pnpm challenge:<command> [<id>|--all] [选项]
 
   new <id>      从模板生成 challenges/<id>/ 的四个文件（public.json / private.json /
                 program.asm / solution.md）；已存在时拒绝覆盖，加 --force 覆盖
-  asm <id>      编译 program.asm，把 hex 写回 private.json 的 VMA init
-                （伪汇编器 D2–D3 接通；当前会明确报未实现并非零退出）
+  asm <id>      编译 program.asm，把 hex 写回 private.json 里对应 VMA 的 init
+                （内容没变时不写盘；汇编错误一律非零退出，不写半成品字节）
   check <id>    校验 public.json / private.json：Schema、VMA 布局、编码表、谓词、
                 跨包引用、flag 缺失
   check --all   校验 challenges/ 下全部题目；目录为空时提示并返回 0
@@ -37,7 +40,8 @@ export const USAGE = `用法：pnpm challenge:<command> [<id>|--all] [选项]
   -h, --help    打印本用法
 
 环境变量：
-  FLAG_<ID大写>  flag 真值，例如 ret2win → FLAG_RET2WIN。缺失时该题拒绝加载（06 §6）。
+  FLAG_<ID大写>  flag 真值，例如 ret2win → FLAG_RET2WIN。缺失时该题拒绝加载（06 §6），
+                因此 asm / check / solve 都要求先导出它。
 `;
 
 export interface CliOptions {
@@ -163,33 +167,62 @@ function runNew(target: string | undefined, force: boolean, options: CliOptions)
   return 0;
 }
 
+/** 打印汇编器给的地址清单：直接拿去填 `labels` 和 `solution.md`（06 §2.2）。 */
+function printListing(listing: readonly AsmListingEntry[]): void {
+  if (listing.length === 0) return;
+  out('地址清单：\n');
+  for (const entry of listing) {
+    out(`  ${entry.label.padEnd(16)} ${entry.addr.padEnd(12)} ${entry.vma}\n`);
+  }
+}
+
 function runAsm(target: string | undefined, options: CliOptions): number {
   if (!target) {
     err(`用法：pnpm challenge:asm <id>\n\n${USAGE}`);
     return 2;
   }
-  const files = readChallengeFiles(target, { root: options.root, env: options.env });
-  if (!files.ok) {
-    printIssues(target, files.issues);
+
+  // 走 check 的同一入口：题目包本身不合法时绝不往 private.json 里写字节。
+  // 唯一例外是「init 是否已经同步」这条自检——asm 存在的意义就是把它修好。
+  const loaded = loadChallengeDefinition(target, { ...checkOptions(options), skipAsmSyncCheck: true });
+  if (!loaded.ok) {
+    printIssues(target, loaded.issues);
     return 1;
   }
-  if (files.files.programAsm === undefined) {
+
+  const files = loaded.files;
+  if (files.programAsm === undefined) {
     out(`${challengeLabel(target)}/${CHALLENGE_FILE_NAMES.asm}: 缺少伪汇编源文件\n`);
     return 1;
   }
 
-  const priv = parsePrivatePackage(files.files.privateRaw);
-  if (!priv.ok) {
-    printIssues(target, priv.issues);
+  const result = assembleProgram(files.programAsm, loaded.definition.priv.vmas, {
+    lookup: loaded.definition.lookup,
+    registers: loaded.definition.priv.registers,
+  });
+  if (!result.ok) {
+    err(`${challengeLabel(target)}/${CHALLENGE_FILE_NAMES.asm}: ${result.message}\n`);
     return 1;
   }
 
-  const result = assembleProgram(files.files.programAsm, priv.priv.vmas);
-  if (!result.ok) {
-    err(`${challengeLabel(target)}: ${result.message}\n`);
+  printListing(result.listing);
+
+  const applied = applyInitPatches(files.privateText, result.segments);
+  if (!applied.ok) {
+    err(`${challengeLabel(target)}/${CHALLENGE_FILE_NAMES.private}: ${applied.message}\n`);
     return 1;
   }
-  out(`${challengeLabel(target)}: 已写出 ${result.vmaId} 的 ${result.patches.length} 个 init 补丁\n`);
+
+  const summary = result.segments
+    .map((segment) => `${segment.vmaId} 段 ${segment.patches.reduce((sum, patch) => sum + patch.hex.length / 2, 0)} 字节`)
+    .join('，');
+  if (!applied.changed) {
+    out(`${challengeLabel(target)}: ${summary}，与 private.json 一致，未写盘\n`);
+    return 0;
+  }
+
+  writeFileSync(join(files.dir, CHALLENGE_FILE_NAMES.private), applied.text, 'utf8');
+  out(`${challengeLabel(target)}: 已写回 ${CHALLENGE_FILE_NAMES.private}（${summary}）\n`);
   return 0;
 }
 

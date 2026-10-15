@@ -1,6 +1,18 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { main, type CliOptions } from '../src/cli';
-import { FIXTURES, OK_ROOT, REPO_ROOT, SENTINEL, captureStdio, failingReplay, fakeReplay, makeTempRepo } from './helpers';
+import {
+  FIXTURES,
+  OK_ROOT,
+  REPO_ROOT,
+  SENTINEL,
+  captureStdio,
+  failingReplay,
+  fakeReplay,
+  makeRet2winRepo,
+  makeTempRepo,
+} from './helpers';
 
 interface CliResult {
   readonly code: number;
@@ -174,10 +186,58 @@ describe('CLI：new', () => {
 });
 
 describe('CLI：asm', () => {
-  it('伪汇编器未实现时返回 1 并说明（不假装成功）', async () => {
-    const result = await runCli(['asm', 'ret2win'], { root: FIXTURES, env: ret2winEnv });
+  it('程序与 private.json 一致时返回 0，并且不写盘', async () => {
+    const root = makeRet2winRepo();
+    const before = readFileSync(join(root, 'challenges', 'ret2win', 'private.json'), 'utf8');
+    const result = await runCli(['asm', 'ret2win'], { root, env: ret2winEnv });
+    expect(result.code).toBe(0);
+    expect(result.err).toBe('');
+    expect(result.out).toContain('与 private.json 一致，未写盘');
+    expect(result.out).toContain('地址清单');
+    expect(result.out).toContain('0x400002');
+    expect(readFileSync(join(root, 'challenges', 'ret2win', 'private.json'), 'utf8')).toBe(before);
+  });
+
+  it('init 过时的时候写回正确字节，且保留其它 VMA 的 init', async () => {
+    const root = makeRet2winRepo();
+    const privatePath = join(root, 'challenges', 'ret2win', 'private.json');
+    writeFileSync(privatePath, readFileSync(privatePath, 'utf8').replace('c9c30f0e', 'ffffffff'), 'utf8');
+
+    const result = await runCli(['asm', 'ret2win'], { root, env: ret2winEnv });
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('已写回');
+
+    const written = JSON.parse(readFileSync(privatePath, 'utf8')) as {
+      vmas: { id: string; init: { at: string; hex: string }[] }[];
+    };
+    expect(written.vmas.find((vma) => vma.id === 'text')?.init).toEqual([
+      { at: '0x400000', hex: 'c9c30f0e' },
+    ]);
+    expect(written.vmas.find((vma) => vma.id === 'stack')?.init).toEqual([
+      { at: '0x7fffff10', hex: '40ffff7f000000000300400000000000' },
+    ]);
+  });
+
+  it('汇编失败时返回 1 并带上行号，且不碰 private.json', async () => {
+    const root = makeRet2winRepo();
+    const privatePath = join(root, 'challenges', 'ret2win', 'private.json');
+    const before = readFileSync(privatePath, 'utf8');
+    // 夹具的编码表里没有 jmp：错误要指向 program.asm、带行号，并且一个字节都不写。
+    writeFileSync(join(root, 'challenges', 'ret2win', 'program.asm'), '.vma text\n    jmp nowhere\n', 'utf8');
+
+    const result = await runCli(['asm', 'ret2win'], { root, env: ret2winEnv });
     expect(result.code).toBe(1);
-    expect(result.err).toContain('伪汇编器尚未实现');
+    expect(result.err).toContain('challenges/ret2win/program.asm');
+    expect(result.err).toContain('第 2 行');
+    expect(result.err).toContain('不在本题的编码表里');
+    expect(readFileSync(privatePath, 'utf8')).toBe(before);
+  });
+
+  it('题目包不合法（flag 缺失）时返回 1，不写盘', async () => {
+    const root = makeRet2winRepo();
+    const result = await runCli(['asm', 'ret2win'], { root, env: {} });
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('challenges/ret2win/flag:');
   });
 
   it('题目不存在时返回 1', async () => {
