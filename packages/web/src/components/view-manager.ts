@@ -10,7 +10,6 @@ import type { PropertyValues } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import {
   SLOT_COUNT,
-  VIEW_TITLES,
   hasMoreAbove,
   hasMoreBelow,
   slotKinds,
@@ -19,6 +18,7 @@ import {
 } from '../viewmodel/views';
 import { sharedStyles, terminalTheme } from '../theme';
 import './disasm-view';
+import './io-view';
 import './memory-view';
 import './registers-view';
 import './stack-view';
@@ -63,10 +63,6 @@ export class Pwn2BlockViewManager extends LitElement {
         color: var(--p2b-dim);
         padding: 1rem;
         text-align: center;
-      }
-      .io-placeholder {
-        padding: 0.5rem;
-        color: var(--p2b-dim);
       }
     `,
   ];
@@ -135,11 +131,7 @@ export class Pwn2BlockViewManager extends LitElement {
       case 'memory':
         return html`<pwn2block-memory-view .context=${this.context}></pwn2block-memory-view>`;
       case 'io':
-      default:
-        return html`<div class="io-placeholder">
-          <h2>${VIEW_TITLES.io}</h2>
-          <p>题目声明 <code>syscalls</code> / <code>fds</code> 时出现；stdout、stdin 与 syscall 速查在 D02 接入（05 §2.6）。</p>
-        </div>`;
+        return html`<pwn2block-io-view .context=${this.context}></pwn2block-io-view>`;
     }
   }
 
