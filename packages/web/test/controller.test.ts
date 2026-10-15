@@ -361,6 +361,86 @@ describe('会话控制器：已退出即终止态（04 §1.1/§5、09 §8 第 10
   });
 });
 
+describe('会话控制器：限流与旧会话释放（04 §5/§6）', () => {
+  it('时间窗口型 429 把 Retry-After 的秒数说出来，点「重试」真的重发同一条命令', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, [{ type: 'ret' }]);
+
+    api.failNext(new ApiClientError('rate_limited', '请求过于频繁', { status: 429, retryAfterSeconds: 7 }));
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.notice?.action === 'retry', '限流提示');
+    expect(controller.state.notice?.text).toContain('服务端要求 7 秒后再试');
+    expect(controller.state.cursor).toBe(0);
+    expect(controller.state.sessionExpired).toBe(false);
+
+    controller.retry();
+    await until(() => controller.state.cursor === 1, '重试生效');
+    expect(actionsCalls(api)).toHaveLength(2);
+    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'ret' }]);
+    expect(controller.state.notice).toBeUndefined();
+  });
+
+  it('会话容量型 429（没有 Retry-After）只提示稍后重试，不编造等待时间', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, [{ type: 'ret' }]);
+
+    api.failNext(new ApiClientError('rate_limited', '本机存活会话数已达上限', { status: 429 }));
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.notice?.action === 'retry', '限流提示');
+    expect(controller.state.notice?.text).toContain('本机存活会话数已达上限');
+    expect(controller.state.notice?.text).not.toContain('秒后再试');
+  });
+
+  async function twoChallenges(): Promise<Harness> {
+    const api = createFakeApi({
+      challenges: [
+        { id: 'a', title: '题 A' },
+        { id: 'b', title: '题 B' },
+      ],
+    });
+    const tracker = createFakeTracker();
+    const controller = createSessionController({ api: api.client, tracker: tracker.tracker });
+    controller.start();
+    await until(() => controller.state.phase === 'choosing', '进入选题');
+    controller.choose('a');
+    await until(() => controller.state.phase === 'ready', '第一题就绪');
+    expect(methods(api)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
+    return { api, tracker, controller };
+  }
+
+  it('换题与重新开始都先 DELETE 旧会话，再建新会话（存活配额不泄漏）', async () => {
+    const { api, controller } = await twoChallenges();
+
+    controller.choose('b');
+    await until(() => controller.state.challengeId === 'b' && controller.state.phase === 'ready', '第二题就绪');
+    expect(methods(api).slice(3)).toEqual(['endSession', 'getChallenge', 'createSession']);
+    expect(api.calls[3]?.sessionId).toBe(FAKE_SESSION_ID);
+
+    controller.restart();
+    await until(
+      () => controller.state.challengeId === 'b' && controller.state.phase === 'ready',
+      '重新开始就绪',
+    );
+    expect(methods(api).slice(6)).toEqual(['endSession', 'getChallenge', 'createSession']);
+    expect(api.calls.filter((call) => call.method === 'endSession')).toHaveLength(2);
+    expect(api.calls.filter((call) => call.method === 'createSession')).toHaveLength(3);
+  });
+
+  it('旧会话已经不存在（DELETE 404）时新会话照常建立，不误报会话失效', async () => {
+    const { api, controller } = await twoChallenges();
+    // 下一个请求就是那次清理：会话可能已被空闲回收（04 §1），或网络抖动。
+    api.failNext(
+      new ApiClientError('session_expired', '会话不存在', { status: 404, sessionExpired: true }),
+    );
+
+    controller.choose('b');
+    await until(() => controller.state.challengeId === 'b' && controller.state.phase === 'ready', '第二题就绪');
+    expect(controller.state.notice).toBeUndefined();
+    expect(controller.state.sessionExpired).toBe(false);
+    expect(api.calls.filter((call) => call.method === 'createSession')).toHaveLength(2);
+  });
+});
+
 describe('会话控制器：会话失效与网络错误（05 §6）', () => {
   it('会话失效：提示重新开始、门禁全关，restart 后拿到新会话', async () => {
     const { api, tracker, controller } = await open();

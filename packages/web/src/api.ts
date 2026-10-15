@@ -79,11 +79,19 @@ export class ApiClientError extends Error {
   readonly status: number;
   readonly sessionExpired: boolean;
   readonly network: boolean;
+  /** 429 的 `Retry-After`（秒）：只有时间窗口型限流才给（04 §6）。 */
+  readonly retryAfterSeconds?: number;
 
   constructor(
     code: ApiErrorCode,
     message: string,
-    options: { readonly status?: number; readonly sessionExpired?: boolean; readonly network?: boolean; readonly cause?: unknown } = {},
+    options: {
+      readonly status?: number;
+      readonly sessionExpired?: boolean;
+      readonly network?: boolean;
+      readonly retryAfterSeconds?: number;
+      readonly cause?: unknown;
+    } = {},
   ) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'ApiClientError';
@@ -91,6 +99,7 @@ export class ApiClientError extends Error {
     this.status = options.status ?? 0;
     this.sessionExpired = options.sessionExpired ?? false;
     this.network = options.network ?? false;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -143,7 +152,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         sessionExpired: true,
       });
     }
-    if (!response.ok) throw describeFailure(response.status, text);
+    if (!response.ok) throw describeFailure(response, text);
     if (response.status === 204 || text.length === 0) return undefined as T;
 
     let payload: unknown;
@@ -162,7 +171,18 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     return parsed.data;
   }
 
-  function describeFailure(status: number, text: string): ApiClientError {
+  /**
+   * `Retry-After` 只接受秒数形态：HTTP 日期形态不猜（我们的服务端只发秒，04 §6）。
+   * 会话容量型 429 不带这个头——什么时候能建取决于调用方何时 DELETE，没有确定时间点。
+   */
+  function retryAfterSecondsOf(response: Response): number | undefined {
+    const raw = response.headers.get('retry-after');
+    if (raw === null || !/^[0-9]+$/.test(raw.trim())) return undefined;
+    const seconds = Number.parseInt(raw, 10);
+    return seconds > 0 ? seconds : undefined;
+  }
+
+  function describeFailure(response: Response, text: string): ApiClientError {
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -171,9 +191,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     }
     const error = ApiErrorSchema.safeParse(parsed);
     if (error.success) {
-      return new ApiClientError(error.data.code, error.data.message, { status });
+      const retryAfterSeconds = retryAfterSecondsOf(response);
+      return new ApiClientError(error.data.code, error.data.message, {
+        status: response.status,
+        // 限流提示要把等待时间说出来，否则用户只能盲目重试（05 §6）。
+        ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      });
     }
-    return new ApiClientError('internal', `请求失败（HTTP ${status}）`, { status });
+    return new ApiClientError('internal', `请求失败（HTTP ${response.status}）`, {
+      status: response.status,
+    });
   }
 
   return {
