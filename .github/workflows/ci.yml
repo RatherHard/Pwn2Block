@@ -13,7 +13,10 @@ jobs:
       # 一旦 `challenges/` 下有真实题目，`challenge:check` / `challenge:solve` 就需要这个变量，
       # 否则校验器按设计报「环境变量缺失，拒绝加载该题」（08 §5 S05）。
       # 这里注入的是**测试哨兵值**，不是真 flag；各题按 id 追加自己的变量。
+      # 新题落地时必须在同一个提交里补上它的变量，否则 `--all` 会因缺 env 拒绝加载该题（那是设计的正确行为，不是 CI 故障）。
       FLAG_RET2WIN: pwn2block-ci-sentinel
+      FLAG_ENDIAN: pwn2block-ci-sentinel
+      FLAG_PUSHPOP: pwn2block-ci-sentinel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
