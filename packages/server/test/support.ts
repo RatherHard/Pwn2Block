@@ -101,6 +101,11 @@ export interface FakeRuntimeOptions {
   readonly rejectResult?: { readonly code: ErrorCode; readonly detail?: string };
   readonly disasm?: readonly DisasmEntry[];
   readonly revealed?: readonly string[];
+  /**
+   * 覆盖初态寄存器值（键与 `privatePkg.registers` 对齐）。
+   * 用来构造非 `RSP`/`RBP`/`RIP` 命名的题目，验证 `roles` 是**透传**而不是服务端硬编码。
+   */
+  readonly registers?: Readonly<Record<string, bigint>>;
 }
 
 export interface FakeRuntime {
@@ -162,6 +167,7 @@ export function makeFakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
       RBP: 0x7fffff10n,
       RIP: 0x400000n,
       FLAG: 0n,
+      ...(options.registers ?? {}),
     },
     flags: NO_FLAGS,
     memory: { kind: 'cow-memory' },

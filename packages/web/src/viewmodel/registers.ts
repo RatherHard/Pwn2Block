@@ -10,6 +10,7 @@ import { EMPTY_DIFF, type FlagName, type ProjectionDiff } from './diff';
 import { formatAddr, formatDecimal } from './format';
 import { labelKindName, labelAt } from './labels';
 import { createProjectionReader } from './reader';
+import { type RegisterRole } from './roles';
 
 export const FLAG_NAMES: readonly FlagName[] = ['ZF', 'CF', 'SF'];
 
@@ -26,7 +27,8 @@ export interface RegisterRowModel {
   readonly hex: string;
   readonly decimal: string;
   readonly changed: boolean;
-  readonly role?: 'sp' | 'bp' | 'ip';
+  /** 角色（`sp` / `bp` / `ip`）从投影的 `roles` 推导，不在前端硬编码寄存器名。 */
+  readonly role?: RegisterRole;
   readonly targetKind: RegisterTargetKind;
   /** 指向说明：`stack` / `标注「buf」（缓冲区）` / `隐藏 VMA「key」`。 */
   readonly targetText: string;

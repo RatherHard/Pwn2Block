@@ -6,12 +6,8 @@
  * D4 换成 `src/api.ts` 的会话接口后删掉那个切换条即可，视图与纯逻辑都不用改。
  */
 import { LitElement, css, html } from 'lit';
-import {
-  SAMPLE_ARCH_BITS,
-  SAMPLE_PROJECTIONS,
-  SAMPLE_PUBLIC_CHALLENGE,
-  SAMPLE_ROLES,
-} from '../fixtures/sample';
+import { SAMPLE_ARCH_BITS, SAMPLE_PROJECTIONS, SAMPLE_PUBLIC_CHALLENGE } from '../fixtures/sample';
+import { createViewContext } from '../viewmodel/context';
 import { diffProjections } from '../viewmodel/diff';
 import { viewScrollDelta } from '../viewmodel/keymap';
 import {
@@ -165,7 +161,7 @@ export class Pwn2BlockApp extends LitElement {
       <pwn2block-top-bar
         .mode=${mode}
         .views=${views}
-        .available=${availableViews(projection)}
+        .available=${availableViews(projection, challenge)}
         @p2b-mode-change=${this.onModeChange}
         @p2b-view-toggle=${this.onViewToggle}
         @p2b-view-move=${this.onViewMove}
@@ -203,7 +199,7 @@ export class Pwn2BlockApp extends LitElement {
           <pwn2block-view-manager
             .context=${this.viewContext()}
             .views=${views}
-            .available=${availableViews(projection)}
+            .available=${availableViews(projection, challenge)}
           ></pwn2block-view-manager>
         </section>
         <section class="right" aria-label="payload 窗口">
@@ -213,17 +209,21 @@ export class Pwn2BlockApp extends LitElement {
     `;
   }
 
-  /** 所有视图共用同一份上下文；差分在这里算一次（05 §2.1、04 §4）。 */
+  /**
+   * 所有视图共用同一份上下文；差分在这里算一次（05 §2.1、04 §4）。
+   *
+   * 角色与公开标注都不在这里填：`createViewContext` 分别从 `projection.roles` 与公开包取
+   * （08 §9.2），页面壳没有参数可以传进另一套角色名。
+   */
   private viewContext(): ViewContext {
     const { projection, previous } = this.state;
-    return {
+    return createViewContext({
       projection,
       previous,
       archBits: SAMPLE_ARCH_BITS,
-      roles: SAMPLE_ROLES,
-      labels: SAMPLE_PUBLIC_CHALLENGE.labels ?? [],
+      challenge: SAMPLE_PUBLIC_CHALLENGE,
       diff: diffProjections(previous, projection),
-    };
+    });
   }
 
   private useSample(index: number): void {

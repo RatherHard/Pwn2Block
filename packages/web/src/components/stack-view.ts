@@ -8,8 +8,8 @@
  * 数据全部来自 `viewmodel/stack.ts`；组件只管排版、地址跳转与自动跟随 `sp`。
  */
 import { LitElement, css, html } from 'lit';
-import { parseHex } from '@pwn2block/shared';
 import { alignDown, formatAddrShort, parseAddrInput } from '../viewmodel/format';
+import { roleValue } from '../viewmodel/roles';
 import { buildStackRows, refollowBase, type StackRowModel } from '../viewmodel/stack';
 import { sharedStyles, terminalTheme } from '../theme';
 import type { ViewContext } from './view-context';
@@ -200,14 +200,13 @@ export class Pwn2BlockStackView extends LitElement {
     return this.context === undefined ? 8 : Math.max(1, Math.floor(this.context.archBits / 8));
   }
 
-  private registerValue(name: string): bigint {
-    const found = this.context?.projection.registers.find((item) => item.name === name);
-    return found === undefined ? 0n : parseHex(found.value);
-  }
-
+  /**
+   * `sp` 的当前值：只认上下文里的角色映射（`createViewContext` 保证它等于 `projection.roles`，08 §9.2）。
+   * 题目没下发这个寄存器时按 0 处理——窗口起点退化成未映射区，而不是猜 `RSP`。
+   */
   private spValue(): bigint {
     if (this.context === undefined) return 0n;
-    return this.registerValue(this.context.roles.sp);
+    return roleValue(this.context.projection, this.context.roles, 'sp') ?? 0n;
   }
 
   private baseAddr(): bigint {

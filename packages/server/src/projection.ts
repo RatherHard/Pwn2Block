@@ -20,6 +20,7 @@ import type {
   ReplayFrame,
   ReplayFrameView,
   ReplayView,
+  Roles,
   StdinView,
   StdoutView,
   SubmitOutcome,
@@ -36,6 +37,8 @@ import type {
  * 1. 隐藏 VMA 只给布局（地址、大小、权限、hidden），内容只在 `reveal` 之后出现（01 §6 第 2 条）。
  * 2. `win` / `fail` / `flag` / 虚拟文件内容 / `VmError.detail` 永不进入返回对象。
  * 3. 题目未声明的 fd 不出现：`stdin` / `stdout` 都按题目包的 fd 表裁剪。
+ * 4. `roles` 只有 `sp` / `bp` / `ip` 三个寄存器**名字**，逐个字段拷贝：它是「固定的已知信息」
+ *    （04 §4、01 §6 第 2 条），不是私有内容的通道，所以绝不把私有包整个带出去。
  *
  * 返回值一律过一遍 `ProjectionSchema`：契约由 shared 定义，这里不自己造形状。
  */
@@ -47,6 +50,17 @@ export interface ProjectionContext {
   readonly hasStdout: boolean;
   /** 出题人给错误码写的补充说明，作为投影错误的 `note`。 */
   readonly errorNotes: Readonly<Record<string, string>>;
+  /**
+   * 角色寄存器名，随投影下发（04 §4、09 §4）。
+   *
+   * 来源是私有包的 `roles`，但它是**固定的已知信息**（布局与命名公开、内容隐藏，01 §6 第 2 条）：
+   * 不下发的话前端只能硬编码 `RSP` / `RBP` / `RIP`，32 位题目与自定义命名就标不出栈 / 帧 / 指令指针。
+   * 它**不进 `public.json`**：出题人已在私有包声明一次，公开包再声明一次只会漂移。
+   *
+   * 预取一次即可：题目加载后它就固定，且这里的对象是**新构造**的（逐字段白名单），
+   * 不与私有包共享引用，避免调用方无意中改到私有包。
+   */
+  readonly roles: Roles;
 }
 
 interface Range {
@@ -62,6 +76,12 @@ export function createProjectionContext(runtime: EngineRuntime): ProjectionConte
     hasStdin: fds.some((fd) => fd.kind === 'stdin'),
     hasStdout: fds.some((fd) => fd.kind === 'stdout'),
     errorNotes: runtime.publicPkg.errorNotes ?? {},
+    // 逐字段白名单：只取三个寄存器名，私有包的 `flag` / `win` / `fail` / `files` 一概不进来。
+    roles: {
+      sp: runtime.privatePkg.roles.sp,
+      bp: runtime.privatePkg.roles.bp,
+      ip: runtime.privatePkg.roles.ip,
+    },
   };
 }
 
@@ -223,6 +243,8 @@ export function projectState(ctx: ProjectionContext, state: VmState, failures: n
     steps: state.steps,
     failures: failureCount(failures),
     registers: registersOf(ctx, state),
+    // 每次返回新对象：投影之间、投影与上下文之间都不共享引用。
+    roles: { sp: ctx.roles.sp, bp: ctx.roles.bp, ip: ctx.roles.ip },
     flags: { ZF: state.flags.ZF, CF: state.flags.CF, SF: state.flags.SF },
     vmas: vmaViews(ctx, state),
     ...stdioOf(ctx, state),
@@ -241,6 +263,9 @@ function projectFrame(
 ): ReplayFrameView {
   const state = frame.state;
   const lastStop = lastStopOf(state);
+  // 帧自己的 `error` 优先：被拒绝的动作（`action_not_allowed` / `unknown_action`）只拒绝动作、
+  // 不写 `state.error`，丢掉它前端就看不出这一帧为什么停下（08 §9.2）。运行期异常的帧两者一致。
+  const error = frame.error ?? state.error;
   return ReplayFrameSchema.parse({
     index,
     label: frame.label,
@@ -253,7 +278,7 @@ function projectFrame(
     changedVmas: [...changedVmas],
     ...stdioOf(ctx, state),
     ...(lastStop === undefined ? {} : { lastStop }),
-    ...(state.error === undefined ? {} : { error: describeVmError(ctx, state.error) }),
+    ...(error === undefined ? {} : { error: describeVmError(ctx, error) }),
   });
 }
 

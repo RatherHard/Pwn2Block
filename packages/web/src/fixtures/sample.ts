@@ -15,13 +15,9 @@ import {
   ret2winPublic,
   type PublicChallenge,
   type Projection,
-  type Roles,
 } from '@pwn2block/shared';
 
 export const SAMPLE_ARCH_BITS = 64;
-
-/** 前端需要 `roles` 才能标 `sp` / `bp` / `ip`，但 `roles` 只在私有包里（见交接报告的契约缺口）。 */
-export const SAMPLE_ROLES: Roles = { sp: 'RSP', bp: 'RBP', ip: 'RIP' };
 
 export const SAMPLE_PUBLIC_CHALLENGE: PublicChallenge = ret2winPublic;
 
@@ -121,6 +117,8 @@ export const SAMPLE_PROJECTION_START: Projection = ProjectionSchema.parse({
     { name: 'RIP', value: '0x400000' },
     { name: 'FLAG', value: '0x0' },
   ],
+  /** 角色随投影下发（08 §9.2）：样例数据里写一次，视图与测试都从这里取。 */
+  roles: { sp: 'RSP', bp: 'RBP', ip: 'RIP' },
   flags: { ZF: false, CF: false, SF: false },
   vmas: [
     TEXT_VMA,
@@ -143,6 +141,8 @@ export const SAMPLE_PROJECTION_AFTER: Projection = ProjectionSchema.parse({
     { name: 'RIP', value: '0x400002' },
     { name: 'FLAG', value: '0x0' },
   ],
+  /** 角色随投影下发（08 §9.2）：样例数据里写一次，视图与测试都从这里取。 */
+  roles: { sp: 'RSP', bp: 'RBP', ip: 'RIP' },
   flags: { ZF: false, CF: false, SF: false },
   vmas: [
     TEXT_VMA,

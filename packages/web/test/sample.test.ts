@@ -5,7 +5,6 @@ import {
   SAMPLE_PROJECTION_START,
   SAMPLE_PROJECTIONS,
   SAMPLE_PUBLIC_CHALLENGE,
-  SAMPLE_ROLES,
 } from '../src/fixtures/sample';
 
 describe('D1 样例投影（05 §2.2–2.5）', () => {
@@ -40,8 +39,18 @@ describe('D1 样例投影（05 §2.2–2.5）', () => {
     expect(text?.perm).toBe('rx');
     expect(stack?.start).toBe('0x7fffe000');
     expect(stack?.size).toBe('0x2000');
-    expect(SAMPLE_ROLES.sp).toBe('RSP');
+    expect(SAMPLE_PROJECTION_START.roles).toEqual({ sp: 'RSP', bp: 'RBP', ip: 'RIP' });
     expect(SAMPLE_PUBLIC_CHALLENGE.labels?.length).toBe(3);
+  });
+
+  it('角色随投影下发，且都指向投影里真实存在的寄存器（不再有前端硬编码的那一份）', () => {
+    for (const projection of SAMPLE_PROJECTIONS) {
+      const names = new Set(projection.registers.map((item) => item.name));
+      for (const name of Object.values(projection.roles)) {
+        expect(names.has(name)).toBe(true);
+      }
+    }
+    expect(SAMPLE_PROJECTION_START.roles).toEqual(SAMPLE_PROJECTION_AFTER.roles);
   });
 
   it('disasm 的字节与 text 内容逐字节一致（前端不解码，只对齐展示）', () => {

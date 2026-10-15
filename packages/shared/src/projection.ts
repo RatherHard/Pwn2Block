@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RolesSchema } from './challenge';
 import { ErrorCodeSchema, InstanceStatusSchema, StopReasonSchema } from './errors';
 import { HexBytesSchema, HexSchema } from './hex';
 import {
@@ -75,6 +76,17 @@ export const ProjectionSchema = z.object({
   /** 被拒绝 + 失败的动作计数，单调递增，用于解锁提示（04 §3）。 */
   failures: z.number().int().min(0),
   registers: z.array(RegisterViewSchema),
+  /**
+   * 角色寄存器（`sp` / `bp` / `ip`）**随投影下发**（D1 契约决策，08 §9.2）。
+   *
+   * 它来自私有包的 `roles`，但它是「固定的东西」而不是运行时未知量（01 §6 第 2 条）：
+   * 布局与命名公开、内容隐藏。不下发的话前端只能自己猜 `RSP` / `RBP` / `RIP`，
+   * 32 位题目（`ESP / EBP / EIP`）与自定义命名的题目就标不出栈指针、帧指针和指令指针。
+   *
+   * 它**不放进 `public.json`**：出题人已经在私有包里声明一次，公开包再声明一次只会漂移。
+   * 服务端从私有包取值后随投影下发，前端不读私有包。
+   */
+  roles: RolesSchema,
   flags: FlagsViewSchema,
   vmas: z.array(VmaViewSchema),
   /** 题目未声明 stdin 时省略（04 §4）。 */

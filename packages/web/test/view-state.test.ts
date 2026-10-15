@@ -25,7 +25,7 @@ import {
   slotKinds,
   toggleView,
 } from '../src/viewmodel/views';
-import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START } from '../src/fixtures/sample';
+import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START, SAMPLE_PUBLIC_CHALLENGE } from '../src/fixtures/sample';
 import { makeProjection } from './helpers';
 
 describe('视图管理器状态（05 §2.1）', () => {
@@ -95,8 +95,15 @@ describe('视图管理器状态（05 §2.1）', () => {
     expect(focusSlot(state, 0)).toBe(state);
   });
 
-  it('I/O 视图只在题目声明 stdin / stdout 后出现（05 §2.6）', () => {
-    expect(availableViews(SAMPLE_PROJECTION_START)).toEqual(['stack', 'disasm', 'registers', 'memory']);
+  it('I/O 视图按公开包的出现条件判定（05 §2.6）：rt2win 声明了 syscalls，所以有', () => {
+    expect(availableViews(SAMPLE_PROJECTION_START, SAMPLE_PUBLIC_CHALLENGE)).toEqual([
+      'stack',
+      'disasm',
+      'registers',
+      'memory',
+      'io',
+    ]);
+    // 兼容分支：调用方只有投影时，投影里已有 I/O 状态也算数。
     const withIo = makeProjection({ stdin: { hex: '4141', pos: 0 } });
     expect(availableViews(withIo)).toContain('io');
   });

@@ -6,7 +6,7 @@
  * - 「视图」菜单勾选改的是 `shown`（顺序仍按 `order`）；
  * - 所有函数返回新对象，不改动入参。
  */
-import type { Projection } from '@pwn2block/shared';
+import type { Projection, PublicChallenge } from '@pwn2block/shared';
 
 export const VIEW_KINDS = ['stack', 'disasm', 'registers', 'memory', 'io'] as const;
 export type ViewKind = (typeof VIEW_KINDS)[number];
@@ -41,10 +41,21 @@ export interface ViewManagerState {
   readonly activeSlot: number;
 }
 
-/** 题目声明了 stdin / stdout 时才有 I/O 视图（05 §2.6）。 */
-export function availableViews(projection: Projection): readonly ViewKind[] {
+/**
+ * 有哪些视图可用。
+ *
+ * `io` 的出现条件按 05 §2.6：**题目声明了 `syscalls` 或 `fds`**——公开包是唯一判定输入
+ * （所以要传 `challenge`）。只声明 `syscalls`、没有 fd 的题目同样出现 I/O 视图（至少给速查表），
+ * 只看 `projection.stdin / stdout` 会漏掉这种情况。
+ *
+ * 保留“投影里已经有 I/O 状态就算数”的兼容分支：调用方拿不到公开包时（例如回放旧帧）
+ * 也不会把明明有 stdin / stdout 的题目判成没有 I/O 视图。
+ */
+export function availableViews(projection: Projection, challenge?: PublicChallenge): readonly ViewKind[] {
   const kinds: ViewKind[] = ['stack', 'disasm', 'registers', 'memory'];
-  if (projection.stdin !== undefined || projection.stdout !== undefined) kinds.push('io');
+  const declares = challenge !== undefined && (challenge.syscalls !== undefined || challenge.fds !== undefined);
+  const hasStreams = projection.stdin !== undefined || projection.stdout !== undefined;
+  if (declares || hasStreams) kinds.push('io');
   return kinds;
 }
 

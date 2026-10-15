@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { diffProjections } from '../src/viewmodel/diff';
 import { FLAG_DESCRIPTIONS, buildRegisterRows, flagRow } from '../src/viewmodel/registers';
-import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START, SAMPLE_ROLES } from '../src/fixtures/sample';
+import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START } from '../src/fixtures/sample';
 import { hexOf, makeProjection, makeVma } from './helpers';
 
 const LABELS = [
@@ -14,7 +14,7 @@ describe('寄存器视图行投影（05 §2.4）', () => {
     const rows = buildRegisterRows({
       projection: SAMPLE_PROJECTION_START,
       archBits: 64,
-      roles: SAMPLE_ROLES,
+      roles: SAMPLE_PROJECTION_START.roles,
     });
     expect(rows.registers.map((row) => row.name)).toEqual(['RAX', 'RDI', 'RSP', 'RBP', 'RIP', 'FLAG']);
     expect(rows.registers.find((row) => row.name === 'RSP')?.role).toBe('sp');
@@ -24,11 +24,8 @@ describe('寄存器视图行投影（05 §2.4）', () => {
   });
 
   it('值按位宽定宽显示，并给出十进制', () => {
-    const rows = buildRegisterRows({
-      projection: makeProjection({ registers: { RAX: '0x63', RSP: '0x0', RBP: '0x0', RIP: '0x0' } }),
-      archBits: 64,
-      roles: SAMPLE_ROLES,
-    });
+    const projection = makeProjection({ registers: { RAX: '0x63', RSP: '0x0', RBP: '0x0', RIP: '0x0' } });
+    const rows = buildRegisterRows({ projection, archBits: 64, roles: projection.roles });
     expect(rows.registers[0]?.hex).toBe('0x0000000000000063');
     expect(rows.registers[0]?.decimal).toBe('99');
   });
@@ -37,7 +34,7 @@ describe('寄存器视图行投影（05 §2.4）', () => {
     const rows = buildRegisterRows({
       projection: SAMPLE_PROJECTION_START,
       archBits: 64,
-      roles: SAMPLE_ROLES,
+      roles: SAMPLE_PROJECTION_START.roles,
       labels: LABELS,
     });
     expect(rows.registers.find((row) => row.name === 'RSP')).toMatchObject({
@@ -57,7 +54,7 @@ describe('寄存器视图行投影（05 §2.4）', () => {
         makeVma({ id: 'key', kind: 'key', start: '0x80000000', hidden: true }),
       ],
     });
-    const hiddenRow = buildRegisterRows({ projection: withKey, archBits: 64, roles: SAMPLE_ROLES }).registers[0];
+    const hiddenRow = buildRegisterRows({ projection: withKey, archBits: 64, roles: withKey.roles }).registers[0];
     expect(hiddenRow).toMatchObject({
       targetKind: 'hidden',
       targetText: '隐藏 VMA「key」（内容未下发）',
@@ -69,7 +66,7 @@ describe('寄存器视图行投影（05 §2.4）', () => {
     const rows = buildRegisterRows({
       projection: SAMPLE_PROJECTION_AFTER,
       archBits: 64,
-      roles: SAMPLE_ROLES,
+      roles: SAMPLE_PROJECTION_AFTER.roles,
       diff,
     });
     const changed = rows.registers.filter((row) => row.changed).map((row) => row.name);
@@ -79,7 +76,7 @@ describe('寄存器视图行投影（05 §2.4）', () => {
   it('标志位显示值与变化，并带中文说明', () => {
     const projection = makeProjection({ flags: { ZF: true, CF: false, SF: true } });
     const diff = diffProjections(makeProjection({ flags: { ZF: false, CF: false, SF: false } }), projection);
-    const rows = buildRegisterRows({ projection, archBits: 64, roles: SAMPLE_ROLES, diff });
+    const rows = buildRegisterRows({ projection, archBits: 64, roles: projection.roles, diff });
     expect(rows.flags.map((flag) => flag.name)).toEqual(['ZF', 'CF', 'SF']);
     expect(rows.flags.map((flag) => flag.value)).toEqual([true, false, true]);
     expect(rows.flags.map((flag) => flag.changed)).toEqual([true, false, true]);

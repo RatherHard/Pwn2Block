@@ -8,7 +8,7 @@ import {
 } from '../src/viewmodel/stack';
 import { diffProjections } from '../src/viewmodel/diff';
 import { alignDown } from '../src/viewmodel/format';
-import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START, SAMPLE_ROLES } from '../src/fixtures/sample';
+import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START } from '../src/fixtures/sample';
 import { hexOf, makeProjection, makeVma } from './helpers';
 
 const BASE = 64;
@@ -17,7 +17,7 @@ function startRows(overrides: Partial<Parameters<typeof buildStackRows>[0]> = {}
   return buildStackRows({
     projection: SAMPLE_PROJECTION_START,
     archBits: BASE,
-    roles: SAMPLE_ROLES,
+    roles: SAMPLE_PROJECTION_START.roles,
     labels: [
       { name: 'buf', addr: '0x7fffff00', size: 16, kind: 'buffer' },
       { name: 'saved rbp', addr: '0x7fffff10', size: 8, kind: 'saved_bp' },
@@ -71,7 +71,7 @@ describe('栈视图行投影（05 §2.2）', () => {
       registers: { RSP: '0x90000000', RBP: '0x90000010', RIP: '0x400000', RAX: '0x0' },
       vmas: [makeVma({ id: 'text', kind: 'code', start: '0x400000', perm: 'rx', hex: hexOf(0x1000, { 0: 'c9' }) })],
     });
-    const rows = buildStackRows({ projection, archBits: BASE, roles: SAMPLE_ROLES, rowCount: 2 });
+    const rows = buildStackRows({ projection, archBits: BASE, roles: projection.roles, rowCount: 2 });
     expect(rows[0]?.state).toBe('unmapped');
     expect(rows[0]?.cells.every((cell) => cell.text === '')).toBe(true);
     expect(rows[0]?.ascii).toBeUndefined();
@@ -100,7 +100,7 @@ describe('栈视图行投影（05 §2.2）', () => {
     const rows = buildStackRows({
       projection: SAMPLE_PROJECTION_AFTER,
       archBits: BASE,
-      roles: SAMPLE_ROLES,
+      roles: SAMPLE_PROJECTION_AFTER.roles,
       labels: [{ name: 'buf', addr: '0x7fffff00', size: 16, kind: 'buffer' }],
     });
     const bufRow = rows.find((row) => row.addr === 0x7fffff00n);
@@ -118,7 +118,7 @@ describe('栈视图行投影（05 §2.2）', () => {
     const rows = buildStackRows({
       projection: SAMPLE_PROJECTION_AFTER,
       archBits: BASE,
-      roles: SAMPLE_ROLES,
+      roles: SAMPLE_PROJECTION_AFTER.roles,
       diff,
     });
     const retRow = rows.find((row) => row.addr === 0x7fffff18n);

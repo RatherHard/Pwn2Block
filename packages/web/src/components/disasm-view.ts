@@ -10,6 +10,7 @@ import { parseHex } from '@pwn2block/shared';
 import { buildDisasmRows, findDisasmRow, type DisasmRowModel } from '../viewmodel/disasm';
 import { formatAddrShort } from '../viewmodel/format';
 import { funcLabels } from '../viewmodel/labels';
+import { roleValue } from '../viewmodel/roles';
 import { sharedStyles, terminalTheme } from '../theme';
 import type { ViewContext } from './view-context';
 
@@ -157,10 +158,10 @@ export class Pwn2BlockDisasmView extends LitElement {
     });
   }
 
+  /** `ip` 行高亮的值：只认上下文里的角色映射（等于 `projection.roles`，08 §9.2），不猜 `RIP`。 */
   private ipValue(): bigint | undefined {
     if (this.context === undefined) return undefined;
-    const found = this.context.projection.registers.find((item) => item.name === this.context.roles.ip);
-    return found === undefined ? undefined : parseHex(found.value);
+    return roleValue(this.context.projection, this.context.roles, 'ip');
   }
 
   // 点击目标行后要高亮并滚入视野：内部状态不是响应式属性，改完显式请求重绘。

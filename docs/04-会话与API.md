@@ -98,6 +98,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `steps` | 已执行指令数 |
 | `failures` | 被拒绝 + 失败的动作计数，用于解锁提示 |
 | `registers` | 全部寄存器，按题目包声明顺序的 `[{name, value}]`，值为 hex 字符串 |
+| `roles` | `{sp, bp, ip}`：题目包在 `private.json` 声明的角色寄存器名。它是**固定的已知信息**（布局与命名公开，01 §6 第 2 条），服务端从私有包取值后随投影下发，前端据此标栈指针 / 帧指针 / 指令指针，不自己猜 `RSP`/`RBP`/`RIP`，也不读私有包 |
 | `flags` | `{ZF, CF, SF}`，布尔值 |
 | `vmas[]` | 全部 VMA 的布局 `{id, kind, label, start, size, perm, hidden}`；仅非隐藏的带 `hex` |
 | `stdin` | `{hex, pos}`：已 `feed` 的全部字节和当前读位置。题目未声明 stdin 时省略 |
@@ -112,6 +113,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 - 题目加载时校验可见字节总量上限（建议 256KB），保证全量投影代价可控。
 - 被 `reveal` 的 VMA 在投影里变为 `hidden: false` 并带上 `hex`。
 - 隐藏 VMA 的内容、虚拟文件内容、`win`/`fail` 永不出现在任何响应中。它们只能经由程序执行“获取”，见 02 §3。
+- `roles` 只在 `private.json` 声明一次，不在 `public.json` 重复声明：避免出题人两处维护产生漂移。
 - 断点没了之后 `limit` 从边缘情况变成常态：“运行 N 步”正常停下来就是这个原因。
 
 ## 5. REST API
