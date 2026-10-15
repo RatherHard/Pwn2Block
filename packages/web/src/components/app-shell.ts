@@ -14,7 +14,7 @@
  * 它自己负责把事件接对、把 `aria-live` 播报区放对。
  */
 import { LitElement, css, html } from 'lit';
-import type { Projection, PublicChallenge } from '@pwn2block/shared';
+import type { Hint, Projection, PublicChallenge } from '@pwn2block/shared';
 import { createApiClient, type ApiClient } from '../api';
 import { createViewContext } from '../viewmodel/context';
 import {
@@ -51,6 +51,9 @@ interface ActiveView {
   readonly previous?: Projection;
   readonly disasmNotice?: string;
 }
+
+/** 题目没声明提示时的稳定空表：避免每次渲染都新建数组，让子组件的属性判定不抖动。 */
+const EMPTY_HINTS: readonly Hint[] = [];
 
 export class Pwn2BlockApp extends LitElement {
   static override styles = [
@@ -236,9 +239,11 @@ export class Pwn2BlockApp extends LitElement {
         ? ''
         : html`<div class="briefing">
             <pwn2block-briefing-panel
+              .challengeId=${challenge.id}
               .challengeTitle=${challenge.title}
               .briefing=${challenge.briefing}
-              .hintCount=${(challenge.hints ?? []).length}
+              .hints=${challenge.hints ?? EMPTY_HINTS}
+              .failures=${state.page?.projection.failures ?? 0}
             ></pwn2block-briefing-panel>
           </div>`}
       ${this.renderNotice(state)} ${mode === 'verdict' ? this.renderVerdict(state) : ''} ${this.renderBody(state)}

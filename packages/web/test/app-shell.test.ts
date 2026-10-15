@@ -277,4 +277,20 @@ describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
     expect(step?.disabled).toBe(true);
     expect(textOf(runMenuOf(app))).toContain('回到调试');
   });
+
+  it('题面面板拿到题目的 hints 与调试实例的 failures：达标条目自动解锁（05 §5）', async () => {
+    // failures 是调试实例的：判题结果模式里也不许拿录像的帧去覆盖它（05 §5、§6）。
+    const api = createFakeApi({
+      projection: makeProjection({ status: 'satisfied', failures: 3, lastStop: { reason: 'step' } }),
+    });
+    const { app } = await mountApp(api);
+
+    const panel = app.renderRoot.querySelector('pwn2block-briefing-panel');
+    const root = shadowOf(panel);
+    expect(root).toBeDefined();
+    // ret2win 的第 3 条提示带 unlockAfterFailures: 3：failures 达标 ⇒ 三条一起揭示。
+    expect(root?.querySelectorAll('li .text')).toHaveLength(3);
+    expect(root?.querySelectorAll('.tag')).toHaveLength(3);
+    expect(root?.querySelector('[role="status"]')?.textContent).toContain('自动解锁第 1、2、3 条提示');
+  });
 });

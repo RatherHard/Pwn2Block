@@ -534,6 +534,18 @@ describe('会话控制器：提交与「回到调试」（05 §6）', () => {
     await until(() => api.calls.filter((call) => call.method === 'submit').length === 2, '可以再提交一次');
   });
 
+  it('判题录像只是判题模式的数据源：拖时间线不碰调试实例的投影（05 §5/§6）', async () => {
+    const { controller, debugProjection } = await submitted();
+    // 提交不改动调试实例，切到判题结果也不许用录像覆盖它——恢复路径的地基。
+    expect(controller.state.page?.mode).toBe('verdict');
+    expect(controller.state.page?.projection).toBe(debugProjection);
+
+    controller.selectPosition(1);
+    controller.selectPosition(0);
+    expect(controller.state.verdict?.position).toBe(0);
+    expect(controller.state.page?.projection).toBe(debugProjection);
+  });
+
   it('「回到调试」恢复提交前的调试状态，视图显隐保持不变', async () => {
     const { controller, debugProjection } = await submitted();
     const before = controller.state;
