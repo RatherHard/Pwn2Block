@@ -373,6 +373,25 @@ describe('stepOnce：异常映射与“不留半截效果”', () => {
     expect(outcome.executed).toBe(0);
     expect(outcome.stop).toBe('exit');
   });
+
+  it('已退出但 status 是 satisfied 的实例也不再执行（判胜那一刻程序已经结束）', () => {
+    // syscall win：置 FLAG 并退出 → 同时满足 win 与「已退出」，status 记 satisfied。
+    const { env, state } = start(code(0x1b, 0xee));
+    const won = stepOnce(env, state);
+    expect(won.state.status).toBe('satisfied');
+    expect(won.state.lastStop).toEqual({ reason: 'exit', addr: 0x1000n });
+    expect(reg(won.state, 'FLAG')).toBe(1n);
+
+    // 修复点：判据是 `isExited` 而不是 `status === 'exited'`，这里必须停，不能再取指 0xee。
+    const blocked = stepOnce(env, won.state);
+    expect(blocked.executed).toBe(0);
+    expect(blocked.stop).toBe('exit');
+    expect(blocked.state.status).toBe('satisfied');
+    expect(blocked.state.error).toBeUndefined();
+    expect(blocked.state.steps).toBe(1);
+    expect(reg(blocked.state, 'RIP')).toBe(0x1001n);
+    expect(reg(blocked.state, 'FLAG')).toBe(1n);
+  });
 });
 
 describe('stepOnce：syscall', () => {

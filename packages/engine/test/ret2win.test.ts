@@ -75,6 +75,38 @@ describe('ret2win 参考解法：端到端判胜', () => {
     ]);
   });
 
+  it('参考解法末尾多接两个 step 积木仍然判胜：判胜那一刻程序已退出，后续动作不执行', () => {
+    const env = makeEnv();
+    const payload = [
+      ...ret2winSolutionActions,
+      { type: 'step', count: 1 },
+      { type: 'step', count: 1 },
+    ] as Action[];
+    const outcome = replaySubmit(env, payload);
+
+    // 修复前：多出来的 step 会继续取指撞上 `invalid_instruction`，verdict 变成 failed。
+    expect(outcome.verdict).toBe('won');
+    expect(outcome.executed).toBe(2);
+    expect(outcome.results).toEqual([
+      { ok: true, action: 'block' },
+      { ok: true, action: 'step' },
+    ]);
+    expect(outcome.frames.map((frame) => frame.label)).toEqual([
+      'init',
+      'block',
+      'leave',
+      'ret',
+      'syscall win',
+      'step',
+    ]);
+    expect(outcome.finalState.status).toBe('satisfied');
+    expect(outcome.finalState.error).toBeUndefined();
+    expect(outcome.finalState.lastStop).toEqual({ reason: 'exit', addr: 0x400002n });
+    expect(outcome.finalState.steps).toBe(3);
+    expect(readRegister(outcome.finalState, 'FLAG')).toBe(1n);
+    expect(readRegister(outcome.finalState, 'RIP')).toBe(0x400003n);
+  });
+
   it('调试实例里同一个 payload 只提示 satisfied，不发 flag', () => {
     const env = makeEnv();
     const instance = createDebugInstance(env);

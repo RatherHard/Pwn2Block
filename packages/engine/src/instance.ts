@@ -18,7 +18,7 @@ import { createInitialState } from './env';
 import type { StepHooks } from './execute';
 import type { SnapshotApi, VmStateSnapshot } from './snapshots/index';
 import { createSnapshotApi } from './snapshots/index';
-import { forkState, withMemory } from './state';
+import { forkState, isExited, withMemory } from './state';
 import { rejectError } from './vm-errors';
 
 /**
@@ -268,7 +268,8 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
         if (!isControlAction(action)) failureCount += 1;
         break;
       }
-      if (current.status === 'exited') break;
+      // 程序已退出（含 `satisfied` + `exit` 的判胜态）：后续动作不执行（04 §1.1、§5）。
+      if (isExited(current)) break;
     }
 
     // 交给调用方的状态必须能安全长期持有：fork 内存句柄，后续请求不会改到它。

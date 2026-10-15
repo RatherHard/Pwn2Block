@@ -30,7 +30,8 @@
 | `failed` | 运行时异常，或命中失败条件 |
 | `exited` | 程序已结束但未满足成功条件 |
 
-- 处于 `failed` 或 `exited` 时，执行类动作被拒绝，回退类动作仍可用。`satisfied` 不限制任何动作：满足成功条件后仍可继续写内存或执行，只有 `failed` / `exited` 会中断后续动作。
+- 处于 `failed` 或程序**已退出**时，执行类动作被拒绝，回退类动作仍可用。`satisfied` **本身**不限制任何动作：满足成功条件后仍可继续写内存或执行。
+  - 「已退出」看的是 `lastStop.reason === 'exit'`（引擎的 `isExited()`），不是 `status` 字段：程序正常退出后如果同时满足成功条件，`status` 会显示 `satisfied`，但已退出这个事实不能被抹掉，否则退出之后还能继续执行、撞上一条非法指令就把判胜的 payload 判成 `failed`。
 - `executed` 的计数口径：`step` / `run` 的结果里是指令数；`actions` / `submit` 响应里是**实际生效的动作数**（被拒绝的不计，一个 `block` 算一个动作）。
 - 调试实例里没有 `won`：判胜只属于判题实例，它不是一个可停留的会话状态，而是一次提交的结果。
 
@@ -130,7 +131,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 
 `actions` 批量接口（调试实例）：
 
-- 按顺序执行，遇到第一个被拒绝的动作或进入 `failed`/`exited` 即停止，后续动作不执行。
+- 按顺序执行，遇到第一个被拒绝的动作、进入 `failed` 或程序**已退出**（同样看 `isExited()`）即停止，后续动作不执行。
 - 单批动作数上限是 `MAX_ACTIONS_PER_REQUEST`（512），比 `submit` 的 `MAX_SUBMIT_ACTIONS`（4096）小：程序区动作更多时，前端按 512 分片**串行**发送，并在客户端跨片保持「遇到第一个拒绝或终态就停」的语义（[05](05-前端交互.md) §3）。
 - 返回 `{results: [{ok, action, error?}], executed, projection, history}`，`executed` 为实际执行的动作数。
 - 整批只压一份请求层快照，见 §3。
@@ -144,7 +145,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 服务端的处理是一个纯函数，不受调试实例影响：
 
 1. 判题实例重置到题目初始状态。
-2. 按顺序回放 `actions`。任一动作被拒绝即终止。
+2. 按顺序回放 `actions`。任一动作被拒绝、进入 `failed` 或程序已退出即终止（§1.1）。
 3. 按 `win` / `fail` 判定，`fail` 优先。
 
 返回 `{verdict, executed, results, replay, flag?}`：

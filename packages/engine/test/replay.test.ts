@@ -72,17 +72,53 @@ describe('replaySubmit：计数与帧', () => {
     expect(outcome.frames).toHaveLength(4);
   });
 
-  it('satisfied 不限制动作（04 §1.1）：置 FLAG 后的写动作照常执行', () => {
-    const kit = testKit({ code: code(0x1b) });
+  it('satisfied 且未退出不限制动作（04 §1.1）：置 FLAG 后的写动作照常执行', () => {
+    // `mark` 只置 FLAG、不退出，所以停在 `satisfied` 且没有 `lastStop`。
+    const kit = testKit({
+      code: code(0x1b),
+      syscalls: [
+        {
+          nr: 99,
+          name: 'mark',
+          kind: 'custom',
+          doc: '置 FLAG=1，不退出',
+          effects: [{ type: 'set_reg', reg: 'FLAG', value: '0x1' }],
+        },
+      ],
+    });
     const outcome = replaySubmit(kit.env, [
-      { type: 'step', count: 3 },
+      { type: 'step', count: 1 },
       { type: 'write_bytes', addr: '0x2000', hex: 'ff' },
     ]);
     expect(outcome.verdict).toBe('won');
     expect(outcome.executed).toBe(2);
     expect(outcome.results).toHaveLength(2);
     expect(outcome.finalState.status).toBe('satisfied');
+    expect(outcome.finalState.lastStop).toBeUndefined();
+    expect(outcome.finalState.error).toBeUndefined();
     expect(memoryHex(kit.memory, outcome.finalState.memory, 0x2000n, 1)).toBe('ff');
+  });
+
+  it('satisfied + 已退出：判胜那一刻程序已结束，后续动作不执行、不再撞非法指令', () => {
+    // syscall win 置 FLAG 并退出，紧接着是非法字节 0xee；多出来的两个 step 若还执行，
+    // 就会以 `invalid_instruction` 把已经判胜的 payload 判成 failed。
+    const kit = testKit({ code: code(0x1b, 0xee) });
+    const outcome = replaySubmit(kit.env, [
+      { type: 'step', count: 1 },
+      { type: 'step', count: 1 },
+      { type: 'step', count: 1 },
+    ]);
+
+    expect(outcome.verdict).toBe('won');
+    expect(outcome.executed).toBe(1);
+    expect(outcome.results).toEqual([{ ok: true, action: 'step' }]);
+    expect(outcome.frames.map((frame) => frame.label)).toEqual(['init', 'syscall win', 'step']);
+    expect(outcome.finalState.status).toBe('satisfied');
+    expect(outcome.finalState.error).toBeUndefined();
+    expect(outcome.finalState.lastStop).toEqual({ reason: 'exit', addr: 0x1000n });
+    expect(outcome.finalState.steps).toBe(1);
+    expect(readRegister(outcome.finalState, 'FLAG')).toBe(1n);
+    expect(readRegister(outcome.finalState, 'RIP')).toBe(0x1001n);
   });
 
   it('exited 中断后续动作：第二个动作不再被处理', () => {

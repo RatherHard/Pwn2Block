@@ -131,7 +131,13 @@ export function isExited(state: VmState): boolean {
   return state.status === 'exited' || state.lastStop?.reason === 'exit';
 }
 
-/** `failed` / `exited` 是终止态：执行类动作被拒绝，回退类动作仍可用（04 §1.1）。 */
+/**
+ * 终止态：`failed`，或**程序已退出**（`status` 可能是 `exited`，也可能是 `satisfied`——
+ * 退出那一刻同时满足成功条件时就是后者）。两者都拒绝执行类动作，回退类动作仍可用（04 §1.1）。
+ *
+ * 判据用 `isExited` 而不是 `status === 'exited'`：程序已经结束之后不该再取指执行，
+ * 否则下一条字节会以 `invalid_instruction` 把已经判胜的 payload 判成失败。
+ */
 export function isTerminal(state: VmState): boolean {
-  return state.status === 'failed' || state.status === 'exited';
+  return state.status === 'failed' || isExited(state);
 }

@@ -109,7 +109,8 @@ function judge(env: EngineEnv, state: VmState, ip: bigint): { state: VmState; st
  */
 export function stepOnce(env: EngineEnv, state: VmState, hooks?: StepHooks): StepOutcome {
   if (state.status === 'failed') return outcomeOf(state, 0, 'exception');
-  if (state.status === 'exited') return outcomeOf(state, 0, 'exit');
+  // 已退出就是终止态：`satisfied` + `lastStop.reason === 'exit'` 也要停（判胜那一刻程序已经结束）。
+  if (isExited(state)) return outcomeOf(state, 0, 'exit');
 
   const working = forkState(env.memory, state);
   const ip = readRegister(working, env.roles.ip) & env.mask;

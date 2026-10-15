@@ -235,7 +235,7 @@
 | 引擎编码表入口 | `createRuntime(pub, priv, options?)`，引用 preset 的题目必须传展开后的编码表 / 查询表（引擎不读文件与环境） | 09 §3.3、`vm.ts` |
 | 退出码 | `VmState.exitCode?` 属于 VM 快照的一部分（跨退出回退不许留过期退出码） | 02 §7、09 §7 |
 | 内存句柄可变性 | `write`/`copy` 靠换页表指针生效；要留住某一时刻必须 `restore(snapshot(...))` fork，历史不得共享句柄 | `vm.ts`、09 §3.1 |
-| 动作语义 | `pop` 丢值只前移 sp、`call` 压当前 ip、fail 命中记 `exception` 无 error、`executed` 两种口径、`satisfied` 不限制动作 | 04 §2/§5、09 §7 |
+| 动作语义 | `pop` 丢值只前移 sp、`call` 压当前 ip、fail 命中记 `exception` 无 error、`executed` 两种口径、`satisfied` 不限制动作。**D3 更正**：`satisfied` 本身不限制动作，但「程序已退出」（`isExited()`）是终止态，与 `failed` 一样中断批量——D2 只写了「不限制动作」，漏了这条（见 09 §7 第 5 条、04 §1.1） | 04 §2/§5、09 §7 |
 | 编译上限 | 循环 256、表达式 4096（一次编译累计）、产物动作数复用 `MAX_SUBMIT_ACTIONS`；本轮不做列表与带返回值函数 | 05 §3.1/§4、09 §3.2 |
 | 服务端与引擎的判定分工 | `allowedActions` 只有一个判定点（引擎的提交动作筛查）；服务端不重复判定、不预展开积木 | 09 §3.3 |
 

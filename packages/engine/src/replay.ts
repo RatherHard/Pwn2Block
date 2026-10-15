@@ -14,7 +14,7 @@ import type { EngineEnv } from './env';
 import { createInitialState } from './env';
 import type { StepHooks } from './execute';
 import { evaluateVerdict, predicateContext } from './predicates';
-import { forkState } from './state';
+import { forkState, isExited } from './state';
 import { rejectError } from './vm-errors';
 
 /**
@@ -95,8 +95,8 @@ export function replaySubmit(env: EngineEnv, actions: readonly Action[]): Submit
     frames.push(frameOf('action', action.type, forkState(env.memory, current), outcome.error));
     executed += 1;
 
-    // 程序已退出：后续动作不再执行（判题实例不能交互）。
-    if (current.status === 'exited') break;
+    // 程序已退出（含 `satisfied` + `exit` 的判胜态）：后续动作不再执行（判题实例不能交互）。
+    if (isExited(current)) break;
     // 运行期异常即判负，不再继续。
     if (current.status === 'failed') break;
   }

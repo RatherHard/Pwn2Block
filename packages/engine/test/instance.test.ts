@@ -410,6 +410,119 @@ describe('applyRequest：failures 的口径（被拒绝 + 执行类动作推进�
   });
 });
 
+/**
+ * 真实引擎缺陷回归（04 §1.1 / §5）：**「已退出」是终止态**，判据是 `isExited(state)` 而不是
+ * `status === 'exited'`。判胜那一刻程序已经结束（`status` 记 `satisfied` + `lastStop.reason ===
+ * 'exit'`），这时再执行就会去取下一条字节，用 `invalid_instruction` 把已经判胜的 payload 判负。
+ */
+describe('applyRequest：程序退出后不再执行（含 satisfied 的判胜态）', () => {
+  it('win + exit 之后再 step：被拒（not_executable），状态仍是 satisfied，不再撞非法指令', () => {
+    // syscall win 置 FLAG 并退出，紧接着是非法字节 0xee。
+    const { instance } = start({ code: code(0x1b, 0xee) });
+
+    const won = instance.applyRequest([{ type: 'step', count: 1 }]);
+    expect(won.results).toEqual([{ ok: true, action: 'step' }]);
+    expect(won.state.status).toBe('satisfied');
+    expect(won.state.lastStop).toEqual({ reason: 'exit', addr: 0x1000n });
+    expect(won.state.error).toBeUndefined();
+    expect(readRegister(won.state, 'FLAG')).toBe(1n);
+    expect(won.failures).toBe(0);
+
+    const blocked = instance.applyRequest([{ type: 'step', count: 1 }]);
+    expect(blocked.results).toEqual([
+      { ok: false, action: 'step', error: { code: 'not_executable' } },
+    ]);
+    expect(blocked.executed).toBe(0);
+    expect(blocked.state.status).toBe('satisfied');
+    expect(blocked.state.error).toBeUndefined();
+    expect(blocked.state.steps).toBe(1);
+    expect(blocked.state.lastStop).toEqual({ reason: 'exit', addr: 0x1000n });
+    expect(readRegister(blocked.state, 'FLAG')).toBe(1n);
+    expect(readRegister(blocked.state, 'RIP')).toBe(0x1001n);
+    // 这一步是**被拒绝的动作**，按 04 §4 计一次失败（09 §8 第 1 条）；但它不改变任何状态。
+    expect(blocked.failures).toBe(1);
+    expect(instance.historyDepth()).toEqual({ undo: 1, stepBack: 1 });
+  });
+
+  it('win + exit 之后同一批里的后续动作不执行（批量在退出处停下）', () => {
+    const { env, instance } = start({ code: code(0x1b, 0xee) });
+    const outcome = instance.applyRequest([{ type: 'step', count: 1 }, WRITE_AA, WRITE_BB]);
+
+    expect(outcome.results).toEqual([{ ok: true, action: 'step' }]);
+    expect(outcome.executed).toBe(1);
+    expect(outcome.failures).toBe(0);
+    expect(outcome.state.status).toBe('satisfied');
+    expect(outcome.state.error).toBeUndefined();
+    expect(hexAt(env, instance, DATA_START, 2)).toBe('0000');
+  });
+
+  it('satisfied 但未退出仍可继续执行（04 §1.1 不变）：再 step 一次撞非法指令 → failed', () => {
+    // `mark` 只置 FLAG、不退出：status 是 satisfied，但“没退出”，所以执行类动作仍然可用。
+    const kit = testKit({
+      code: code(0x1b, 0xee),
+      syscalls: [
+        {
+          nr: 99,
+          name: 'mark',
+          kind: 'custom',
+          doc: '置 FLAG=1，不退出',
+          effects: [{ type: 'set_reg', reg: 'FLAG', value: '0x1' }],
+        },
+      ],
+    });
+    const instance = createDebugInstance(kit.env);
+
+    const satisfied = instance.applyRequest([{ type: 'step', count: 1 }]);
+    expect(satisfied.results).toEqual([{ ok: true, action: 'step' }]);
+    expect(satisfied.state.status).toBe('satisfied');
+    expect(satisfied.state.lastStop).toBeUndefined();
+    expect(satisfied.state.error).toBeUndefined();
+    expect(satisfied.failures).toBe(0);
+
+    const failed = instance.applyRequest([{ type: 'step', count: 1 }]);
+    expect(failed.results).toEqual([
+      {
+        ok: true,
+        action: 'step',
+        error: { code: 'invalid_instruction', addr: 0x1001n, detail: '未命中编码表的 opcode 0xee' },
+      },
+    ]);
+    expect(failed.state.status).toBe('failed');
+    expect(failed.state.steps).toBe(1);
+    expect(failed.failures).toBe(1);
+  });
+
+  it('判胜退出后回退类动作仍可用（04 §1.1）：step_back / reset 都能离开终止态', () => {
+    const { instance } = start({ code: code(0x1b, 0xee) });
+    const won = instance.applyRequest([{ type: 'step', count: 1 }]);
+    expect(won.state.status).toBe('satisfied');
+    expect(readRegister(won.state, 'FLAG')).toBe(1n);
+    expect(instance.historyDepth()).toEqual({ undo: 1, stepBack: 1 });
+
+    // 已退出是终止态，但不挡回退：退回判胜前那一步，寄存器与状态一起回来。
+    const back = instance.applyRequest([{ type: 'step_back' }]);
+    expect(back.results).toEqual([{ ok: true, action: 'step_back' }]);
+    expect(back.state.status).toBe('ready');
+    expect(back.state.error).toBeUndefined();
+    expect(back.state.steps).toBe(0);
+    expect(back.state.lastStop).toBeUndefined();
+    expect(readRegister(back.state, 'FLAG')).toBe(0n);
+    expect(readRegister(back.state, 'RIP')).toBe(0x1000n);
+    expect(back.failures).toBe(0);
+
+    // 退回之后又能执行：再走一次 syscall win，仍然判胜且不计失败。
+    const again = instance.applyRequest([{ type: 'step', count: 1 }]);
+    expect(again.state.status).toBe('satisfied');
+    expect(readRegister(again.state, 'FLAG')).toBe(1n);
+    expect(again.failures).toBe(0);
+
+    const reset = instance.applyRequest([{ type: 'reset' }]);
+    expect(reset.results).toEqual([{ ok: true, action: 'reset' }]);
+    expect(reset.state.status).toBe('ready');
+    expect(readRegister(reset.state, 'FLAG')).toBe(0n);
+  });
+});
+
 describe('applyRequest：回退到指令级', () => {
   it('step_back 回到上一条指令之前，且不压栈', () => {
     const { instance } = start({ code: code(0x90, 0x90) });
