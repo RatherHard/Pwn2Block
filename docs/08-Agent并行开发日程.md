@@ -351,7 +351,7 @@
 
 ### D4 / 日终
 
-- **基线提交**：D4 联调基线 `e466dc2 + e01fc9c + 07cf367`（§9.1）。D4 区间（`07cf367..cfe8838`）共 **47 个提交**，其中 **11 个 `--no-ff` 集成合并**、36 个 owner 提交，全部已提交、工作区干净。各 owner 分支与 tip：C04 `feat/c04-static-hosting`（`fa4af07` + 重写补齐 18 条的 `2645442`）、E03 `challenge/endian`（`e79ec1f`）、E04 `challenge/pushpop`（`ba23a9c`）、B/G `fix/engine-d4-defects`（`9238534` + `9ecf3b9`）、H `feat/h02-origin-mapping`（`59db7ed`/`8b16ec0`/`67b116b`/`ea8e7c1`）、D `fix/d02-exited-blindspots`（5 个，含 `e80aaf8`）、F02 `test/f02-acceptance-d4`（4 个）、F03 `test/f03-s06-publish`（`21d6399`）。
+- **基线提交**：D4 联调基线 `e466dc2 + e01fc9c + 07cf367`（§9.1）。D4 区间（`07cf367..c70b30f`）共 **50 个提交**，其中 **11 个 `--no-ff` 集成合并**、39 个非合并提交（各 owner 的实现/测试 + A 的收尾与文档），全部已提交、工作区干净。各 owner 分支与 tip：C04 `feat/c04-static-hosting`（`fa4af07` + 重写补齐 18 条的 `2645442`）、E03 `challenge/endian`（`e79ec1f`）、E04 `challenge/pushpop`（`ba23a9c`）、B/G `fix/engine-d4-defects`（`9238534` + `9ecf3b9`）、H `feat/h02-origin-mapping`（`59db7ed`/`8b16ec0`/`67b116b`/`ea8e7c1`）、D `fix/d02-exited-blindspots`（5 个，含 `e80aaf8`）、F02 `test/f02-acceptance-d4`（4 个）、F03 `test/f03-s06-publish`（`21d6399`）。
 
 - **已验收任务与证据**（勾选见 §4 / §5）：
   - **C04 达标（原排 D5–D6，提前落地）**：`static.ts` + `app.ts` 的 `staticRoot`/`serveStatic`、`/api` 优先、403→404、**无 SPA 回退**、不列目录；18 条用例（含 2 条**真实产物**用例）。**CI 改成先 build 再 test**——否则那两条会因 `dist` 缺席被静默 skip，等于把"没测"当"通过"。
