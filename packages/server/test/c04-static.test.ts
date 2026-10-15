@@ -449,4 +449,23 @@ describe.skipIf(realEntry === undefined)('真实构建产物（`pnpm build` 之�
       expect(script.headers['content-type']).toMatch(/javascript|ecmascript/);
     });
   });
+
+  it('真实产物 + 真实仓库路径：私密文件与穿越变体仍然全部 404', async () => {
+    await withApp(optionsWith({ staticRoot: undefined }), async (app) => {
+      for (const url of [
+        '/private.json',
+        '/.env',
+        '/.env.example',
+        '/solution.md',
+        '/packages/server/src/app.ts',
+        '/challenges/ret2win/private.json',
+        '/docs/01-产品与范围.md',
+        '/../challenges/ret2win/private.json',
+        '/%2e%2e%2fchallenges%2fret2win%2fprivate.json',
+        '/assets/../../challenges/ret2win/private.json',
+      ]) {
+        expectBlocked(await app.inject({ method: 'GET', url }));
+      }
+    });
+  });
 });
