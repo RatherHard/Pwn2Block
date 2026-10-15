@@ -21,6 +21,7 @@ import type {
 import type { EngineEnv } from './env';
 import type { StepHooks } from './execute';
 import { runState, stepState } from './execute';
+import { createIo } from './io/index';
 import { checkActionRange } from './layout';
 import { isTerminal, maskTo, readRegister, withMemory, writeRegister } from './state';
 import { memFaultError, rejectError } from './vm-errors';
@@ -81,19 +82,24 @@ export function screenAction(env: EngineEnv, state: VmState, action: Action): Vm
   return undefined;
 }
 
-/** `feed`：往 stdin 缓冲追加字节，累计超过 4KB 拒绝（02 §5.3、04 §2）。 */
+/**
+ * `feed`：往 stdin 缓冲追加字节，累计超过 4KB 拒绝（02 §5.3、04 §2）。
+ *
+ * 缓冲上限、整段拒绝、`pos` 保持都属于 I/O 层：实现**只**委托给 G02 的
+ * `createIo().feed`，动作层不再自留第二份。失败时状态不变（`ok: false` 由调用方处理），
+ * 错误码直接用 I/O 层的 `stdin_overflow`。
+ */
 export function feedStdin(state: VmState, bytes: Uint8Array): PrimitiveOutcome {
-  const total = state.stdin.bytes.length + bytes.length;
-  if (total > MAX_IO_BYTES) {
-    return rejected(
-      state,
-      rejectError('stdin_overflow', `stdin 累计 ${total} 字节超过上限 ${MAX_IO_BYTES}`),
-    );
+  const outcome = createIo().feed(state.stdin, bytes);
+  if (!outcome.ok) {
+    return rejected(state, rejectError(outcome.code, stdinOverflowDetail(state, bytes)));
   }
-  const merged = new Uint8Array(total);
-  merged.set(state.stdin.bytes, 0);
-  merged.set(bytes, state.stdin.bytes.length);
-  return { ok: true, state: { ...state, stdin: { bytes: merged, pos: state.stdin.pos } } };
+  return { ok: true, state: { ...state, stdin: outcome.stdin } };
+}
+
+/** `stdin_overflow` 的 detail：只含长度、不含内容（与委托前的文案一致）。 */
+function stdinOverflowDetail(state: VmState, bytes: Uint8Array): string {
+  return `stdin 累计 ${state.stdin.bytes.length + bytes.length} 字节超过上限 ${MAX_IO_BYTES}`;
 }
 
 function writeBytesAction(env: EngineEnv, state: VmState, action: Extract<PrimitiveAction, { type: 'write_bytes' }>): PrimitiveOutcome {

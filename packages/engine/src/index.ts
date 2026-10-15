@@ -6,9 +6,11 @@ import type {
   RuntimeOptions,
 } from '@pwn2block/shared';
 import { disassembleState } from './disasm';
+import type { EngineEnv } from './env';
 import { buildEnvironment, createInitialState } from './env';
 import { runState, stepState } from './execute';
 import { createDebugInstance } from './instance';
+import { createSyscallIo } from './io/index';
 import { createMemory } from './memory/index';
 import { evaluateVerdict, predicateContext } from './predicates';
 import { replaySubmit } from './replay';
@@ -33,10 +35,20 @@ export const createRuntime: CreateRuntime = (
   priv: PrivateChallenge,
   options?: RuntimeOptions,
 ): EngineRuntime => {
-  const env = buildEnvironment(pub, priv, createMemory, {
+  const base = buildEnvironment(pub, priv, createMemory, {
     encoding: options?.encoding,
     lookup: options?.lookup,
   });
+
+  /**
+   * `read` / `write` 的 fd 宿主来自 G02 的 `createSyscallIo(env)`（09 §3.1）。
+   *
+   * 装配顺序（G 在 `io/index.ts` 里写明）：先 `buildEnvironment` 得到 env，再建宿主，
+   * 最后派生一个带 `io` 的新 env——`env` 只读，不做原地写入；两次装配只共享不可变的
+   * 题目数据与 `MemoryApi`，没有额外状态。
+   */
+  const syscallIo = createSyscallIo(base);
+  const env: EngineEnv = { ...base, io: syscallIo };
 
   return {
     challengeId: env.challengeId,
