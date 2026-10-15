@@ -138,6 +138,7 @@
 - [ ] **S02 · F，B/C 配合** 判题边界：调试 satisfied 不发 flag、不记录通过；submit 从初态回放，不能借用手工调试状态，且不修改调试实例。
 - [ ] **S03 · F，C 配合** 请求边界：伪造快照/成功标记、未知动作、未允许的动作被拒绝；拒绝不修改状态，回退动作按契约仍可用。
 - [ ] **S04 · F，C/H 配合** payload 边界：block 由服务端展开，不相信客户端提供的展开结果；读状态 payload 被 rejected，而不是变成零。
+  - **D3 口径（A 定）**：`reads_state` 是**编译期**防线（05 §4），线上动作集无法表达读状态，服务端与引擎不产出该错误码；「客户端编译上限在服务端复核」本轮不成立，服务端只能复核产物动作数 ≤ `MAX_SUBMIT_ACTIONS`。这两条的验收分层与证据见 [09](09-契约冻结.md) §8 第 4–5 条。D3 收工时 S04 为**部分通过**：`block` 展开边界、`unknown_action`、`invalid_arguments`、`submit` 动作 Schema 与上限已按真实 HTTP 验证；`reads_state` 三条与「编译上限服务端复核」一条保留为口径项。
 - [ ] **S05 · F，C/E 配合** flag 边界：缺失环境变量，或虚拟文件/隐藏 VMA 内容包含注入的 flag 真值时拒绝加载；使用测试哨兵值，不把真实 flag 写进仓库。
 - [ ] **S06 · F，A/C 配合** 发布边界：检查构建产物和实际静态 HTTP 路径，不能取得 private.json、solution.md、环境文件或注入的 flag 哨兵值。
 
@@ -269,7 +270,7 @@
 |---|---|---|
 | `roles` 进投影 | `ProjectionSchema.roles` 必填（sp/bp/ip），服务端从 `priv.roles` 白名单取值；不进 `public.json`，前端不硬编码 | 04 §4、07 §7、09 §3.2/§4 |
 | 动作来源表 | 前端本地 `ActionOrigin {index, blockId}` + `ACTION_ORIGIN_VERSION`，`CompileResult.ok` 增加 `origins` / `originsVersion`，与 `actions` 等长同序；循环展开指向循环积木本身；**不进网络 payload** | 09 §3.4、08 §9.2 |
-| 录像帧与提交动作关联 | 不新增字段：`replay.initial` 是初态，第 k 个 `kind === 'action'` 帧对应第 k 个提交动作，`instruction` 帧归属前一个动作帧，`frames[i].index` 是帧序号 | 09 §3.4、08 §9.2 |
+| 录像帧与提交动作关联 | 不新增字段：`replay.initial` 是初态，第 k 个 `kind === 'action'` 帧对应第 k 个提交动作，`frames[i].index` 是帧序号。**D3 更正**：`instruction` 帧归属**后一个**动作帧（D2 定稿写的“前一个”是反的，见 09 §3.4 与 09 §8 第 6 条） | 09 §3.4、08 §9.2 |
 | 录像帧的反汇编 | 本轮不给 `ReplayFrame` 加 `disasm`：只有没有任何 `changedVmas` 条目的 `perm` 含 `x` 时才显示 `replay.initial.disasm`，否则显示「不可用」而不是过期反汇编 | 09 §3.4、08 §9.2 |
 | Blockly 容量与事件语义 | 唯一开始积木 = `maxInstances`（只拦工具箱/粘贴/复制）+ 编译期错误兜底；变更事件只覆盖用户手势，程序化装载后要主动重编译 | 05 §3.1 实现备忘、09 §3.2 |
 
@@ -291,7 +292,7 @@ D/H 迁移布局、token、交互状态和说明，不复制预设执行逻辑�
 |---|---|---|---|
 | 公开 sp/bp/ip 角色 | **D1 已定：增加 Projection.roles**，不放入 public.json，不让前端读取私有包；当前 shared 与服务端投影代码尚未实现 | A 改 shared 及契约文档；C 填充投影；D 使用公开角色；F 同步白名单守卫。由 A 集成完整消费者适配 | 阻塞真实 sp/bp/ip 锚点与跟随。投影/回放初态均有角色，支持非示例寄存器命名，无额外私有信息泄露；D4 前完成 |
 | 编译成功动作到积木的映射 | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：前端本地 `ActionOrigin {index, blockId}` + `ACTION_ORIGIN_VERSION`，`CompileResult.ok` 增加 `origins` / `originsVersion`，与 `actions` 等长同序；循环展开指向循环积木本身；**不进网络 payload**。原型 action.blockId 不是合法 API 字段，因此不改成网络字段 | A 定契约与文档；H 在独占目录实现（含测试）；D 消费。冻结接口有变更时按 09 同步 | 阻塞成功动作及回放动作定位；不阻塞现有编译错误定位。验证循环展开、author block、重新编译和提交后编辑；网络 payload 不含来源元数据 |
-| 录像帧与提交动作关联 | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：不新增字段。`replay.initial` 是初态；`frames` 里 `kind === 'action'` 的第 k 个对应第 k 个提交动作（1-based）；两个 `action` 帧之间的 `instruction` 帧属于前一个动作；`frames[i].index` 是帧序号而不是动作下标。原型 UI 的“初态=0、动作从1起”不作为 API 索引规则 | A 定编号与关联约定；C 用真实录像核对并补不变式测试（`results.length` 等于 `action` 帧数、第 k 帧 `label` 等于 `results[k].action`）；D/H 按约定绑定提交快照 | 阻塞准确的动作/积木定位。真实录像逐例证明对应关系；无法确定关联时不错误定位。核对与真实行为不符时报 A 改 04 §5.1，不为迁就断言改实现 |
+| 录像帧与提交动作关联 | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：不新增字段。`replay.initial` 是初态；`frames` 里 `kind === 'action'` 的第 k 个对应第 k 个提交动作（1-based）；`frames[i].index` 是帧序号而不是动作下标。原型 UI 的“初态=0、动作从1起”不作为 API 索引规则。**D3 更正**：`instruction` 帧归属**后一个**动作帧（D2 写的“前一个”与真实引擎相反，C 用真实录像核对发现，D2 的 `replay-frames.test.ts` 早已记录；见 09 §3.4 / §8） | A 定编号与关联约定；C 用真实录像核对并补不变式测试（`results.length` 等于 `action` 帧数、第 k 帧 `label` 等于 `results[k].action`）；D/H 按约定绑定提交快照 | 阻塞准确的动作/积木定位。真实录像逐例证明对应关系；无法确定关联时不错误定位。核对与真实行为不符时报 A 改 04 §5.1，不为迁就断言改实现 |
 | 代码变化后的回放 disasm | **D2 已定**（见 [09](09-契约冻结.md) §3.4）：本轮**不给 `ReplayFrame` 加 `disasm`**。录像播放显示 `replay.initial.disasm`，且仅当 `frames[].changedVmas` 中没有 `perm` 含 `x` 的 VMA 内容变化时才可用；代码被改写就显示「录像中代码已变化，指令视图不可用」，不许显示过期反汇编。前端不解码 | A 定规则并写入 09；D 实现可用性判定；F 补针对用例。将来要逐帧正确反汇编需给 `ReplayFrame` 加字段，由 A 同批适配全部消费者 | 阻塞相关帧正确的指令显示。未解决前相关指令区明确不可用，不能据此将录像 P0/G2/G3 判完成 |
 
 以上仅登记工作与依赖；本轮文档更新没有修改生产代码或冻结类型。`roles` 是执行已定决策；另外三项先补可验证的接口约定，再实施必要改动。A 不必让所有角色等待全部约定完成，只暂停受影响的接线文件与功能。
