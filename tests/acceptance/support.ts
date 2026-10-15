@@ -2,8 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
-import { API_ERROR_STATUS, ApiErrorSchema, bytesToHex, formatHex } from '@pwn2block/shared';
-import type { ApiErrorCode, EngineRuntime, Projection, VmState } from '@pwn2block/shared';
+import {
+  API_ERROR_STATUS,
+  ApiErrorSchema,
+  ProjectionSchema,
+  bytesToHex,
+  formatHex,
+} from '@pwn2block/shared';
+import type { ApiErrorCode, EngineRuntime, Projection, VmState, VmaView } from '@pwn2block/shared';
 
 /**
  * 验收测试的公共设施（owner：F，写入范围 `tests/acceptance/**`）。
@@ -120,6 +126,89 @@ export function expectApiError(
   expect(parsed.success).toBe(true);
   if (parsed.success) expect(parsed.data.code).toBe(code);
   expectNoInternalLeak(response.body, extra);
+}
+
+/**
+ * 「被拒绝的请求不修改状态」的**逐字段**比较口径（04 §2、§3）。
+ *
+ * 与 `stateFieldsOf` 的差别：这里按 `ProjectionSchema` 声明的字段**逐个**断言，
+ * 失败信息直接点名是哪个字段变了；`vmas` 再按每个 VMA 逐字段比对（隐藏区的 `hex`
+ * 恰好是最可能被悄悄改掉的地方）。字段集合从 Schema 派生，投影加字段自动进入比较范围。
+ *
+ * 同样**排除 `failures`**：它是「挣扎了多少」的单调计数，被拒绝的动作本来就该 +1，
+ * 每个调用方必须在用例里单独正面断言它的变化（见 `stateFieldsOf` 的说明）。
+ */
+export function expectProjectionFieldsUnchanged(before: Projection, after: Projection): void {
+  const fields = Object.keys(ProjectionSchema.shape) as (keyof Projection)[];
+  // 自检：派生字段集合不能退化成空集，否则这条断言会静默失效。
+  expect(fields).toContain('vmas');
+  expect(fields).toContain('registers');
+
+  for (const field of fields) {
+    if (field === 'failures') continue;
+    if (field === 'vmas') {
+      expectVmaViewsUnchanged(before.vmas, after.vmas);
+      continue;
+    }
+    expect(after[field], `投影字段 ${String(field)} 不应被这次请求改动`).toEqual(before[field]);
+  }
+}
+
+/** 逐个 VMA 逐字段比对（`vmas` 是数组，整段 `toEqual` 失败时看不出是哪个 VMA 的哪个字段）。 */
+export function expectVmaViewsUnchanged(
+  before: readonly VmaView[],
+  after: readonly VmaView[],
+): void {
+  expect(after.map((vma) => vma.id)).toEqual(before.map((vma) => vma.id));
+  for (const [index, expected] of before.entries()) {
+    const actual = after[index];
+    for (const field of Object.keys(expected) as (keyof VmaView)[]) {
+      expect(
+        actual?.[field],
+        `VMA ${expected.id} 的字段 ${String(field)} 不应被这次请求改动`,
+      ).toEqual(expected[field]);
+    }
+  }
+}
+
+/** 一段秘密字节可能在响应正文里出现的编码形态（用于多形态泄露扫描）。 */
+export function secretForms(bytes: Uint8Array): readonly string[] {
+  const buffer = Buffer.from(bytes);
+  const hex = bytesToHex(bytes);
+  const forms = new Set<string>([
+    buffer.toString('latin1'),
+    buffer.toString('base64'),
+    hex,
+    hex.toUpperCase(),
+  ]);
+  // 太短的串会在正文里随机命中，不构成有意义的证据。
+  return [...forms].filter((form) => form.length >= 4);
+}
+
+export interface SecretLeak {
+  /** 秘密的名字（调用方给的键）。 */
+  readonly label: string;
+  /** 命中的编码形态。 */
+  readonly form: string;
+}
+
+/**
+ * 在响应正文里扫描若干秘密的多形态编码（hex 大小写 / 原始 ASCII / base64）。
+ *
+ * 用途：S01 的「隐藏字节与虚拟文件内容不以任何形式下发」。返回空数组表示零命中；
+ * 调用方**必须**同时用正对照证明扫描器真的能命中（否则这条断言可能是失效的空转）。
+ */
+export function findSecretLeaks(
+  body: string,
+  secrets: Readonly<Record<string, Uint8Array>>,
+): SecretLeak[] {
+  const leaks: SecretLeak[] = [];
+  for (const [label, bytes] of Object.entries(secrets)) {
+    for (const form of secretForms(bytes)) {
+      if (body.includes(form)) leaks.push({ label, form });
+    }
+  }
+  return leaks;
 }
 
 /**
