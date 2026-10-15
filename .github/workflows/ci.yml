@@ -8,6 +8,12 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # 题目包的 flag 只写 `"flag": "env:FLAG_<ID>"`，真值绝不进仓库（06 §6、07 §7）。
+      # 一旦 `challenges/` 下有真实题目，`challenge:check` / `challenge:solve` 就需要这个变量，
+      # 否则校验器按设计报「环境变量缺失，拒绝加载该题」（08 §5 S05）。
+      # 这里注入的是**测试哨兵值**，不是真 flag；各题按 id 追加自己的变量。
+      FLAG_RET2WIN: pwn2block-ci-sentinel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
