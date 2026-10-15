@@ -1,4 +1,4 @@
-import type { MemorySnapshot, VmState } from '@pwn2block/shared';
+import type { MemoryApi, MemorySnapshot, VmState } from '@pwn2block/shared';
 
 /**
  * G 的快照接口（G02，D2–D3 实现）：COW 脏页快照与恢复（02 §7）。
@@ -81,4 +81,61 @@ export interface SnapshotApi {
   capture(state: VmState): VmStateSnapshot;
   /** 返回可拼回 `VmState` 的状态片段；`status / steps` 等由 B 自行决定。 */
   restore(snapshot: VmStateSnapshot): VmStateSnapshot;
+}
+
+/**
+ * `SnapshotApi` 的实现（G02，D2）。
+ *
+ * 分工（08 §2 规则 2）：本函数只做**状态存取**，历史管理（请求层 `undo`、指令层环形缓冲
+ * `step_back`、可 undo 的 `reset`、`MAX_SNAPSHOTS` 裁剪）由 B 的 `src/instance.ts` 编排；
+ * 内存那一半由 `MemoryApi.snapshot / restore`（`../memory/`）提供 O(1) 页表共享。
+ *
+ * 别名纪律（`vm.ts` 的 `MemoryState` 注释）：`MemoryState` 是可变句柄。
+ * - `capture` 是 O(1)：内存只抓页表引用，其余字段共享不可变值，**不复制**；
+ * - `restore` 派生新值：内存用 `memory.restore` 换一个与快照共享不可变页表的**新句柄**，
+ *   数组与对象复制一份，于是“回退”不会改动被回退掉的那段历史。
+ *
+ * 返回的对象形状是 `VmStateSnapshot`（带 `kind`），调用方要把 8 个 VM 字段逐个拼回
+ * `VmState`，**不要整个 spread 进 `VmState`**（`kind` 不属于 `VmState`）。
+ * `status / steps / lastStop / error` 不在快照里，回退后取什么值由 B 决定（见文件头）。
+ */
+export function createSnapshotApi(memory: MemoryApi): SnapshotApi {
+  return {
+    capture(state: VmState): VmStateSnapshot {
+      return {
+        kind: 'vm-snapshot',
+        memory: memory.snapshot(state.memory),
+        registers: state.registers,
+        flags: state.flags,
+        revealed: state.revealed,
+        stdin: state.stdin,
+        stdout: state.stdout,
+        fileOffsets: state.fileOffsets,
+        // 槽位必填：显式写下“有退出码”还是“没有”，回退才不会继承回退前那一刻的值。
+        exitCode: state.exitCode,
+      };
+    },
+
+    restore(snapshot: VmStateSnapshot): VmStateSnapshot {
+      /**
+       * `memory.restore` 派生出来的是**活句柄**（`MemoryState`），而冻结的字段类型是
+       * `VmStateSnapshot.memory: MemorySnapshot`（`MemoryState` 是可变句柄，两者在 shared 里
+       * 用不同品牌区分）。这里显式窄化一次，B 在 `instance.ts` 的 `materializeSnapshot`
+       * 同样窄化——契约缺口已由 B 报 A：`SnapshotApi.restore` 的返回类型应把 `memory`
+       * 标成 `MemoryState`。不要为此改 `VmStateSnapshot` 的形状（那会动冻结契约）。
+       */
+      const restoredMemory = memory.restore(snapshot.memory) as unknown as MemorySnapshot;
+      return {
+        kind: 'vm-snapshot',
+        memory: restoredMemory,
+        registers: { ...snapshot.registers },
+        flags: { ...snapshot.flags },
+        revealed: [...snapshot.revealed],
+        stdin: { bytes: snapshot.stdin.bytes.slice(), pos: snapshot.stdin.pos },
+        stdout: snapshot.stdout.slice(),
+        fileOffsets: { ...snapshot.fileOffsets },
+        exitCode: snapshot.exitCode,
+      };
+    },
+  };
 }
