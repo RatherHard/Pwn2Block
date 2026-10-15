@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiClientError } from '../src/api';
 import { createSessionController, type SessionController } from '../src/viewmodel/controller';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
-import { MESSAGE_EXITED } from '../src/viewmodel/toolbar';
+import { MESSAGE_EXITED, MESSAGE_FAILED } from '../src/viewmodel/toolbar';
 import {
   FAKE_SESSION_ID,
   createFakeApi,
@@ -284,7 +284,7 @@ describe('会话控制器：试运行与分块（04 §5、05 §3）', () => {
   });
 });
 
-describe('会话控制器：已退出即终止态（04 §1.1/§5、09 §8 第 10 条）', () => {
+describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、09 §8 第 10 条）', () => {
   /** 600 个动作 = 512 + 88：退出落在第一片末尾时，就是「退出恰好落在分片边界」。 */
   async function exitAtChunkBoundary(
     projection: ReturnType<typeof makeProjection>,
@@ -355,6 +355,36 @@ describe('会话控制器：已退出即终止态（04 §1.1/§5、09 §8 第 10
     expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'reset' }]);
 
     // 「提交判题」不受影响：提交走判题实例，与调试实例是否退出无关。
+    controller.run({ kind: 'submit' });
+    await until(() => controller.state.verdict !== undefined, '提交完成');
+    expect(api.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  });
+
+  it('判负（status=failed）同样是终止态：分片不再多发，执行类被拦住且原因说「判负」', async () => {
+    const { api, controller } = await exitAtChunkBoundary(
+      makeProjection({
+        status: 'failed',
+        steps: 512,
+        error: { code: 'memory_fault', message: '访问了未映射的地址' },
+        lastStop: { reason: 'exception', addr: '0x400001' },
+      }),
+    );
+    // 判负也是终止态：跨分片停止条件同样生效（这条来路以前完全没有门禁）。
+    expect(actionsCalls(api)).toHaveLength(1);
+    expect(controller.state.cursor).toBe(512);
+
+    controller.run({ kind: 'step' });
+    controller.run({ kind: 'trial-run' });
+    controller.run({ kind: 'run-n', count: 5 });
+    await flush();
+    // 文案与「已退出」分开：判负未必是 exit 造成的（04 §1.1）。
+    expect(controller.state.notice?.text).toBe(MESSAGE_FAILED);
+    expect(actionsCalls(api)).toHaveLength(1);
+
+    controller.run({ kind: 'undo' });
+    await until(() => actionsCalls(api).length === 2, '撤销发出');
+    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'undo' }]);
+
     controller.run({ kind: 'submit' });
     await until(() => controller.state.verdict !== undefined, '提交完成');
     expect(api.calls.filter((call) => call.method === 'submit')).toHaveLength(1);

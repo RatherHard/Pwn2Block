@@ -209,6 +209,44 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     await settle(app);
     expect(api.calls.some((call) => call.method === 'actions')).toBe(false);
   });
+
+  it('调试实例已判负（status failed）：执行类按钮禁用且原因写「判负」，点击不发请求', async () => {
+    const api = createFakeApi({
+      projection: makeProjection({
+        status: 'failed',
+        steps: 7,
+        error: { code: 'memory_fault', message: '访问了未映射的地址' },
+        lastStop: { reason: 'exception', addr: '0x400001' },
+      }),
+    });
+    const { app } = await mountApp(api);
+    const workspace = panelOf(app).workspace;
+    if (workspace === undefined) throw new Error('画布没挂上');
+    const start = workspace.newBlock(BLOCK_TYPES.start);
+    const step = workspace.newBlock(BLOCK_TYPES.actionStep);
+    const next = start.nextConnection;
+    const previous = step.previousConnection;
+    if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
+    next.connect(previous);
+    clickRun(app, '编译');
+    await settle(app);
+
+    const buttonOf = (label: string) => runButtons(app).find((each) => each.textContent?.trim() === label);
+    expect(buttonOf('试运行')?.disabled).toBe(true);
+    expect(buttonOf('单步')?.disabled).toBe(true);
+    expect(buttonOf('运行 N 步')?.disabled).toBe(true);
+    // 回退类与提交不受影响（04 §1.1）：回退类的深度判定见 controller 的用例，
+    // 这里只断言它们不是因为「判负」而被禁（重置与提交与终止态无关）。
+    expect(buttonOf('重置')?.disabled).toBe(false);
+    expect(buttonOf('提交判题')?.disabled).toBe(false);
+    // 判负的文案必须与「已退出」不同：说「已退出」会让学习者找错方向（05 §6）。
+    expect(textOf(runMenuOf(app))).toContain('已被判负');
+    expect(textOf(runMenuOf(app))).not.toContain('程序已退出');
+
+    clickRun(app, '试运行');
+    await settle(app);
+    expect(api.calls.some((call) => call.method === 'actions')).toBe(false);
+  });
 });
 
 describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {

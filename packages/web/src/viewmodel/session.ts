@@ -55,6 +55,24 @@ export function isExitedProjection(projection: Projection): boolean {
   return projection.status === 'exited' || projection.lastStop?.reason === 'exit';
 }
 
+/**
+ * 终止态的原因（04 §1.1）：`failed` 是判负（异常或命中失败条件），`exited` 是程序已经结束。
+ * 两者都拒绝执行类动作，但原因不同，界面文案必须分开——判负未必是 `exit` 造成的。
+ */
+export type TerminalReason = 'failed' | 'exited';
+
+/**
+ * 终止态的**唯一**派生口径，与引擎的 `isTerminal()`（`packages/engine/src/state.ts`）同源：
+ * `status === 'failed' || isExitedProjection(projection)`。
+ *
+ * 判负优先于已退出：`failed` 的实例也可能带着 `lastStop.reason === 'exit'`（例如退出那一刻命中
+ * 失败条件），此刻学习者最需要看到的是「判负」，而不是退出细节，所以 `failed` 先行。
+ */
+export function terminalReasonOf(projection: Projection): TerminalReason | undefined {
+  if (projection.status === 'failed') return 'failed';
+  return isExitedProjection(projection) ? 'exited' : undefined;
+}
+
 export type StatusTone = 'ok' | 'warn' | 'error' | 'info';
 
 export interface StatusText {

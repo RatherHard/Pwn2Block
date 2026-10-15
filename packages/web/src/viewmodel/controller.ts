@@ -38,8 +38,8 @@ import { defaultPosition } from './replay';
 import {
   applyProjection,
   createPageState,
-  isExitedProjection,
   setMode,
+  terminalReasonOf,
   type PageMode,
   type PageState,
   type StatusTone,
@@ -210,8 +210,8 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       history: state.history,
       cursor: state.cursor,
       allowedActions: state.challenge?.allowedActions ?? [],
-      // 退出信息来自调试实例的投影（04 §1.1）：`satisfied` 与「已退出」可以同时成立。
-      exited: page === undefined ? false : isExitedProjection(page.projection),
+      // 终止态（failed / 已退出）来自调试实例的投影（04 §1.1）：`satisfied` 与「已退出」可以同时成立。
+      terminal: page === undefined ? undefined : terminalReasonOf(page.projection),
     };
   }
 
@@ -303,19 +303,20 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
   /**
    * 批量停止条件（04 §5、09 §3.4）：服务端「遇到第一个被拒绝的动作就停」的语义要在客户端
-   * **跨分片保持**——某片出现被拒绝、该片实际生效数少于提交数、或实例已经 `failed` / 已退出，
-   * 就不再发后续分片。`executed` 与 `results.length` 是两个口径（09 §8），两个都要看。
+   * **跨分片保持**——某片出现被拒绝、该片实际生效数少于提交数、或实例已经是终止态
+   * （`failed` / 已退出），就不再发后续分片。`executed` 与 `results.length` 是两个口径（09 §8），
+   * 两个都要看。
    *
-   * 终止态里的「已退出」用 `isExitedProjection`（`lastStop.reason === 'exit'`）：退出恰好落在
-   * 512 分片边界时该片全部成功、`status` 仍是 `satisfied`，只看 `status` 会多发一片，
-   * 整片撞 `not_executable` 并白记 `failures`（09 §8 第 10 条）。
+   * 终止态用 `terminalReasonOf`（与引擎 `isTerminal()` 同源）：退出恰好落在 512 分片边界时该片
+   * 全部成功、`status` 仍是 `satisfied`，只看 `status` 会多发一片，整片撞 `not_executable`
+   * 并白记 `failures`（09 §8 第 10 条）。
    * 反过来不许用「`satisfied` 就停」代替：`satisfied` 本身不限制动作（04 §1.1）。
    */
   function stopped(response: ActionsResponse, submitted: number): boolean {
     if (response.results.length < submitted) return true;
     if (response.results.some((result) => !result.ok)) return true;
     if (response.executed < submitted) return true;
-    return response.projection.status === 'failed' || isExitedProjection(response.projection);
+    return terminalReasonOf(response.projection) !== undefined;
   }
 
   function nextCursor(command: RunCommand, response: ActionsResponse): number {

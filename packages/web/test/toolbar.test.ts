@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
-import { isExitedProjection } from '../src/viewmodel/session';
+import { terminalReasonOf } from '../src/viewmodel/session';
 import {
   MESSAGE_EXITED,
+  MESSAGE_FAILED,
   buttonModel,
   disabledReasons,
   runMenuModel,
@@ -26,7 +27,7 @@ function input(overrides: Partial<RunMenuInput> = {}): RunMenuInput {
     history: { undo: 0, stepBack: 0 },
     cursor: 0,
     allowedActions: CHALLENGE_ACTIONS,
-    exited: false,
+    terminal: undefined,
     ...overrides,
   };
 }
@@ -143,7 +144,7 @@ function enabledMatrix(model: readonly RunButtonModel[]): Readonly<Record<string
   return Object.fromEntries(model.map((button) => [button.id, button.enabled]));
 }
 
-describe('「已退出」是终止态：执行类禁用、回退类与提交不受影响（04 §1.1、05 §6、09 §8 第 10 条）', () => {
+describe('终止态（failed / 已退出）禁执行类、放行回退类与提交（04 §1.1、05 §6、09 §8 第 10 条）', () => {
   /**
    * 判胜那一刻程序已经结束：`status` 是 `satisfied`，只有 `lastStop.reason === 'exit'`
    * 记得它退出了。这就是工具栏原来的盲区。
@@ -159,20 +160,29 @@ describe('「已退出」是终止态：执行类禁用、回退类与提交不�
     steps: 9,
     lastStop: { reason: 'step', addr: '0x400002' },
   });
+  /** 判负：运行时异常 / 命中失败条件（03 §2.1），同样是终止态。 */
+  const FAILED = makeProjection({
+    status: 'failed',
+    steps: 7,
+    error: { code: 'memory_fault', message: '访问了未映射的地址' },
+    lastStop: { reason: 'exception', addr: '0x400001' },
+  });
 
-  it('派生口径与引擎 isExited() 一致：lastStop 的 exit 与 status 的 exited 都算', () => {
-    expect(isExitedProjection(SATISFIED_EXIT)).toBe(true);
-    expect(isExitedProjection(SATISFIED_STEP)).toBe(false);
-    expect(isExitedProjection(makeProjection({ status: 'exited', lastStop: { reason: 'exit' } }))).toBe(true);
+  it('派生口径与引擎 isTerminal() 同源：failed 与「已退出」都是终止态，且优先报判负', () => {
+    expect(terminalReasonOf(FAILED)).toBe('failed');
+    expect(terminalReasonOf(SATISFIED_EXIT)).toBe('exited');
+    expect(terminalReasonOf(makeProjection({ status: 'exited', lastStop: { reason: 'exit' } }))).toBe('exited');
     // `lastStop` 是可选的：只看 status 的那条路径也不能丢。
-    expect(isExitedProjection(makeProjection({ status: 'exited' }))).toBe(true);
-    expect(isExitedProjection(makeProjection({ status: 'ready' }))).toBe(false);
-    expect(isExitedProjection(makeProjection({ status: 'failed', error: { code: 'memory_fault', message: '越权' } }))).toBe(false);
+    expect(terminalReasonOf(makeProjection({ status: 'exited' }))).toBe('exited');
+    expect(terminalReasonOf(makeProjection({ status: 'ready' }))).toBeUndefined();
+    // 判负优先：退出那一刻命中失败条件时报「判负」，不报「已退出」。
+    expect(terminalReasonOf(makeProjection({ status: 'failed', lastStop: { reason: 'exit' } }))).toBe('failed');
+    expect(terminalReasonOf(SATISFIED_STEP)).toBeUndefined();
   });
 
   it('satisfied + lastStop.reason=exit：执行类三个按钮禁用，其余五个可用', () => {
     const model = runMenuModel(
-      input({ history: { undo: 2, stepBack: 5 }, exited: isExitedProjection(SATISFIED_EXIT) }),
+      input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(SATISFIED_EXIT) }),
     );
     expect(enabledMatrix(model)).toEqual({
       compile: true,
@@ -195,9 +205,36 @@ describe('「已退出」是终止态：执行类禁用、回退类与提交不�
     ]);
   });
 
+  it('status=failed：执行类三个按钮禁用且原因写「判负」，回退类与提交放行', () => {
+    const model = runMenuModel(input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(FAILED) }));
+    expect(enabledMatrix(model)).toEqual({
+      compile: true,
+      'trial-run': false,
+      step: false,
+      'run-n': false,
+      'step-back': true,
+      undo: true,
+      reset: true,
+      submit: true,
+    });
+    // 文案必须与「已退出」分开：判负未必是 exit 造成的（04 §1.1）。
+    expect(disabledReasons(model)).toEqual([
+      `试运行：${MESSAGE_FAILED}`,
+      `单步：${MESSAGE_FAILED}`,
+      `运行 N 步：${MESSAGE_FAILED}`,
+    ]);
+    expect(MESSAGE_FAILED).not.toBe(MESSAGE_EXITED);
+    expect(MESSAGE_FAILED).toContain('已被判负');
+    expect(MESSAGE_FAILED).not.toContain('已退出');
+    // 出路照给：回退类与提交都要能点。
+    for (const id of ['step-back', 'undo', 'reset', 'submit'] as const) {
+      expect(buttonModel(model, id)?.enabled).toBe(true);
+    }
+  });
+
   it('satisfied + lastStop.reason=step：八个按钮全部可用（satisfied 本身不限制动作）', () => {
     const model = runMenuModel(
-      input({ history: { undo: 2, stepBack: 5 }, exited: isExitedProjection(SATISFIED_STEP) }),
+      input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(SATISFIED_STEP) }),
     );
     expect(enabledMatrix(model)).toEqual({
       compile: true,
@@ -212,8 +249,8 @@ describe('「已退出」是终止态：执行类禁用、回退类与提交不�
     expect(disabledReasons(model)).toEqual([]);
   });
 
-  it('已退出优先于产物类原因：重编译也换不回执行权，但提交仍按产物口径说明', () => {
-    const model = runMenuModel(input({ stale: true, exited: true }));
+  it('终止态优先于产物类原因：重编译也换不回执行权，但提交仍按产物口径说明', () => {
+    const model = runMenuModel(input({ stale: true, terminal: 'exited' }));
     expect(buttonModel(model, 'trial-run')?.disabledReason).toBe(MESSAGE_EXITED);
     expect(buttonModel(model, 'step')?.disabledReason).toBe(MESSAGE_EXITED);
     expect(buttonModel(model, 'run-n')?.disabledReason).toBe(MESSAGE_EXITED);
@@ -221,13 +258,17 @@ describe('「已退出」是终止态：执行类禁用、回退类与提交不�
     expect(buttonModel(model, 'reset')?.enabled).toBe(true);
 
     // 没有产物时同理：先说清「程序已经退出」，而不是误导成「点编译就好」。
-    const noArtifact = runMenuModel(input({ artifact: undefined, compileErrorCount: 0, exited: true }));
+    const noArtifact = runMenuModel(input({ artifact: undefined, compileErrorCount: 0, terminal: 'exited' }));
     expect(buttonModel(noArtifact, 'step')?.disabledReason).toBe(MESSAGE_EXITED);
     expect(buttonModel(noArtifact, 'compile')?.enabled).toBe(true);
+
+    // 判负也一样：编译失败 / 没产物都不是首要原因（05 §6 的优先级）。
+    const failedNoArtifact = runMenuModel(input({ artifact: undefined, terminal: 'failed' }));
+    expect(buttonModel(failedNoArtifact, 'step')?.disabledReason).toBe(MESSAGE_FAILED);
   });
 
-  it('判题结果模式的原因优先于已退出：先告诉用户「回到调试」', () => {
-    const model = runMenuModel(input({ mode: 'verdict', exited: true }));
+  it('判题结果模式的原因优先于终止态：先告诉用户「回到调试」', () => {
+    const model = runMenuModel(input({ mode: 'verdict', terminal: 'exited' }));
     expect(buttonModel(model, 'step')?.disabledReason).toContain('回到调试');
     expect(buttonModel(model, 'submit')?.enabled).toBe(true);
   });
