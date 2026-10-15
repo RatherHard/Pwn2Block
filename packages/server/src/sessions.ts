@@ -32,6 +32,8 @@ export interface Session {
   readonly judge: JudgeSlot;
   /** 回退深度现取自调试实例，避免在会话里存一份会过期的副本（04 §3）。 */
   readonly history: () => HistoryDepth;
+  /** 创建该会话的客户端标识（服务端用 `request.ip`），用于每 IP 的存活会话数上限（04 §6）。 */
+  readonly ownerKey: string;
   readonly createdAt: number;
   readonly lastActiveAt: number;
 }
@@ -84,7 +86,7 @@ export class SessionStore {
   }
 
   /** 建会话：两个实例槽位一次建好，返回不可变记录。 */
-  create(runtime: EngineRuntime): Session {
+  create(runtime: EngineRuntime, ownerKey = ''): Session {
     const at = this.now();
     const debug = runtime.createDebugInstance();
     const session: Session = {
@@ -94,6 +96,7 @@ export class SessionStore {
       debug,
       judge: { kind: 'stateless-replay', submits: 0 },
       history: () => debug.historyDepth(),
+      ownerKey,
       createdAt: at,
       lastActiveAt: at,
     };
@@ -110,6 +113,26 @@ export class SessionStore {
 
   size(): number {
     return this.sessions.size;
+  }
+
+  /**
+   * 某客户端标识的**存活**会话数（04 §6 的每 IP 上限）。
+   *
+   * 计数直接派生自存活会话表，不另立计数器：主动 `DELETE`、空闲回收、`clear()`
+   * 都会让会话离开这张表，配额随之释放，不存在「计数泄漏」这种失效模式。
+   */
+  countByOwner(ownerKey: string): number {
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      if (session.ownerKey === ownerKey) count += 1;
+    }
+    return count;
+  }
+
+  /** 关闭服务时清空：所有会话（连同每 IP / 全局计数）归零（04 §6）。 */
+  clear(): void {
+    this.sessions.clear();
+    this.tails.clear();
   }
 
   /**

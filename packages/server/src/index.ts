@@ -5,6 +5,7 @@ import type { BuildAppOptions } from './app';
 
 export { buildApp };
 export type { BuildAppOptions };
+export type { RateLimitOptions, RateLimitConfig, SessionLimits, WindowLimit } from './limits';
 
 /**
  * 服务端开发入口：Fastify 单进程同时承担引擎、API 与静态托管（07 §7）。

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import Fastify from 'fastify';
-import type { FastifyError, FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   API_ERROR_STATUS,
   ActionsRequestSchema,
@@ -24,6 +24,8 @@ import type {
   SubmitResponse,
 } from '@pwn2block/shared';
 import { defaultChallengeDir, loadChallengeDir, resolveFlag } from './challenges';
+import { SlidingWindowLimiter, resolveRateLimit } from './limits';
+import type { RateLimitOptions, SessionLimits } from './limits';
 import { mapActionResults, projectReplay, projectState, projectionContextOf } from './projection';
 import { engineRuntimeFactory } from './runtime';
 import { SessionStore } from './sessions';
@@ -47,10 +49,51 @@ export interface BuildAppOptions {
   /** 引擎装配工厂，默认 `@pwn2block/engine` 的 `createRuntime`。 */
   readonly createRuntime?: CreateRuntime;
   readonly sessions?: SessionStoreOptions;
+  /** 限流与并发会话上限（04 §6）。缺省即开启，默认值与依据见 `limits.ts`。 */
+  readonly rateLimit?: RateLimitOptions;
 }
+
+/** 限流的对外文案：固定字符串，不回显请求内容，也不含任何内部信息（04 §6）。 */
+const RATE_LIMITED_MESSAGE = '请求过于频繁，请稍后再试';
+const SESSION_LIMIT_MESSAGES: Readonly<Record<'per-ip' | 'global', string>> = {
+  'per-ip': '同一来源的会话数已达上限，请先结束旧会话或稍后再试',
+  global: '服务器会话数已达上限，请稍后再试',
+};
 
 function fail(reply: FastifyReply, code: ApiErrorCode, message: string): FastifyReply {
   return reply.code(API_ERROR_STATUS[code]).send(ApiErrorSchema.parse({ code, message }));
+}
+
+/**
+ * 限流只作用于 API（04 §6）。
+ * - 静态资源不算：一次页面加载要取几十个文件，计入配额会把正常浏览打成 429。
+ * - `/api/health` 不算：它是给部署探针用的，被限流只会制造假故障。
+ */
+function isRateLimitedRequest(request: FastifyRequest): boolean {
+  if (!request.url.startsWith('/api/')) return false;
+  const [path] = request.url.split('?');
+  return path !== '/api/health';
+}
+
+/** 提交接口用**独立**的桶：它每次都要跑一遍完整回放，代价与普通请求不同量级（04 §6）。 */
+function isSubmitRequest(request: FastifyRequest): boolean {
+  const route = request.routeOptions.url;
+  return route === undefined ? request.url.includes('/submit') : route.endsWith('/submit');
+}
+
+/**
+ * 会话容量的判定（04 §6）：全局与每 IP 都按**存活**会话数算。
+ * 先按空闲时间惰性回收一轮，所以空闲回收掉下去的会话当场把配额还回来。
+ */
+function sessionLimitReason(
+  sessions: SessionStore,
+  limits: SessionLimits,
+  ownerKey: string,
+): 'per-ip' | 'global' | undefined {
+  sessions.reap();
+  if (sessions.countByOwner(ownerKey) >= limits.perIp) return 'per-ip';
+  if (sessions.size() >= limits.global) return 'global';
+  return undefined;
 }
 
 /** 会话不存在，或已被空闲回收——两者的 HTTP 状态都是 404，但错误码不同（04 §5）。 */
@@ -89,10 +132,34 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const challenges = loadChallengeDir(challengeDir, { env, presetDir });
   const assembleRuntime = options.createRuntime ?? engineRuntimeFactory;
   const sessions = new SessionStore(options.sessions);
+  const limits = resolveRateLimit(options.rateLimit);
+  // 每次 buildApp() 各一份，不做全局单例：测试之间互不影响（04 §6）。
+  const requestLimiter = new SlidingWindowLimiter(
+    limits.request,
+    limits.now,
+    limits.maxTrackedKeys,
+  );
+  const submitLimiter = new SlidingWindowLimiter(limits.submit, limits.now, limits.maxTrackedKeys);
+
+  // 按 IP 限流（04 §6）。钩子必须早于路由注册，否则只对之后注册的路由生效。
+  // 拒绝发生在路由处理之前：不进引擎、不动 `failures`、不压快照、不分配会话。
+  app.addHook('onRequest', async (request, reply) => {
+    if (!isRateLimitedRequest(request)) return;
+    const decision = (isSubmitRequest(request) ? submitLimiter : requestLimiter).hit(request.ip);
+    if (decision.allowed) return;
+    // `Retry-After` 按秒向上取整；窗口是滑动的，所以它是「最早一次命中过期」的那一刻。
+    reply.header('retry-after', String(Math.ceil(decision.retryAfterMs / 1000)));
+    return fail(reply, 'rate_limited', RATE_LIMITED_MESSAGE);
+  });
+
   // 空闲回收：定时清理 unref()，不阻止进程退出（04 §1）。
   sessions.startSweeper();
   app.addHook('onClose', async () => {
     sessions.stopSweeper();
+    // 关闭即释放：会话与限流计数一并归零，不留给下一次 buildApp（04 §6）。
+    sessions.clear();
+    requestLimiter.clear();
+    submitLimiter.clear();
   });
 
   app.get('/api/health', async () => ({ ok: true }));
@@ -122,6 +189,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         : fail(reply, 'not_found', '题目不存在');
     }
 
+    // 容量检查必须在装配引擎**之前**（04 §6）：超限时既不分配会话，也不装配引擎。
+    const overLimit = sessionLimitReason(sessions, limits.sessions, request.ip);
+    if (overLimit !== undefined) return fail(reply, 'rate_limited', SESSION_LIMIT_MESSAGES[overLimit]);
+
     let runtime: EngineRuntime;
     try {
       // 引擎不读文件：preset 展开后的编码表由加载器算好，这里连同查询表一起转交
@@ -136,7 +207,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       return fail(reply, 'challenge_unavailable', '引擎暂不可用，无法创建会话');
     }
 
-    const session = sessions.create(runtime);
+    const session = sessions.create(runtime, request.ip);
     return CreateSessionResponseSchema.parse({
       sessionId: session.id,
       projection: currentProjection(session),
