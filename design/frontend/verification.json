@@ -1,0 +1,417 @@
+{
+  "date": "2026-10-15",
+  "browser": "Microsoft Edge 155.0.4283.45",
+  "platform": "win32",
+  "deviceScaleFactor": 1,
+  "method": "Playwright 操作实际浏览器；截图直接来自页面，未进行人工视觉审查",
+  "passed": 93,
+  "failed": 0,
+  "results": [
+    {
+      "name": "1440×900 / default 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / io 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / registers 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / uncompiled 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / stale 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / error 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / limit 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / waiting 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / complete 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / satisfied 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / won 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / incomplete 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / failed 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / rejected 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / debug-failed 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / exited 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / expired 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / network 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / loading 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / no-challenges 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / empty 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / history 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / hints 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1440×900 / long 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / default 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / io 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / registers 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / uncompiled 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / stale 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / error 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / limit 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / waiting 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / complete 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / satisfied 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / won 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / incomplete 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / failed 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / rejected 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / debug-failed 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / exited 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / expired 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / network 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / loading 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / no-challenges 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / empty 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / history 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / hints 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1280×720 / long 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / default 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / io 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / registers 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / uncompiled 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / stale 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / error 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / limit 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / waiting 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / complete 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / satisfied 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / won 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / incomplete 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / failed 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / rejected 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / debug-failed 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / exited 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / expired 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / network 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / loading 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / no-challenges 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / empty 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / history 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / hints 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "1920×1080 / long 布局与边界",
+      "status": "PASS"
+    },
+    {
+      "name": "题面折叠、手动提示与本地记忆",
+      "status": "PASS"
+    },
+    {
+      "name": "视图隐藏、键盘排序、拖拽排序与快捷键",
+      "status": "PASS"
+    },
+    {
+      "name": "产物过期阻止执行；重新编译恢复",
+      "status": "PASS"
+    },
+    {
+      "name": "编译错误定位与修正",
+      "status": "PASS"
+    },
+    {
+      "name": "等待锁、单步、撤销、重置",
+      "status": "PASS"
+    },
+    {
+      "name": "逐指令回退不新增请求历史",
+      "status": "PASS"
+    },
+    {
+      "name": "空程序执行采用 VM 调试语义",
+      "status": "PASS"
+    },
+    {
+      "name": "同一投影的菜单重绘不重复闪亮",
+      "status": "PASS"
+    },
+    {
+      "name": "调试满足条件仍可操作且无 flag",
+      "status": "PASS"
+    },
+    {
+      "name": "四种结果、回放拖动、返回调试完全保留状态",
+      "status": "PASS"
+    },
+    {
+      "name": "错误/过期编辑状态不污染判题快照；返回仍为过期",
+      "status": "PASS"
+    },
+    {
+      "name": "提交完整样例进入独立结果；返回保持调试位置",
+      "status": "PASS"
+    },
+    {
+      "name": "I/O 切换、隐藏/未映射区分、动作过滤",
+      "status": "PASS"
+    },
+    {
+      "name": "寄存器复制、地址跳转与字节搜索",
+      "status": "PASS"
+    },
+    {
+      "name": "无可用题目有独立空态与刷新入口",
+      "status": "PASS"
+    },
+    {
+      "name": "会话恢复保留画布、清空调试历史",
+      "status": "PASS"
+    },
+    {
+      "name": "提示阈值自动揭示",
+      "status": "PASS"
+    },
+    {
+      "name": "键盘焦点、模式语义和状态播报",
+      "status": "PASS"
+    },
+    {
+      "name": "直接打开 file:// 入口",
+      "status": "PASS"
+    },
+    {
+      "name": "零浏览器脚本错误",
+      "status": "PASS"
+    },
+    {
+      "name": "无外部资源/服务端执行请求",
+      "status": "PASS"
+    }
+  ],
+  "screenshots": [
+    "default-1440x900.png",
+    "io-1440x900.png",
+    "registers-1440x900.png",
+    "uncompiled-1440x900.png",
+    "stale-1440x900.png",
+    "error-1440x900.png",
+    "limit-1440x900.png",
+    "waiting-1440x900.png",
+    "complete-1440x900.png",
+    "satisfied-1440x900.png",
+    "won-1440x900.png",
+    "incomplete-1440x900.png",
+    "failed-1440x900.png",
+    "rejected-1440x900.png",
+    "debug-failed-1440x900.png",
+    "exited-1440x900.png",
+    "expired-1440x900.png",
+    "network-1440x900.png",
+    "loading-1440x900.png",
+    "no-challenges-1440x900.png",
+    "empty-1440x900.png",
+    "history-1440x900.png",
+    "hints-1440x900.png",
+    "long-1440x900.png",
+    "default-1280x720.png",
+    "won-1280x720.png",
+    "long-1280x720.png",
+    "default-1920x1080.png",
+    "won-1920x1080.png",
+    "long-1920x1080.png",
+    "keyboard-focus-1440x900.png"
+  ],
+  "consoleErrors": []
+}
