@@ -1,0 +1,43 @@
+{
+  "name": "pwn2block",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "内存可视化的 Pwn 概念实验室：后端权威 VM + 积木 payload",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm dev:server\" \"pnpm dev:web\"",
+    "dev:server": "tsx watch packages/server/src/index.ts",
+    "dev:web": "vite --config packages/web/vite.config.ts",
+    "start": "tsx packages/server/src/index.ts",
+    "build": "vite build --config packages/web/vite.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/web/tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "challenge:new": "tsx packages/authoring/src/cli.ts new",
+    "challenge:asm": "tsx packages/authoring/src/cli.ts asm",
+    "challenge:check": "tsx packages/authoring/src/cli.ts check",
+    "challenge:solve": "tsx packages/authoring/src/cli.ts solve",
+    "e2e": "playwright test --config tests/e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.4",
+    "concurrently": "^10.0.6",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@pwn2block/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vite + Lit + Blockly 单页应用",
+  "main": "./src/main.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@pwn2block/shared": "workspace:*",
+    "blockly": "^13.4.0",
+    "lit": "^3.3.3"
+  }
+}

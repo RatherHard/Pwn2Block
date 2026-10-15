@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+
+# pnpm 11 起构建脚本白名单写在 workspace 配置里（package.json 的 pnpm 字段已不再读取）。
+allowBuilds:
+  esbuild: true

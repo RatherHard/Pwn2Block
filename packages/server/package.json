@@ -1,0 +1,20 @@
+{
+  "name": "@pwn2block/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fastify：会话管理、题目加载、公开投影、REST、静态托管",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pwn2block/engine": "workspace:*",
+    "@pwn2block/shared": "workspace:*",
+    "fastify": "^5.12.7"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@pwn2block/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "类型与 Schema：public.json、私有包、动作、投影、API。单一事实来源",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

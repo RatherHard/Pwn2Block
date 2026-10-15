@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: 单元与集成测试
+        run: pnpm test
+      - name: 构建前端产物
+        run: pnpm build
+      - name: 校验全部题目包
+        run: pnpm challenge:check --all
+      - name: 跑全部题目参考解法
+        run: pnpm challenge:solve --all

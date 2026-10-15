@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "packages/shared/src/**/*.ts",
+    "packages/shared/test/**/*.ts",
+    "packages/engine/src/**/*.ts",
+    "packages/engine/test/**/*.ts",
+    "packages/server/src/**/*.ts",
+    "packages/server/test/**/*.ts",
+    "packages/authoring/src/**/*.ts",
+    "packages/authoring/test/**/*.ts",
+    "tests/acceptance/**/*.ts",
+    "tests/integration/**/*.ts",
+    "tests/e2e/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["packages/web/**", "**/node_modules/**", "**/dist/**"]
+}
