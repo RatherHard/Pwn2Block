@@ -12,7 +12,8 @@ import type { NormalizedBlock, NormalizedWorkspace } from '../compiler/types';
  *
  * 归一化规则：
  * - `fields`：遍历每个输入的 `fieldRow`，取有 `name` 的字段；Blockly 的布尔字段转成
- *   `'true'` / `'false'`，数字字段保留数字。
+ *   `'true'` / `'false'`，数字字段保留数字，**变量字段转成变量名**（`FieldVariable.getValue()`
+ *   给的是 id，编译契约要名字，见 `BlocklyFieldLike.getVariable`）。
  * - `inputs`：只记录**连上了积木**的输入槽，未连接的槽不出现（编译器按 `undefined` 处理）。
  * - `next`：语句链上的下一块；值表达式没有 `next`。
  * - 被禁用的积木（`isEnabled() === false`）视为未连接，不参与编译。
@@ -22,6 +23,18 @@ import type { NormalizedBlock, NormalizedWorkspace } from '../compiler/types';
 export interface BlocklyFieldLike {
   readonly name?: string;
   getValue(): unknown;
+  /**
+   * 变量字段专用（真实 `Blockly.FieldVariable` 有，其它字段没有，所以是可选的）。
+   *
+   * 必须走它取名字：`FieldVariable.getValue()` 返回的是变量 **id**，而编译契约里的
+   * `FIELDS.variable`（`'VAR'`）要的是**名字**（见 `compiler/statement.ts` 的
+   * `readStringField(block, FIELDS.variable)` 与 `compiler/compile.test.ts` 的
+   * `fields: { VAR: 'n' }`）。用 id 会让编译期查不到变量、静默报「未定义变量」。
+   *
+   * 用 `getName()` 而不是 `.name`：真实返回的 `IVariableModel` 暴露的是 `getName()`，
+   * 名字只在它的**状态**对象（`save()` 的产物）上才是 `name` 属性。
+   */
+  getVariable?(): { getName(): string } | null;
 }
 
 export interface BlocklyConnectionLike {
@@ -105,14 +118,26 @@ function readFields(block: BlocklyBlockLike): Record<string, string | number> {
   for (const input of block.inputList) {
     for (const field of input.fieldRow ?? []) {
       if (field.name === undefined || field.name === '') continue;
-      const value = toFieldValue(field.getValue());
+      const value = toFieldValue(field);
       if (value !== undefined) fields[field.name] = value;
     }
   }
   return fields;
 }
 
-function toFieldValue(raw: unknown): string | number | undefined {
+/**
+ * 字段值 → 归一化后的值。
+ *
+ * 变量字段优先：`FieldVariable.getValue()` 是变量 id，而契约要名字（见 `BlocklyFieldLike`）。
+ * 变量被删掉、`getVariable()` 返回 null 时退回 `getValue()`——那时拿到的是 id，
+ * `toFieldValue` 会照常返回它，编译期再报「未定义变量」，不在这里猜名字。
+ */
+function toFieldValue(field: BlocklyFieldLike): string | number | undefined {
+  const variable = field.getVariable?.();
+  const variableName = variable === null || variable === undefined ? undefined : variable.getName();
+  if (typeof variableName === 'string' && variableName !== '') return variableName;
+
+  const raw = field.getValue();
   if (typeof raw === 'string' || typeof raw === 'number') return raw;
   if (typeof raw === 'boolean') return raw ? 'true' : 'false';
   return undefined;

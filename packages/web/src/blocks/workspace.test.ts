@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ret2winPublic } from '@pwn2block/shared';
-import { BLOCK_TYPES, CONCAT_ITEM_PREFIX, FIELDS, INPUTS } from '../compiler/types';
+import { BLOCK_TYPES, CONCAT_ITEM_PREFIX, FIELDS, INPUTS, ACTION_ORIGIN_VERSION } from '../compiler/types';
 import { compileProgram } from '../compiler/compile';
 import type { NormalizedBlock, NormalizedWorkspace } from '../compiler/types';
 import { BLOCK_SPECS } from './catalog';
@@ -276,6 +276,11 @@ describe('适配器接编译器：ret2win 全链路（无 DOM）', () => {
           args: { data: `${'41'.repeat(16)}${'42'.repeat(8)}0200400000000000` },
         },
       ],
+      origins: [
+        { index: 0, blockId: 'step1' },
+        { index: 1, blockId: 'gets1' },
+      ],
+      originsVersion: ACTION_ORIGIN_VERSION,
     });
   });
 });

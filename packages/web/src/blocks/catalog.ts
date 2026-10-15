@@ -1,4 +1,4 @@
-import type { AuthorBlock, PrimitiveActionType } from '@pwn2block/shared';
+import { MAX_STEPS_PER_RUN, type AuthorBlock, type PrimitiveActionType } from '@pwn2block/shared';
 import { authorBlockType } from '../compiler/types';
 import { ARITHMETIC_OPS, BLOCK_TYPES, FIELDS, INPUTS, LOGIC_OPS } from '../compiler/types';
 
@@ -32,6 +32,15 @@ export interface BlockInputSpec {
   readonly label: string;
   /** 值输入的影子积木类型。 */
   readonly shadow?: string;
+  /**
+   * 影子积木数字字段的取值（不填就用影子积木自己的默认值）。
+   *
+   * 为什么需要它：`step` / `run` 的输入**空着**时编译器按 04 §2 的默认值处理
+   * （`step` 默认 1 条，`run` 默认跑到全局步数上限），但工具箱里挂着影子积木就永远不空，
+   * 于是影子块的值就成了"默认值"。用 0 会直接撞上「步数必须在 1..10000 之间」，
+   * 所以这两个输入的影子值取文档里写的默认值，而不是数字积木自己的默认 0。
+   */
+  readonly shadowValue?: number;
 }
 
 export interface BlockSpec {
@@ -65,11 +74,17 @@ export const TOOLBOX_CATEGORY_META: Readonly<
 // 小工具
 // ---------------------------------------------------------------------------
 
-const valueInput = (name: string, label: string, shadow?: string): BlockInputSpec => ({
+const valueInput = (
+  name: string,
+  label: string,
+  shadow?: string,
+  shadowValue?: number,
+): BlockInputSpec => ({
   name,
   kind: 'value',
   label,
   ...(shadow === undefined ? {} : { shadow }),
+  ...(shadowValue === undefined ? {} : { shadowValue }),
 });
 
 const statementInput = (name: string, label: string): BlockInputSpec => ({
@@ -111,9 +126,10 @@ const variableField = (name: string, label: string): BlockFieldSpec => ({
   label,
 });
 
-/** 数字输入槽默认挂 `math_number` 影子块，学习者不用先拖一个数字积木。 */
-const numberInput = (name: string, label: string): BlockInputSpec =>
-  valueInput(name, label, SHADOW_MATH_NUMBER);
+/** 数字输入槽默认挂 `math_number` 影子块，学习者不用先拖一个数字积木。
+ *  `shadowValue` 只在"空着有默认含义"的输入上给（见 `BlockInputSpec.shadowValue`）。 */
+const numberInput = (name: string, label: string, shadowValue?: number): BlockInputSpec =>
+  valueInput(name, label, SHADOW_MATH_NUMBER, shadowValue);
 
 /** 运算符中文名按 `ARITHMETIC_OPS` / `LOGIC_OPS` 一一对应：契约里新增运算符时这里会编译报错。 */
 const ARITHMETIC_TEXT: Readonly<Record<(typeof ARITHMETIC_OPS)[number], string>> = {
@@ -330,7 +346,8 @@ export const BLOCK_SPECS: readonly BlockSpec[] = [
     category: 'action',
     action: 'step',
     tooltip: '执行 count 条指令，默认 1 条（04 §2）。',
-    inputs: [numberInput(INPUTS.count, '步数')],
+    // 影子值 = 文档里的默认值 1：挂了影子块就永远不空，用 0 会撞上「步数必须在 1..10000 之间」。
+    inputs: [numberInput(INPUTS.count, '步数', 1)],
   },
   {
     type: BLOCK_TYPES.actionRun,
@@ -338,7 +355,9 @@ export const BLOCK_SPECS: readonly BlockSpec[] = [
     category: 'action',
     action: 'run',
     tooltip: '连续执行到程序退出、异常或达到步数上限（04 §2）。',
-    inputs: [numberInput(INPUTS.maxSteps, '最大步数')],
+    // 影子值取「单次运行的全局上限」：`run` 省略 `maxSteps` 就是跑到上限，显式写出同一个数
+    // 在语义上等价（程序退出/异常都会提前停），但让画布上的输入不像"漏填"。
+    inputs: [numberInput(INPUTS.maxSteps, '最大步数', MAX_STEPS_PER_RUN)],
   },
 ];
 
