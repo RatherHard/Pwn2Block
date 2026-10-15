@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiClientError } from '../src/api';
 import { createSessionController, type SessionController } from '../src/viewmodel/controller';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
+import { MESSAGE_EXITED } from '../src/viewmodel/toolbar';
 import {
   FAKE_SESSION_ID,
   createFakeApi,
@@ -280,6 +281,83 @@ describe('会话控制器：试运行与分块（04 §5、05 §3）', () => {
     controller.run({ kind: 'trial-run' });
     await until(() => controller.state.cursor === 3, '试运行剩余两个');
     expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'ret' }, { type: 'ret' }]);
+  });
+});
+
+describe('会话控制器：已退出即终止态（04 §1.1/§5、09 §8 第 10 条）', () => {
+  /** 600 个动作 = 512 + 88：退出落在第一片末尾时，就是「退出恰好落在分片边界」。 */
+  async function exitAtChunkBoundary(
+    projection: ReturnType<typeof makeProjection>,
+  ): Promise<Harness & { readonly firstChunkCalls: () => number }> {
+    const harness = await open();
+    compileInto(harness.tracker, harness.controller, repeatedActions(600));
+    harness.api.setActionsResponse((actions) => ({
+      // 该片每个动作都成功、executed 等于提交数：只看得见 status 的判据会认为还可以继续。
+      results: actions.map((action) => ({ ok: true, action: action.type })),
+      executed: actions.length,
+      projection,
+      history: { undo: 1, stepBack: 64 },
+    }));
+    harness.controller.run({ kind: 'trial-run' });
+    await until(() => actionsCalls(harness.api).length === 1, '第一片发出');
+    await until(() => !harness.controller.state.busy, '第一片结束');
+    await flush();
+    return { ...harness, firstChunkCalls: () => actionsCalls(harness.api).length };
+  }
+
+  it('退出落在 512 分片边界：不再发第二片，也不产生任何拒绝', async () => {
+    const { api, controller, firstChunkCalls } = await exitAtChunkBoundary(
+      // 判胜那一刻程序已经退出：status 仍是 satisfied，终止事实只在 lastStop 上。
+      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'exit', addr: '0x400003' } }),
+    );
+
+    expect(firstChunkCalls()).toBe(1);
+    expect(actionsCalls(api)[0]?.actions).toHaveLength(512);
+    expect(controller.state.cursor).toBe(512);
+    // 没有多发片 ⇒ 没有 not_executable 的拒绝、failures 也没有被白记一次。
+    expect(controller.state.results).toHaveLength(512);
+    expect(controller.state.results.every((result) => result.ok)).toBe(true);
+    expect(controller.state.page?.projection.failures).toBe(0);
+  });
+
+  it('status 为 exited（没有 lastStop）时停止行为不回归', async () => {
+    const { api, controller, firstChunkCalls } = await exitAtChunkBoundary(
+      makeProjection({ status: 'exited', steps: 512 }),
+    );
+    expect(firstChunkCalls()).toBe(1);
+    expect(actionsCalls(api)).toHaveLength(1);
+    expect(controller.state.cursor).toBe(512);
+  });
+
+  it('satisfied 但停因是 step（未退出）时继续发后续分片', async () => {
+    const { controller } = await exitAtChunkBoundary(
+      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'step', addr: '0x400002' } }),
+    );
+    // satisfied 本身不限制动作（04 §1.1）：第二片照发，游标走完 600。
+    await until(() => controller.state.cursor === 600, '两片跑完');
+    expect(controller.state.cursor).toBe(600);
+  });
+
+  it('已退出后执行类命令被门禁拦住，回退类与「提交判题」仍放行（05 §6）', async () => {
+    const { api, controller } = await exitAtChunkBoundary(
+      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'exit' } }),
+    );
+
+    controller.run({ kind: 'step' });
+    controller.run({ kind: 'run-n', count: 3 });
+    await flush();
+    expect(controller.state.notice?.text).toBe(MESSAGE_EXITED);
+    expect(actionsCalls(api)).toHaveLength(1);
+
+    // 回退类不受影响：reset 照发。
+    controller.run({ kind: 'reset' });
+    await until(() => actionsCalls(api).length === 2, '重置发出');
+    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'reset' }]);
+
+    // 「提交判题」不受影响：提交走判题实例，与调试实例是否退出无关。
+    controller.run({ kind: 'submit' });
+    await until(() => controller.state.verdict !== undefined, '提交完成');
+    expect(api.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
   });
 });
 
