@@ -62,6 +62,14 @@ interface OneResult {
 /** 一次请求里“是否已经压过请求层快照”的开关。 */
 interface RequestMark {
   pushed: boolean;
+  /**
+   * 本次 `markRequest` 因**容量已满**被 `shift()` 挤掉的最旧一条（没有则为 `undefined`）。
+   *
+   * 被拒时要把它补回栈底：`undoStack.pop()` 只撤掉刚压进去的那条，被挤掉的那条不会自己回来，
+   * 于是 `history.undo` 会静默少一层（G2 复核在 D4 发现）。`stepRing` 早就有 `ringGuard` 护栏，
+   * 这个字段是 `undoStack` 的对应物——两者对称，缺一边就是同一类缺陷。
+   */
+  dropped?: HistoryEntry | undefined;
 }
 
 /**
@@ -184,9 +192,12 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
   const restoreEntry = (entry: HistoryEntry): VmState =>
     withMemory(entry.state, env.memory.restore(entry.memory));
 
-  const pushUndo = (entry: HistoryEntry): void => {
+  const pushUndo = (entry: HistoryEntry): HistoryEntry | undefined => {
     undoStack.push(entry);
-    if (undoStack.length > env.limits.maxSnapshots) undoStack.shift();
+    // 容量满时丢最旧一条（04 §3）。返回值就是被丢掉的那条：调用方在**被拒**时要把它补回栈底，
+    // 否则这次「为了试一下」的压栈会永久缩掉一层可撤销历史。
+    if (undoStack.length > env.limits.maxSnapshots) return undoStack.shift();
+    return undefined;
   };
 
   const hooks: StepHooks = {
@@ -199,7 +210,7 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
   /** 请求层快照：在第一个真正生效的动作前压入，且整批只压一次。 */
   const markRequest = (mark: RequestMark): void => {
     if (mark.pushed) return;
-    pushUndo(entryOf(current));
+    mark.dropped = pushUndo(entryOf(current));
     mark.pushed = true;
   };
 
@@ -256,10 +267,15 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
       // 2. 把指令层缓冲还原到动作前：那些位置属于被回滚掉的时间线，否则 `step_back` 会退到
       //    一个不存在的过去。
       // 3. 撤掉刚压的请求层快照：它等于原地不动的状态，留着会污染 undo 历史。
+      //    这里必须是 `markRequest` 的**精确逆操作**：只弹掉它压进去的那条，并把因容量已满
+      //    被它挤掉的最旧一条补回栈底（`mark.dropped`）。整栈回填是错的——同一请求里若前面
+      //    有成功的 `undo`（它自己会 `pop`），整栈回填会把那次成功的回退也一并抹掉。
       current = outcome.state;
       restoreRing(stepRing, ringGuard);
       if (pushedNow) {
         undoStack.pop();
+        if (mark.dropped !== undefined) undoStack.unshift(mark.dropped);
+        mark.dropped = undefined;
         mark.pushed = false;
       }
       return { ok: false, error: outcome.error };

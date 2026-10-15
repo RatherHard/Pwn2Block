@@ -155,6 +155,98 @@ describe('applyRequest：被拒的多动作积木整块回滚（D4 · BG06）', 
 });
 
 /**
+ * G2 独立复核在 D4 发现的**第二条真实缺陷**（与 BG06 同一类，`stepRing` 与 `undoStack` 修复不对称）：
+ *
+ * `pushUndo` 在 `undoStack` 达到 `maxSnapshots` 时会 `shift()` 丢掉最旧一条，而被拒分支只
+ * `undoStack.pop()` —— 弹掉的是刚压进去的那条，**被挤掉的那条不会自己回来**。于是
+ * 「为了试一下」的一次被拒动作会静默缩掉一层可撤销历史（默认 1000 时 1000 → 999）。
+ *
+ * 这里同时钉住**反向**要求：修复必须是 `markRequest` 的**精确逆操作**，不能整栈回填——
+ * 同一请求里前面若有成功的 `undo`（它自己会 `pop`），整栈回填会把那次成功的回退也抹掉。
+ */
+describe('undo 容量边界：被拒动作不得吃掉一层撤销历史（D4 · G2 复核发现）', () => {
+  const writeAt = (hex: string): Action => ({ type: 'write_bytes', addr: '0x2000', hex });
+
+  it('撤销栈已满时被拒：深度与**内容**都要原样还在（能一路退到起点）', () => {
+    // 第一条展开写 0x2000 成功，第二条写未映射的 0x9000 必被拒 → 走 `pushedNow` 那条路径。
+    const PAIR: AuthorBlock = {
+      id: 'pair_cap',
+      label: '写两块',
+      params: [{ name: 'data', type: 'bytes' }],
+      expand: [
+        { type: 'write_bytes', addr: '0x2000', hex: '$data' },
+        { type: 'write_bytes', addr: '0x9000', hex: '$data' },
+      ],
+    };
+    const { env, instance } = start({ limits: { maxSnapshots: 3 }, authorBlocks: [PAIR] });
+
+    // 三条各自成请求，正好把 3 层撤销栈填满。
+    for (const byte of ['01', '02', '03']) {
+      expect(instance.applyRequest([writeAt(byte)]).executed).toBe(1);
+    }
+    expect(instance.historyDepth().undo).toBe(3);
+    expect(hexAt(env, instance, DATA_START, 1)).toBe('03');
+
+    const rejected = instance.applyRequest([{ type: 'block', id: 'pair_cap', args: { data: 'ff' } }]);
+    expect(rejected.results[0]?.error?.code).toBe('inaccessible_address');
+    expect(rejected.executed).toBe(0);
+    // 修复前这里是 2：最旧那条（回到全零）被 `shift()` 挤掉后再也没回来。
+    expect(instance.historyDepth().undo, '被拒不得缩掉撤销深度').toBe(3);
+    expect(hexAt(env, instance, DATA_START, 1), '被拒的动作自己不留痕').toBe('03');
+
+    // 内容也要在：三次 undo 必须正好一路退到起点，第四次才是空历史。
+    for (const expected of ['02', '01', '00']) {
+      expect(instance.applyRequest([{ type: 'undo' }]).results[0]?.ok).toBe(true);
+      expect(hexAt(env, instance, DATA_START, 1), `退到 ${expected}`).toBe(expected);
+    }
+    expect(instance.historyDepth().undo).toBe(0);
+    expect(instance.applyRequest([{ type: 'undo' }]).results[0]?.error?.code).toBe('empty_history');
+  });
+
+  it('生产默认 maxSnapshots：填满后一次被拒同样不掉层', () => {
+    const { instance } = start();
+    const cap = 1000; // `MAX_SNAPSHOTS` 的生产默认值（04 §3 的撤销深度）
+    for (let index = 0; index < cap; index += 1) instance.applyRequest([writeAt('01')]);
+    expect(instance.historyDepth().undo).toBe(cap);
+
+    const rejected = instance.applyRequest([WRITE_AA_BAD]);
+    expect(rejected.executed).toBe(0);
+    // G2 复核实测修复前是 999。
+    expect(instance.historyDepth().undo).toBe(cap);
+  });
+
+  it('反向要求：不得整栈回填——同一请求里前面成功的 undo 必须留下', () => {
+    const { env, instance } = start({ authorBlocks: [PAIR_FOR_OVERROLLBACK] });
+
+    for (const byte of ['01', '02', '03']) instance.applyRequest([writeAt(byte)]);
+    expect(instance.historyDepth().undo).toBe(3);
+
+    // `undo` 先成功（自己弹掉一层）→ 状态回到写入 03 之前；随后的积木被拒，只该撤掉**积木那次**压栈。
+    const outcome = instance.applyRequest([{ type: 'undo' }, { type: 'block', id: 'pair_over', args: { data: 'ff' } }]);
+    expect(outcome.results.map((result) => result.ok)).toEqual([true, false]);
+    expect(outcome.executed).toBe(1);
+    expect(hexAt(env, instance, DATA_START, 1), '成功的 undo 已生效：回到 02').toBe('02');
+    // 整栈回填的实现会在这里给出 3（把成功的 undo 也抹掉）。
+    expect(instance.historyDepth().undo, '成功的 undo 不能被拒绝分支连坐').toBe(2);
+
+    instance.applyRequest([{ type: 'undo' }]);
+    expect(hexAt(env, instance, DATA_START, 1)).toBe('01');
+  });
+});
+
+const WRITE_AA_BAD: Action = { type: 'block', id: 'nope', args: {} };
+
+const PAIR_FOR_OVERROLLBACK: AuthorBlock = {
+  id: 'pair_over',
+  label: '写两块',
+  params: [{ name: 'data', type: 'bytes' }],
+  expand: [
+    { type: 'write_bytes', addr: '0x2000', hex: '$data' },
+    { type: 'write_bytes', addr: '0x9000', hex: '$data' },
+  ],
+};
+
+/**
  * 同类排查（BG06 要求 3）：`applyOne` 里其余「拒绝且丢弃 `outcome.state`」的分支，都在任何
  * 写入之前返回，因此没有 BG06 那种残留。这些用例把「零残留」钉成精确断言，防止以后有人把
  * 校验挪到写入之后。
