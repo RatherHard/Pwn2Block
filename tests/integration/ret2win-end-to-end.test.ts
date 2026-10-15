@@ -1,7 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '@pwn2block/server';
 import {
@@ -50,7 +49,13 @@ const privateWithHiddenKey: PrivateChallenge = {
   ],
 };
 
-let app: FastifyInstance;
+/**
+ * 应用句柄的类型直接从 `buildApp` 推出来：`fastify` 是 server 包的依赖，根 tsconfig
+ * 看不到它，从测试里 import 'fastify' 会解析失败。
+ */
+type App = ReturnType<typeof buildApp>;
+
+let app: App;
 let workDir: string;
 
 beforeAll(async () => {
