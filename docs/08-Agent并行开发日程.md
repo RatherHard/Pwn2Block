@@ -216,7 +216,7 @@
 - **进行中 / owner**：H01 的真实 Blockly 定义与渲染（D2），E01 的 `asm`（D2），B/G 的 syscall + 虚拟文件 + I/O 快照（G02，D2–D3），C02 的静态托管（D4–D5）。
 - **待集成 / 提交号**：D1 全部工作已集成到 `main`，按 owner 分提交（shared 契约、G、B、C、E、H、D、F、集成测试、本文档）。
 - **阻塞 / 解决人 / 下次检查点**：
-  1. **`roles`（sp/bp/ip）没有公开来源**：它只在 `private.json`（03 §2），而 `Projection` 与 `PublicChallenge` 都没有，D 的锚点渲染现在靠 `SAMPLE_ROLES` 兜住。**解决人：A（定契约）+ C（投影下发）**，D4 前必须落地，否则真实 API 接不上。倾向做法：投影里加 `roles`（服务端从私有包取，属于"固定的东西"，不算泄密）。
+  1. **`roles`（sp/bp/ip）没有公开来源**：它只在 `private.json`（03 §2），而 `Projection` 与 `PublicChallenge` 都没有，D 的锚点渲染现在靠 `SAMPLE_ROLES` 兜住。**已定做法：在投影里增加 `roles`**——角色是"固定的东西"，不是运行时未知量（01 §6），由服务端从私有包取后随投影下发，前端不需要也不应该读 `private.json`；不放进 `public.json` 是为了避免出题人两处重复声明、把漂移风险留给校验。**owner：A（改 shared 的 `ProjectionSchema`）+ C（投影填充，同一提交）+ F（白名单守卫同步）**，D4 前落地。
   2. **Playwright 浏览器版本**：本机 `@playwright/test@1.64` 期望 chromium-1248，实际只装了 1243，`pnpm e2e` 会报可执行文件缺失；D5 前需 `pnpm exec playwright install chromium`（F 的配置注释已记，D 临时用 msedge 通道跑通冒烟）。
   3. **Vite 8 只监听 `localhost`（::1）**：E2E 里不要写 `127.0.0.1:5173`。
 - **当前关卡 / 是否放行**：**G0 通过**（骨架、shared Schema、模块接口、API 样例、CLI 解法格式明确，基础检查全绿）。放行 D2。
