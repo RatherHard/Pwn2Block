@@ -109,6 +109,49 @@ describe('applyRequest：被拒的多动作积木整块回滚（D4 · BG06）', 
     expect(readRegister(instance.state(), 'RIP')).toBe(0x1000n);
     expect(instance.applyRequest([{ type: 'step_back' }]).results[0]?.error?.code).toBe('empty_history');
   });
+
+  it('缓冲**已满**时被拒的积木：还原的是原来的时间线，不是「深度对得上」的空壳', () => {
+    // 上一条只压了一条 `step`，走不到 `stepRing.shift()`。把窗口调到 4 先填满，
+    // 再让积木里的 `step` 顶掉最旧一条：此时「按长度截断」和「逐项回填」的差别才会暴露——
+    // 前者看起来深度一样，但最旧那条（RIP = 0x1000）已经永久丢了，一路退到底回不到程序起点。
+    const STEP_THEN_BAD: AuthorBlock = {
+      id: 'step_then_bad_full_ring',
+      label: '走一步再写坏地址（缓冲已满）',
+      params: [],
+      expand: [{ type: 'step' }, { type: 'write_bytes', addr: '0x9000', hex: '00' }],
+    };
+    const { instance } = start({
+      code: code(0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90),
+      limits: { stepBackWindow: 4 },
+      authorBlocks: [STEP_THEN_BAD],
+    });
+
+    // 4 条单步正好填满窗口（`beforeInstruction` 压的是**执行前**的状态）。
+    const walked = instance.applyRequest([
+      { type: 'step' },
+      { type: 'step' },
+      { type: 'step' },
+      { type: 'step' },
+    ]);
+    expect(walked.executed).toBe(4);
+    expect(instance.historyDepth().stepBack).toBe(4);
+    expect(readRegister(instance.state(), 'RIP')).toBe(0x1004n);
+
+    const rejected = instance.applyRequest([{ type: 'block', id: 'step_then_bad_full_ring', args: {} }]);
+    expect(rejected.results[0]?.error?.code).toBe('inaccessible_address');
+    expect(rejected.executed).toBe(0);
+    expect(rejected.failures).toBe(1);
+
+    // 深度回到 4，而且**内容**是原来那 4 条。
+    expect(instance.historyDepth().stepBack).toBe(4);
+    expect(readRegister(instance.state(), 'RIP')).toBe(0x1004n);
+    for (const expected of [0x1003n, 0x1002n, 0x1001n, 0x1000n]) {
+      expect(instance.applyRequest([{ type: 'step_back' }]).results[0]?.ok).toBe(true);
+      expect(readRegister(instance.state(), 'RIP'), `退到 ${expected.toString(16)}`).toBe(expected);
+    }
+    expect(instance.historyDepth().stepBack).toBe(0);
+    expect(instance.applyRequest([{ type: 'step_back' }]).results[0]?.error?.code).toBe('empty_history');
+  });
 });
 
 /**
