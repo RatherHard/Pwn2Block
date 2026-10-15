@@ -33,15 +33,29 @@ import {
  * ## 输出
  *
  * ```ts
- * { ok: true,  actions: CompiledAction[] }
+ * { ok: true,  actions: CompiledAction[], origins: ActionOrigin[], originsVersion: number }
  * { ok: false, errors: { blockId, message }[] }
  * ```
  *
  * - `ok: false` 时**没有可用的动作序列**（部分编译结果会被丢弃），D 只需要把 `errors`
  *   显示在输出区并按 `blockId` 高亮积木（05 §4）。
  * - `ok: true` 且 `actions` 为空是合法的：空程序。
+ * - `origins` 是**动作 → 积木来源表**（08 §9.2）：与 `actions` 等长同序，`origins[i].index === i`。
+ *   它只活在前端内存里——发给服务端的请求体只有 `actions`（用 `actionsForRequest`）。
  * - 动作只包括 8 类原子动作与出题人积木 `block`；`undo / step_back / reset` 是工具栏按钮，
  *   不是积木，编译产物里不会出现（05 §3.1）。
+ *
+ * ## 「开始」积木与离散块（编译入口契约，05 §3.1）
+ *
+ * 1. 顶层积木里必须**恰好有一个**「开始」积木（`start`），程序从它沿 `next` 往下执行。
+ *    一个都没有 → `MESSAGE_NO_START_BLOCK`（`blockId` 是空串：没有具体位置可指）；
+ *    多于一个 → 每个「开始」积木各报一条 `MESSAGE_MULTIPLE_START_BLOCKS`。
+ * 2. 「开始」积木**不许有上一个连接**：它只能出现在顶层。出现在别的积木的输入槽或 `next`
+ *    链里（旧存档、手写数据、未来的错误接线）一律报 `MESSAGE_START_BLOCK_HAS_PREVIOUS`。
+ *    Blockly 的积木定义也从另一边保证这点：它没有上一个连接、没有输出连接。
+ * 3. 未连到「开始」积木的**离散块**既不产生动作，也**不产生错误**：它们不参与编译
+ *    （05 §3.1 的"不参与编译"就是"看不见"）。学习者把积木拖到画布上还没接好时，
+ *    不应该先挨一串错。
  *
  * ## 积木树形状
  *
@@ -196,6 +210,25 @@ export interface NormalizedWorkspace {
 /** 编译产物：8 类原子动作 + 出题人积木（展开由服务端完成，03 §3）。 */
 export type CompiledAction = PrimitiveAction | BlockAction;
 
+/**
+ * 动作来源：`CompileResult.actions[i]` 是由哪块积木产生的（05 §3、08 §9.2）。
+ *
+ * 前端用它把程序区 / 录像里的某一步跳回画布上的积木；它**不进网络 payload**。
+ */
+export interface ActionOrigin {
+  /** 在 `CompileResult.actions` 里的下标（显式写出来，便于前端建索引时自证对齐）。 */
+  readonly index: number;
+  /**
+   * 产生该动作的积木 id。
+   * 循环展开出的每一次迭代都指向**同一个**循环积木（不是循环体里那一块）：
+   * 前端点某一步时要能跳回「就是这个循环」。
+   */
+  readonly blockId: string;
+}
+
+/** 来源表格式版本：与产物版本不一致时按「来源未知」处理，不做猜测式定位。 */
+export const ACTION_ORIGIN_VERSION = 1;
+
 export interface CompileError {
   /** 出错积木的 id；`blockId` 可能指向「开始」积木（例如整棵树没有开始块时用空串）。 */
   readonly blockId: string;
@@ -203,7 +236,13 @@ export interface CompileError {
 }
 
 export type CompileResult =
-  | { readonly ok: true; readonly actions: readonly CompiledAction[] }
+  | {
+      readonly ok: true;
+      readonly actions: readonly CompiledAction[];
+      /** 与 `actions` 等长、同序；`origins[i].index === i` 是不变式。 */
+      readonly origins: readonly ActionOrigin[];
+      readonly originsVersion: number;
+    }
   | { readonly ok: false; readonly errors: readonly CompileError[] };
 
 /** 编译需要的公开包字段：`PublicChallenge` 结构上满足它，直接传整个公开包即可。 */
@@ -277,6 +316,8 @@ export const FORBIDDEN_STATE_BLOCK_TYPES: readonly string[] = [
 export const MESSAGE_NO_START_BLOCK = '画布上需要一个「开始」积木，程序从它往下执行（05 §3.1）';
 export const MESSAGE_MULTIPLE_START_BLOCKS =
   '画布上只能有一个「开始」积木，请把多余的删掉或连成一条链（05 §3.1）';
+export const MESSAGE_START_BLOCK_HAS_PREVIOUS =
+  '「开始」积木不能接在别的积木下面：它没有上一个连接，只能是画布上的顶层积木（05 §3.1）';
 export const MESSAGE_READS_STATE =
   'payload 不能读取当前状态：提交时从初始状态回放，读到的不是调试时看见的值（05 §4）';
 export const MESSAGE_ACTION_NOT_ALLOWED = (name: string): string =>

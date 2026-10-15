@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ActionSchema, ret2winPublic, ret2winSolutionActions } from '@pwn2block/shared';
 import { compileProgram } from './compile';
 import type { CompilerChallenge, NormalizedBlock, NormalizedWorkspace } from './types';
-import { BLOCK_TYPES, INPUTS } from './types';
+import { BLOCK_TYPES, INPUTS, ACTION_ORIGIN_VERSION } from './types';
 
 /**
  * 编译器主路径测试（05 §3、§4）。
@@ -263,7 +263,12 @@ describe('编译器：控制流与变量（编译期展开）', () => {
 
   it('空程序合法：开始积木下面没有东西', () => {
     const program: NormalizedWorkspace = { blocks: [blk(BLOCK_TYPES.start)] };
-    expect(compileProgram({ program, challenge: openChallenge })).toEqual({ ok: true, actions: [] });
+    expect(compileProgram({ program, challenge: openChallenge })).toEqual({
+      ok: true,
+      actions: [],
+      origins: [],
+      originsVersion: ACTION_ORIGIN_VERSION,
+    });
   });
 
   it('repeat 按常量次数展开，并把循环体里的变量带到下一轮', () => {

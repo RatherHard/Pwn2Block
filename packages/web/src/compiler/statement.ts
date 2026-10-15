@@ -3,6 +3,8 @@ import { MAX_RUN_MAX_STEPS, MAX_STEP_COUNT, bytesToHex, formatHex } from '@pwn2b
 import type { CompileContext, Env, Eval } from './context';
 import {
   actionAllowed,
+  beginLoop,
+  endLoop,
   fail,
   ok,
   pushAction,
@@ -168,8 +170,13 @@ function compileRepeat(ctx: CompileContext, block: NormalizedBlock, env: Env): E
     );
   }
   let scope = env;
-  for (let i = 0; i < times.value && !ctx.overflowed; i += 1) {
-    scope = compileChain(ctx, body, scope);
+  beginLoop(ctx, block.id);
+  try {
+    for (let i = 0; i < times.value && !ctx.overflowed; i += 1) {
+      scope = compileChain(ctx, body, scope);
+    }
+  } finally {
+    endLoop(ctx);
   }
   return ok(scope);
 }
@@ -202,7 +209,12 @@ function compileWhile(ctx: CompileContext, block: NormalizedBlock, env: Env): Ev
         `循环展开超过上限 ${ctx.limits.loopUnroll} 次仍未结束（05 §4），检查循环条件`,
       );
     }
-    scope = compileChain(ctx, body, scope);
+    beginLoop(ctx, block.id);
+    try {
+      scope = compileChain(ctx, body, scope);
+    } finally {
+      endLoop(ctx);
+    }
     iterations += 1;
     if (ctx.overflowed) return ok(scope);
   }

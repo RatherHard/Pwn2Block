@@ -1,6 +1,7 @@
 import type { AuthorBlock, PrimitiveActionType } from '@pwn2block/shared';
 import { wordBytes } from './bytes';
 import type {
+  ActionOrigin,
   CompiledAction,
   CompileError,
   CompilerChallenge,
@@ -46,6 +47,13 @@ export interface CompileContext {
   readonly authorBlocks: ReadonlyMap<string, AuthorBlock>;
   /** 输出缓冲。 */
   readonly actions: CompiledAction[];
+  /** 动作 → 积木来源表（08 §9.2）；与 `actions` 等长同序。 */
+  readonly origins: ActionOrigin[];
+  /**
+   * 当前正在展开的循环积木 id（栈；内层循环在栈顶）。
+   * 循环体里编译出的动作归到**循环积木**上，而不是循环体里那一块（08 §9.2 第 2 条）。
+   */
+  readonly loopFrames: string[];
   /** 错误缓冲。 */
   readonly errors: CompileError[];
   /** 已用掉的表达式求值步数。 */
@@ -68,6 +76,8 @@ export function createContext(
     allowed: new Set(challenge.allowedActions),
     authorBlocks: new Map((challenge.authorBlocks ?? []).map((block) => [block.id, block])),
     actions: [],
+    origins: [],
+    loopFrames: [],
     errors: [],
     evalSteps: 0,
     statements: 0,
@@ -111,7 +121,8 @@ export function actionAllowed(
   return false;
 }
 
-/** 动作入缓冲；超过 `limits.actions` 时只报一次错（04 §6 的 submit 上限）。 */
+/** 动作入缓冲；超过 `limits.actions` 时只报一次错（04 §6 的 submit 上限）。
+ *  入缓冲的同时登记来源表（08 §9.2）：`origins[i].index === i` 由这里保证。 */
 export function pushAction(
   ctx: CompileContext,
   blockId: string,
@@ -128,8 +139,25 @@ export function pushAction(
     }
     return false;
   }
+  const index = ctx.actions.length;
   ctx.actions.push(action);
+  // 循环体外：来源就是产生动作的那块积木；循环体里：归到最内层循环积木（08 §9.2 第 2 条）。
+  const loop = ctx.loopFrames[ctx.loopFrames.length - 1];
+  ctx.origins.push({ index, blockId: loop ?? blockId });
   return true;
+}
+
+/**
+ * 进入一个循环体的展开：体里编译出的动作都归到这块循环积木上。
+ * 必须与 `endLoop` 成对调用，调用方用 try/finally 保证栈不错位。
+ */
+export function beginLoop(ctx: CompileContext, loopBlockId: string): void {
+  ctx.loopFrames.push(loopBlockId);
+}
+
+/** 退出循环体展开。 */
+export function endLoop(ctx: CompileContext): void {
+  ctx.loopFrames.pop();
 }
 
 /** 表达式求值预算（05 §4）：每个表达式积木访问一次算一步，整次编译累计。
