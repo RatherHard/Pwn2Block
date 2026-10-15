@@ -1,14 +1,18 @@
 import {
   bytesToHex,
   checkChallengePair,
+  flagEnvVarName,
   hexToBytes,
   parseHex,
+  parsePrivatePackage,
   parsePublicPackage,
   presetNameOf,
   type ChallengeDefinition,
   type ChallengeIssue,
   type ChallengeVma,
   type EncodingItem,
+  type PrivateChallenge,
+  type PublicChallenge,
 } from '@pwn2block/shared';
 import { assembleProgram } from './asm';
 import {
@@ -23,10 +27,15 @@ import { repoRoot } from './paths';
 
 /**
  * 题目包校验（03 §2.2）：读 public/private + 默认编码表 → `checkChallengePair`（shared 的唯一实现），
- * 再补一条 shared 看不到的检查：`program.asm` 汇编出来的字节必须等于 `private.json` 里的 `init`。
+ * 再补三条 shared 看不到的检查：
+ *
+ * 1. `public.json` 的 `id` 必须等于题目目录名（服务端按目录名加载，不一致的包上线即不可用）；
+ * 2. `private.json` 的 `flag` 必须是 `env:FLAG_<ID大写>`（真值不进 git，06 §6）；
+ * 3. `program.asm` 汇编出来的字节必须等于 `private.json` 里的 `init`。
  *
  * 为什么 preset 要在这里读：`shared` 不做文件 IO，只接受「preset 内容」。
- * 本地校验与线上加载共用 `checkChallengePair`，所以「本地过了线上挂」不会成为常态。
+ * 本地校验与线上加载共用 `checkChallengePair`，所以「本地过了线上挂」不会成为常态；
+ * 上面 1 / 2 两条正是补上「出题侧漏、服务端有」与「加载器不能拦、出题闸门必须拦」的两处缺口。
  *
  * 为什么还要查 asm 与 init 是否同步：Schema / 布局 / 编码表全对，也不能证明那份 `init` 是新的。
  * 出题过程中程序改一行、忘了重跑 `challenge:asm`，`check` 会全绿而参考解法已经失效
@@ -126,6 +135,60 @@ function asmSyncIssues(
   return issues;
 }
 
+/**
+ * 出题闸门 1（03 §1）：`public.json` 的 `id` 必须等于题目目录名。
+ *
+ * 服务端 `loadChallengeDir` 按目录名加载并核对 `pub.id`（`server/src/challenges.ts`），
+ * 只有出题侧漏了这条：目录名与包内 id 不一致的包能通过 `challenge:check`，
+ * 上线后按目录名开局直接 503 `challenge_unavailable`。
+ */
+function idGateIssues(id: string, pub: PublicChallenge): ChallengeIssue[] {
+  const declaredId = pub.id;
+  if (declaredId === id) return [];
+  return [
+    issue(
+      'id',
+      `公开包 id「${declaredId}」与目录名「${id}」不一致：` +
+        `服务端按目录名加载题目，这种包一上线就不可用` +
+        `（把 public.json 的 id 改成「${id}」，或把目录改名）`,
+    ),
+  ];
+}
+
+/**
+ * 出题闸门 2（CLAUDE.md「绝对不能进 git」、06 §6）：`private.json` 的 `flag` 必须写成
+ * `env:FLAG_<ID大写>`，真值只在部署时由同名环境变量注入。
+ *
+ * 为什么只装在出题 CLI：`shared` 的 `checkChallengePair` 同时是**加载器**，
+ * 合成测试包（`packages/server/test/**`、`tests/**`）用字面 flag 是合法的，不能在加载器里拦。
+ * 出题侧读取的题目包一定会进 git，字面 flag 等于把真值交出去，所以闸门只装在出题这条路上。
+ *
+ * 错误文案不回显字面值：它可能就是真 flag，写进 CI 日志等于二次泄露。
+ */
+function flagGateIssues(id: string, priv: PrivateChallenge): ChallengeIssue[] {
+  const envVar = flagEnvVarName(id);
+  const expected = `env:${envVar}`;
+  const declared = priv.flag;
+  if (declared === expected) return [];
+
+  if (!declared.startsWith('env:')) {
+    return [
+      issue(
+        'flag',
+        `flag 不得写明文常量：题目包必须写成「${expected}」，` +
+          `真值只在部署时由环境变量 ${envVar} 注入，绝不能进 git（06 §6）`,
+      ),
+    ];
+  }
+  return [
+    issue(
+      'flag',
+      `flag 的环境变量名与题目 id「${id}」不匹配：应写成「${expected}」` +
+        `（题目 id 的大写形态，非字母数字字符换成下划线），实际写成「${declared}」（06 §6）`,
+    ),
+  ];
+}
+
 /** 解析并校验一道题；成功时给出 `ChallengeDefinition`（含展开后的编码表与查询视图）。 */
 export function loadChallengeDefinition(id: string, options: CheckOptions = {}): DefinitionResult {
   const root = options.root ?? repoRoot();
@@ -149,12 +212,21 @@ export function loadChallengeDefinition(id: string, options: CheckOptions = {}):
     }
   }
 
+  // 出题闸门：只看「公开包 id」与「私有包 flag」两个声明字段，所以先算、并进同一份问题清单。
+  // 这样即使 `checkChallengePair` 还报了别的问题（例如 flag 大小写不符），闸门问题也会一起列出来；
+  // 合成测试包里用字面 flag 是加载器的合法输入，闸门只装在出题这条路上。
+  const privResult = parsePrivatePackage(files.privateRaw);
+  const gateIssues: ChallengeIssue[] = [
+    ...(pubResult.ok ? idGateIssues(id, pubResult.pub) : []),
+    ...(privResult.ok ? flagGateIssues(id, privResult.priv) : []),
+  ];
+
   const checked = checkChallengePair(files.publicRaw, files.privateRaw, {
     presetItems,
     flagValue: files.flagValue,
   });
 
-  const issues = [...presetIssues, ...(checked.ok ? [] : checked.issues)];
+  const issues = [...gateIssues, ...presetIssues, ...(checked.ok ? [] : checked.issues)];
   if (!checked.ok || issues.length > 0) return { ok: false, id, issues };
 
   if (files.programAsm !== undefined && options.skipAsmSyncCheck !== true) {

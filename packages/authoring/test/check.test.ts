@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ret2winPrivate, ret2winPublic } from '@pwn2block/shared';
+import { flagEnvVarName, ret2winPrivate, ret2winPublic } from '@pwn2block/shared';
 import { checkAllChallenges, checkChallenge, loadChallengeDefinition } from '../src/check';
 import { readChallengeFiles } from '../src/challenge-files';
 import { clearPresetCache } from '../src/presets';
@@ -23,6 +23,33 @@ function fixtureText(id: string, name: string): string {
 }
 
 const ret2winEnv = { FLAG_RET2WIN: SENTINEL };
+
+/**
+ * 把 ret2win 夹具放成目录名 `dirId` 的题目包，并按需改写包内的 `id` / `flag`。
+ * 默认两处都与目录名自洽，用来单独复现「目录名与包内容不一致」的坏包。
+ */
+function ret2winRepoAs(
+  dirId: string,
+  patch: { readonly publicId?: string; readonly flag?: string } = {},
+): string {
+  const publicText = fixtureText('ret2win', 'public.json').replace(
+    '"id": "ret2win"',
+    `"id": ${JSON.stringify(patch.publicId ?? dirId)}`,
+  );
+  const privateText = fixtureText('ret2win', 'private.json').replace(
+    '"flag": "env:FLAG_RET2WIN"',
+    `"flag": ${JSON.stringify(patch.flag ?? `env:${flagEnvVarName(dirId)}`)}`,
+  );
+  return makeTempRepo({
+    [`challenges/${dirId}/public.json`]: publicText,
+    [`challenges/${dirId}/private.json`]: privateText,
+  });
+}
+
+/** 目录名对应的 flag 环境变量，值用本地哨兵（06 §6）。 */
+function envOf(dirId: string): NodeJS.ProcessEnv {
+  return { [flagEnvVarName(dirId)]: SENTINEL };
+}
 
 describe('check：正例', () => {
   it('夹具题目包与 shared 的 ret2win 样例逐字一致', () => {
@@ -235,6 +262,95 @@ describe('check：program.asm 与 private.json 的 init 必须同步', () => {
       ok: true,
       issues: [],
     });
+  });
+});
+
+describe('check：公开包 id 必须等于题目目录名', () => {
+  it('一致时通过（含连字符目录名）', () => {
+    expect(
+      checkChallenge('ret2win', { root: ret2winRepoAs('ret2win'), env: envOf('ret2win') }),
+    ).toEqual({ id: 'ret2win', ok: true, issues: [] });
+    expect(
+      checkChallenge('stack-frame-01', {
+        root: ret2winRepoAs('stack-frame-01'),
+        env: envOf('stack-frame-01'),
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('不一致时报在 id 上，并同时给出两边名字', () => {
+    const report = checkChallenge('evil-id-mismatch', {
+      root: ret2winRepoAs('evil-id-mismatch', { publicId: 'another-id' }),
+      env: envOf('evil-id-mismatch'),
+    });
+    expect(report.ok).toBe(false);
+    expect(report.issues).toHaveLength(1);
+    expect(report.issues[0]?.path).toBe('id');
+    expect(report.issues[0]?.message).toBe(
+      '公开包 id「another-id」与目录名「evil-id-mismatch」不一致：' +
+        '服务端按目录名加载题目，这种包一上线就不可用（把 public.json 的 id 改成「evil-id-mismatch」，或把目录改名）',
+    );
+  });
+
+  it('id 不一致时不会误判成 flag 问题（flag 已按目录名写对）', () => {
+    const report = checkChallenge('evil-id-mismatch', {
+      root: ret2winRepoAs('evil-id-mismatch', { publicId: 'another-id' }),
+      env: envOf('evil-id-mismatch'),
+    });
+    expect(report.issues.map((item) => item.path)).toEqual(['id']);
+  });
+});
+
+describe('check：flag 必须是 env:FLAG_<ID大写>（出题闸门，06 §6）', () => {
+  it('real ret2win 的 env:FLAG_RET2WIN 通过', () => {
+    expect(
+      checkChallenge('ret2win', { root: ret2winRepoAs('ret2win'), env: envOf('ret2win') }),
+    ).toEqual({ id: 'ret2win', ok: true, issues: [] });
+  });
+
+  it('目录名里的连字符换成下划线：stack-frame-01 → env:FLAG_STACK_FRAME_01', () => {
+    const report = checkChallenge('stack-frame-01', {
+      root: ret2winRepoAs('stack-frame-01'),
+      env: envOf('stack-frame-01'),
+    });
+    expect(report.ok, JSON.stringify(report.issues)).toBe(true);
+  });
+
+  it('明文常量一律报错，且错误文案不回显明文', () => {
+    for (const literal of ['flag{literal_v2}', 'DEMO{literal_v2}', 'plain-text-flag']) {
+      const report = checkChallenge('ret2win', {
+        root: ret2winRepoAs('ret2win', { flag: literal }),
+        env: envOf('ret2win'),
+      });
+      expect(report.ok).toBe(false);
+      const item = report.issues.find(
+        (issue) => issue.path === 'flag' && issue.message.includes('明文'),
+      );
+      expect(item?.message).toContain('env:FLAG_RET2WIN');
+      // 明文本身可能就是真 flag，报错文案不能把它带进 CI 日志。
+      expect(item?.message).not.toContain(literal);
+    }
+  });
+
+  it('env: 前缀但变量名与题目 id 不匹配时报错，并给出期望与实际', () => {
+    const report = checkChallenge('ret2win', {
+      root: ret2winRepoAs('ret2win', { flag: 'env:FLAG_OTHER' }),
+      env: envOf('ret2win'),
+    });
+    expect(report.ok).toBe(false);
+    const item = report.issues.find((issue) => issue.path === 'flag');
+    expect(item?.message).toContain('env:FLAG_RET2WIN');
+    expect(item?.message).toContain('env:FLAG_OTHER');
+  });
+
+  it('全小写的 env:flag_ret2win 报错', () => {
+    const report = checkChallenge('ret2win', {
+      root: ret2winRepoAs('ret2win', { flag: 'env:flag_ret2win' }),
+      env: envOf('ret2win'),
+    });
+    expect(report.ok).toBe(false);
+    expect(report.issues.some((item) => item.path === 'flag')).toBe(true);
+    expect(report.issues.some((item) => item.message.includes('env:FLAG_RET2WIN'))).toBe(true);
   });
 });
 
