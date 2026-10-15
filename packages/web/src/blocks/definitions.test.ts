@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Blockly from 'blockly';
 import { MAX_STEPS_PER_RUN, ret2winPublic } from '@pwn2block/shared';
-import { BLOCK_TYPES, FIELDS, INPUTS } from '../compiler/types';
+import { BLOCK_TYPES, FIELDS, FORBIDDEN_STATE_BLOCK_TYPES, INPUTS } from '../compiler/types';
 import { BLOCK_SPECS, SHADOW_MATH_NUMBER } from './catalog';
 import {
   BLOCK_MAX_INSTANCES,
@@ -73,6 +73,27 @@ describe('积木定义：注册与文案', () => {
   it('登记了全部动作积木的容量约束：开始积木只允许一个', () => {
     expect(START_BLOCK_MAX_INSTANCES).toBe(1);
     expect(BLOCK_MAX_INSTANCES[BLOCK_TYPES.start]).toBe(1);
+  });
+
+  it('读状态类的保留类型名不会被注册成积木（05 §4：工具箱里根本没有）', () => {
+    definePwn2BlockBlocks();
+    // 用一个独立的出题人积木（不碰 ret2win 那份）验证：注册出题人积木也不会冒出保留名。
+    defineAuthorBlockDefinitions({
+      authorBlocks: [
+        {
+          id: 'selfcheck',
+          label: '自证积木',
+          params: [],
+          expand: [{ type: 'step', count: 1 }],
+        },
+      ],
+    });
+    for (const type of FORBIDDEN_STATE_BLOCK_TYPES) {
+      expect(Blockly.Blocks[type], `不该注册读状态积木：${type}`).toBeUndefined();
+    }
+    // 自证：Blockly 认得出注册过的类型，所以上面的 undefined 不是"什么都没注册"。
+    expect(Blockly.Blocks[BLOCK_TYPES.actionRet]).toBeDefined();
+    expect(Blockly.Blocks.author_selfcheck).toBeDefined();
   });
 });
 

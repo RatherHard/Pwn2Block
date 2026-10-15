@@ -1,4 +1,5 @@
-import type { AuthorBlock, PrimitiveActionType } from '@pwn2block/shared';
+import { expandBlock } from '@pwn2block/shared';
+import type { AuthorBlock, BlockAction, PrimitiveActionType } from '@pwn2block/shared';
 import { wordBytes } from './bytes';
 import type {
   ActionOrigin,
@@ -39,6 +40,15 @@ export function fail<T>(): Eval<T> {
 
 export interface CompileContext {
   readonly limits: CompilerLimits;
+  /**
+   * 调用方传进来的公开包（编译只需要 `CompilerChallenge` 那三个字段）。
+   *
+   * 出题人积木的本地预校验要调 shared 的 `expandBlock`（展开语义的唯一事实来源）。它的入参
+   * 已收窄成 `BlockExpansionSource`（只有 `authorBlocks`），所以这里不需要把自己断言成完整
+   * `PublicChallenge`——编译器只经 `authorBlocks` 索引表取值，这个对象也**只用于本地预校验**，
+   * 服务端仍会自己展开一次。
+   */
+  readonly challenge: CompilerChallenge;
   /** 字长（字节）：`int` / `addr` 的默认宽度 W。 */
   readonly wordBytes: number;
   /** 本题允许的原子动作名（`allowedActions`）。 */
@@ -64,6 +74,11 @@ export interface CompileContext {
   overflowed: boolean;
   evalLimitHit: boolean;
   actionLimitHit: boolean;
+  /** 出题人积木展开校验的记忆化：键是 `id + args`，值是失败原因（`undefined` 表示可展开）。
+   * 循环展开会把同一块出题人积木算很多次，参数相同就不必重复跑服务端的展开器。 */
+  readonly expansionChecks: Map<string, string | undefined>;
+  /** 已经报过的 `blockId + 文案`：循环展开会把同一块积木算很多遍，重复项不该重复进列表。 */
+  readonly reported: Set<string>;
 }
 
 export function createContext(
@@ -72,6 +87,8 @@ export function createContext(
 ): CompileContext {
   return {
     limits: { ...DEFAULT_COMPILER_LIMITS, ...limits },
+    // `CompilerChallenge` 结构上满足 `expandBlock` 的入参，这里不需要断言。
+    challenge,
     wordBytes: wordBytes(challenge.archBits),
     allowed: new Set(challenge.allowedActions),
     authorBlocks: new Map((challenge.authorBlocks ?? []).map((block) => [block.id, block])),
@@ -84,16 +101,26 @@ export function createContext(
     overflowed: false,
     evalLimitHit: false,
     actionLimitHit: false,
+    expansionChecks: new Map(),
+    reported: new Set(),
   };
 }
 
-/** 记录一条编译错误并返回失败：调用方直接 `return reportError(...)` 即可。 */
+/**
+ * 记录一条编译错误并返回失败：调用方直接 `return reportError(...)` 即可。
+ *
+ * 同一块积木的同一句话只进列表一次：循环展开会把同一块积木算很多遍（256 轮就是 256 条
+ * 一模一样的错误），重复项会把错误预算占满，后面的真错反而挤不进来（05 §4 的"不刷屏"）。
+ */
 export function reportError(
   ctx: CompileContext,
   blockId: string,
   message: string,
 ): Eval<never> {
+  const key = `${blockId}\u0000${message}`;
+  if (ctx.reported.has(key)) return fail();
   if (ctx.errors.length < ctx.limits.errors) {
+    ctx.reported.add(key);
     ctx.errors.push({ blockId, message });
     if (ctx.errors.length >= ctx.limits.errors) ctx.overflowed = true;
   } else {
@@ -119,6 +146,27 @@ export function actionAllowed(
   if (ctx.allowed.has(name)) return true;
   reportError(ctx, block.id, MESSAGE_ACTION_NOT_ALLOWED(name));
   return false;
+}
+
+/**
+ * 出题人积木的**本地预校验**：把编译出来的 `block` 动作交给 shared 的 `expandBlock` 试展开一次。
+ *
+ * 为什么要在编译期做：编译期与提交期对参数的判定口径必须一致，否则会出现「编译能过、提交必被拒」——
+ * 例如模板 `{ type: 'step', count: '$n' }` 配一个 `int` 参数，学习者填 0 或 20000 时客户端明明能编译，
+ * 服务端展开却超出 `step.count` 的 1..10000 上下界。客户端拿 `authorBlocks` 就能看出这一点，
+ * 却让学习者去挨一次不透明的「提交被拒」，是没道理的。
+ *
+ * 语义**不重复实现**：调的就是服务端那一个 `expandBlock`（01 §6 第 3 条要求展开在服务端完成，
+ * 这里只是提前发现必然的失败，不发送、不采信任何客户端展开结果）。
+ * 返回值是失败原因（`undefined` 表示可展开）。
+ */
+export function expansionIssue(ctx: CompileContext, action: BlockAction): string | undefined {
+  const key = `${action.id}\u0000${JSON.stringify(action.args)}`;
+  if (ctx.expansionChecks.has(key)) return ctx.expansionChecks.get(key);
+  const expansion = expandBlock(ctx.challenge, action);
+  const issue = expansion.ok ? undefined : expansion.detail;
+  ctx.expansionChecks.set(key, issue);
+  return issue;
 }
 
 /** 动作入缓冲；超过 `limits.actions` 时只报一次错（04 §6 的 submit 上限）。

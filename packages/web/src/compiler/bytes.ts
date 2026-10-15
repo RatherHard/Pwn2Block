@@ -1,4 +1,4 @@
-import type { ArchBits } from '@pwn2block/shared';
+import { MAX_BYTE_CONSTRUCTION_BYTES, type ArchBits } from '@pwn2block/shared';
 
 /**
  * 字节构造原语（05 §3.1）。
@@ -22,7 +22,8 @@ export type ByteErrorCode =
   | 'negative_value'
   | 'width_out_of_range'
   | 'value_overflow'
-  | 'invalid_endian';
+  | 'invalid_endian'
+  | 'length_out_of_range';
 
 /** 字节构造原语的结构化错误：`code` 便于测试精确断言，`message` 是给学习者看的中文文案。 */
 export class ByteBuildError extends Error {
@@ -41,6 +42,32 @@ export const MAX_INT_WIDTH = 8;
 
 /** 默认字长：64 位机器一个寄存器 8 字节。32 位题目由编译器传 `wordBytes(archBits)`。 */
 export const DEFAULT_WORD_BYTES = 8;
+
+/**
+ * 单个字节构造允许的最大字节数：**请求体上限的一半**（04 §6，常量在 shared 的 `limits.ts`）。
+ *
+ * 为什么必须有这个上限：`padding(byte, n)` 的 n 直接来自学习者的数字输入框，构造出的字节还要
+ * hex 编码（长度翻倍）后进请求体。没有上限时两件事都会发生，而且都不是"学习者写错了"：
+ * - n 大到几 GB：`Uint8Array` 真的去分配，页面直接卡死（实测 1e10 字节要 3 秒并占住 10GB 虚拟内存）；
+ * - n 更大（例如 `Number.MAX_SAFE_INTEGER`）：`RangeError: Array buffer allocation failed`
+ *   会**逃出** `compileProgram`，编译器就违反了「要么给动作、要么给带 blockId 的错误」的契约。
+ *
+ * 数值本身不在这里定义：它是全局资源上限，与 `MAX_BODY_BYTES` 同源，必须只有一份（07 §2）。
+ */
+export const MAX_BYTE_LENGTH = MAX_BYTE_CONSTRUCTION_BYTES;
+
+/** 分配前的长度检查：超出上限就抛结构化错误，让编译器转成带 blockId 的编译错误。 */
+function assertLength(length: number, what: string): void {
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw new ByteBuildError('invalid_length', `${what}必须是非负整数，收到 ${String(length)}`);
+  }
+  if (length > MAX_BYTE_LENGTH) {
+    throw new ByteBuildError(
+      'length_out_of_range',
+      `${what}超过单个字节构造的上限 ${MAX_BYTE_LENGTH} 字节（请求体上限的一半，04 §6）`,
+    );
+  }
+}
 
 /** 题目位宽 → 字长（字节）。 */
 export function wordBytes(archBits: ArchBits): number {
@@ -71,9 +98,7 @@ export function padding(byte: number, n: number): Uint8Array {
       `填充字节必须是 0x00..0xff 之间的整数，收到 ${String(byte)}`,
     );
   }
-  if (!Number.isSafeInteger(n) || n < 0) {
-    throw new ByteBuildError('invalid_length', `填充次数必须是非负整数，收到 ${String(n)}`);
-  }
+  assertLength(n, '填充次数');
   return new Uint8Array(n).fill(byte);
 }
 
@@ -84,7 +109,10 @@ export function string(s: string): Uint8Array {
   if (typeof s !== 'string') {
     throw new ByteBuildError('invalid_value', `string 需要字符串，收到 ${String(s)}`);
   }
-  return textEncoder.encode(s);
+  const bytes = textEncoder.encode(s);
+  // 按**编码后的字节数**设限：一个汉字 3 字节，不是 1 字节。
+  assertLength(bytes.length, '字符串的字节数');
+  return bytes;
 }
 
 /**
@@ -147,7 +175,9 @@ export function raw(hex: string): Uint8Array {
       `raw 需要偶数个十六进制字符（无 0x 前缀），收到 ${JSON.stringify(String(hex))}`,
     );
   }
-  const out = new Uint8Array(hex.length / 2);
+  const length = hex.length / 2;
+  assertLength(length, 'raw 的字节数');
+  const out = new Uint8Array(length);
   for (let i = 0; i < out.length; i += 1) {
     out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
@@ -165,6 +195,7 @@ export function concat(...parts: readonly Uint8Array[]): Uint8Array {
     }
     total += part.length;
   }
+  assertLength(total, '拼接结果');
 
   const out = new Uint8Array(total);
   let offset = 0;

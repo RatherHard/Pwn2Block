@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_BODY_BYTES } from '@pwn2block/shared';
 import {
   ByteBuildError,
   DEFAULT_WORD_BYTES,
+  MAX_BYTE_LENGTH,
   MAX_INT_WIDTH,
   MIN_INT_WIDTH,
   addr,
@@ -52,6 +54,45 @@ describe('字节原语：padding', () => {
     expect(errorCodeOf(() => padding(0x41, Number.POSITIVE_INFINITY))).toBe(
       'ByteBuildError:invalid_length',
     );
+  });
+});
+
+describe('字节原语：单个构造的长度上限', () => {
+  it('恰好等于上限时通过，超过一个字节就报错', () => {
+    expect(padding(0x41, MAX_BYTE_LENGTH)).toHaveLength(MAX_BYTE_LENGTH);
+    expect(errorCodeOf(() => padding(0x41, MAX_BYTE_LENGTH + 1))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+  });
+
+  it('天文数字的次数给出结构化错误，而不是 Uint8Array 的 RangeError', () => {
+    // 学习者可以在数字输入框里填任意整数：1e10 个字节既分配不出来，也发不出去。
+    expect(errorCodeOf(() => padding(0x41, 10_000_000_000))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+    expect(errorCodeOf(() => padding(0x41, Number.MAX_SAFE_INTEGER))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+  });
+
+  it('string / raw / concat 同样受上限约束', () => {
+    expect(errorCodeOf(() => string('a'.repeat(MAX_BYTE_LENGTH + 1)))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+    // UTF-8 按**编码后的字节数**算：一个汉字 3 字节。
+    expect(errorCodeOf(() => string('中'.repeat(MAX_BYTE_LENGTH / 3 + 1)))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+    expect(errorCodeOf(() => raw('41'.repeat(MAX_BYTE_LENGTH + 1)))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+    expect(errorCodeOf(() => concat(padding(0x41, MAX_BYTE_LENGTH), padding(0x42, 1)))).toBe(
+      'ByteBuildError:length_out_of_range',
+    );
+  });
+
+  it('上限是"请求体上限的一半"：hex 编码后正好放得进请求体（04 §6）', () => {
+    expect(MAX_BYTE_LENGTH).toBe(MAX_BODY_BYTES / 2);
   });
 });
 

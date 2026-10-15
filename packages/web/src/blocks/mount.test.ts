@@ -243,6 +243,29 @@ describe('挂载桥：错误定位', () => {
     bridge.highlight(undefined);
     expect(highlightedIds(workspace)).toEqual([]);
   });
+
+  it('编译错误的 blockId 在真实画布上查得到，能被 highlight 定位（05 §4）', () => {
+    const bridge = mount();
+    const workspace = bridge.workspace;
+    const start = workspace.newBlock(BLOCK_TYPES.start);
+    const gets = workspace.newBlock('author_gets');
+    gets.initSvg();
+    const next = start.nextConnection;
+    const previous = gets.previousConnection;
+    if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
+    next.connect(previous);
+
+    // `data` 还没连：编译器必须报错，并且指到画布上这块积木。
+    const result = compileProgram({ program: bridge.normalize(), challenge: ret2winPublic });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const blockId = result.errors[0]?.blockId;
+    expect(blockId).toBe(gets.id);
+    // 高亮接口按同一个 id 就能定位：D 直接把 errors[].blockId 传进来即可。
+    expect(workspace.getBlockById(blockId ?? '')).toBe(gets);
+    bridge.highlight(blockId);
+    expect(highlightedIds(workspace)).toEqual([gets.id]);
+  });
 });
 
 describe('挂载桥：作者积木进画布', () => {

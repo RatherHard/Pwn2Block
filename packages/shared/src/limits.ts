@@ -57,6 +57,15 @@ export const MAX_RUN_MAX_STEPS = MAX_STEPS_PER_RUN;
 /** HTTP 请求体大小上限（04 §6）。 */
 export const MAX_BODY_BYTES = 1 * 1024 * 1024;
 
+/**
+ * 单个字节构造（`padding` / `string` / `raw` / `concat`）能产出的最大字节数（05 §4）。
+ *
+ * 取请求体上限的一半：字节构造的结果还要 hex 编码（长度翻倍）才进请求体，比这更大的字节串
+ * **一定发不出去**。编译器据此在分配前就报编译错误，而不是让 `Uint8Array` 去分配几 GB
+ * （极端输入还会抛 `RangeError` 逃出 `compileProgram`，破坏「要么给动作、要么给带 blockId 的错误」）。
+ */
+export const MAX_BYTE_CONSTRUCTION_BYTES = MAX_BODY_BYTES / 2;
+
 /** 会话空闲回收时间：30 分钟（04 §1）。 */
 export const SESSION_IDLE_MS = 30 * 60 * 1000;
 

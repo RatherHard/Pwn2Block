@@ -264,12 +264,22 @@ function buildTemplateAction(
 }
 
 /**
+ * 展开出题人积木需要的最小题目信息：只有 `authorBlocks`。
+ *
+ * 刻意收窄而不是要整个 `PublicChallenge`：展开语义只依赖这一处，编译器（`CompilerChallenge`
+ * 的结构子集）因此不需要把自己断言成完整公开包才能调它。
+ */
+export interface BlockExpansionSource {
+  readonly authorBlocks?: readonly AuthorBlock[];
+}
+
+/**
  * 把一个 `block` 动作展开成原子动作序列。
  *
  * **这是唯一的展开入口**：服务端自己展开，客户端提交的展开结果一律不采信（01 §6 第 3 条）。
  * 出题人积木的展开动作不受 `allowedActions` 限制，这是它存在的意义（03 §3）。
  */
-export function expandBlock(pub: PublicChallenge, action: BlockAction): BlockExpansion {
+export function expandBlock(pub: BlockExpansionSource, action: BlockAction): BlockExpansion {
   const block: AuthorBlock | undefined = (pub.authorBlocks ?? []).find((b) => b.id === action.id);
   if (!block) {
     return { ok: false, code: 'unknown_action', detail: `未声明的出题人积木：${action.id}` };

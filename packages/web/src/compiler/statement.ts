@@ -1,10 +1,11 @@
-import type { PrimitiveActionType } from '@pwn2block/shared';
+import type { BlockAction, PrimitiveActionType } from '@pwn2block/shared';
 import { MAX_RUN_MAX_STEPS, MAX_STEP_COUNT, bytesToHex, formatHex } from '@pwn2block/shared';
 import type { CompileContext, Env, Eval } from './context';
 import {
   actionAllowed,
   beginLoop,
   endLoop,
+  expansionIssue,
   fail,
   ok,
   pushAction,
@@ -173,7 +174,10 @@ function compileRepeat(ctx: CompileContext, block: NormalizedBlock, env: Env): E
   beginLoop(ctx, block.id);
   try {
     for (let i = 0; i < times.value && !ctx.overflowed; i += 1) {
+      const before = ctx.errors.length;
       scope = compileChain(ctx, body, scope);
+      // 循环体已经报过错：再展开只会把同一个 blockId 重复算一遍（白白耗掉求值与语句预算）。
+      if (ctx.errors.length > before) break;
     }
   } finally {
     endLoop(ctx);
@@ -211,7 +215,11 @@ function compileWhile(ctx: CompileContext, block: NormalizedBlock, env: Env): Ev
     }
     beginLoop(ctx, block.id);
     try {
+      const before = ctx.errors.length;
       scope = compileChain(ctx, body, scope);
+      // 循环体已经报过错就停：条件依赖的变量多半没被赋值，继续展开只会重复同一条错误，
+      // 最后还会多报一条"展开超上限仍未结束"的误导性错误。
+      if (ctx.errors.length > before) return fail();
     } finally {
       endLoop(ctx);
     }
@@ -394,5 +402,14 @@ function compileAuthorBlock(
     args[param.name] = formatHex(unsigned.value);
   }
 
-  return emit(ctx, block, env, ok<CompiledAction>({ type: 'block', id, args }));
+  // 本地预校验：与提交期同一个展开器（shared 的 expandBlock）。参数形式上没错、但展开结果
+  // 不合法的情形（例如 int 参数超出模板里 `step.count` 的上下界）必须在这里就被拒，
+  // 不能让学习者挨一次不透明的「提交被拒」（03 §3、09 §3.2）。
+  const action: BlockAction = { type: 'block', id, args };
+  const issue = expansionIssue(ctx, action);
+  if (issue !== undefined) {
+    return reportError(ctx, block.id, `出题人积木 ${id} 的参数无法展开：${issue}`);
+  }
+
+  return emit(ctx, block, env, ok<CompiledAction>(action));
 }

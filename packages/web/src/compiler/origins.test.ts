@@ -301,3 +301,88 @@ describe('来源表：每次编译都是新的自洽产物', () => {
     ]);
   });
 });
+
+describe('来源表：混合程序的归因与网络边界', () => {
+  /** 这个 describe 要同时用到 `push` 与出题人积木，所以在公共挑战上补一个动作白名单。 */
+  const mixedChallenge: CompilerChallenge = {
+    ...authorChallenge,
+    allowedActions: ['step', 'write_bytes', 'push'],
+  };
+
+  /** 循环里外都有动作，再接一块出题人积木：三类归因同时出现。 */
+  const mixedProgram = (): NormalizedWorkspace =>
+    programOf([
+      blk(BLOCK_TYPES.controlsRepeat, {
+        id: 'loop1',
+        inputs: { [INPUTS.times]: num(2), [INPUTS.body]: chainOf([push(1, { id: 'body' })]) },
+      }),
+      blk('author_gets', {
+        id: 'author1',
+        inputs: { data: blk(BLOCK_TYPES.bytesRaw, { id: 'raw1', fields: { HEX: 'aabb' } }) },
+      }),
+    ]);
+
+  it('循环展开归循环积木、循环外归自己、出题人积木归自己', () => {
+    const program = mixedProgram();
+    const result = successOf(compileProgram({ program, challenge: mixedChallenge }));
+    expect(result.actions).toEqual([
+      { type: 'push', value: '0x1' },
+      { type: 'push', value: '0x1' },
+      { type: 'block', id: 'gets', args: { data: 'aabb' } },
+    ]);
+    expect(result.origins).toEqual([
+      { index: 0, blockId: 'loop1' },
+      { index: 1, blockId: 'loop1' },
+      { index: 2, blockId: 'author1' },
+    ]);
+    expectOriginsAligned(result, program);
+  });
+
+  it('循环体里的出题人积木：动作归到循环积木（循环展开的归因优先）', () => {
+    const program = programOf([
+      blk(BLOCK_TYPES.controlsRepeat, {
+        id: 'loop1',
+        inputs: {
+          [INPUTS.times]: num(2),
+          [INPUTS.body]: chainOf([
+            blk('author_gets', {
+              id: 'author1',
+              inputs: { data: blk(BLOCK_TYPES.bytesRaw, { id: 'raw1', fields: { HEX: '41' } }) },
+            }),
+          ]),
+        },
+      }),
+    ]);
+    const result = successOf(compileProgram({ program, challenge: mixedChallenge }));
+    expect(result.origins).toEqual([
+      { index: 0, blockId: 'loop1' },
+      { index: 1, blockId: 'loop1' },
+    ]);
+    expectOriginsAligned(result, program);
+  });
+
+  it('请求体只有动作：mixed 程序的 JSON 里没有 origins / blockId / index', () => {
+    const result = successOf(
+      compileProgram({ program: mixedProgram(), challenge: mixedChallenge }),
+    );
+    const body = JSON.stringify({ actions: actionsForRequest(result) });
+    expect(body).toBe(
+      '{"actions":[{"type":"push","value":"0x1"},{"type":"push","value":"0x1"},' +
+        '{"type":"block","id":"gets","args":{"data":"aabb"}}]}',
+    );
+    for (const key of ['origins', 'originsVersion', 'blockId', '"index"']) {
+      expect(body).not.toContain(key);
+    }
+  });
+
+  it('来源表版本与常量一致，且永远不是空串 id', () => {
+    const result = successOf(
+      compileProgram({ program: mixedProgram(), challenge: mixedChallenge }),
+    );
+    expect(result.originsVersion).toBe(ACTION_ORIGIN_VERSION);
+    expect(result.originsVersion).toBe(1);
+    for (const origin of result.origins) {
+      expect(origin.blockId).not.toBe('');
+    }
+  });
+});
