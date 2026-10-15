@@ -25,7 +25,7 @@ import {
 import { diffProjections } from '../viewmodel/diff';
 import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
-import { statusLine, statusMarker, statusTextOf, type PageMode } from '../viewmodel/session';
+import { statusLine, statusMarker, statusTextOf, isExitedProjection, type PageMode } from '../viewmodel/session';
 import { runMenuModel, type RunCommand } from '../viewmodel/toolbar';
 import { verdictModel } from '../viewmodel/verdict';
 import {
@@ -389,8 +389,9 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   private runModel(state: ControllerState) {
+    const page = state.page;
     return runMenuModel({
-      mode: state.page?.mode ?? 'debug',
+      mode: page?.mode ?? 'debug',
       hasSession: state.sessionId !== undefined && state.challenge !== undefined,
       sessionExpired: state.sessionExpired,
       artifact: state.artifact.artifact,
@@ -399,6 +400,9 @@ export class Pwn2BlockApp extends LitElement {
       history: state.history,
       cursor: state.cursor,
       allowedActions: state.challenge?.allowedActions ?? [],
+      // 退出信息与控制器取同一份派生（04 §1.1）：`satisfied` + `lastStop.reason === 'exit'`
+      // 也是终止态，执行类按钮必须禁用并写出原因（05 §6）。
+      exited: page === undefined ? false : isExitedProjection(page.projection),
     });
   }
 

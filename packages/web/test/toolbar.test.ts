@@ -17,6 +17,7 @@ function input(overrides: Partial<RunMenuInput> = {}): RunMenuInput {
     history: { undo: 0, stepBack: 0 },
     cursor: 0,
     allowedActions: CHALLENGE_ACTIONS,
+    exited: false,
     ...overrides,
   };
 }
