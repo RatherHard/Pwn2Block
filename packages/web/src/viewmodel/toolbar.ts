@@ -4,6 +4,11 @@
  * 顶部「运行」菜单与 payload 工具栏等价（05 §1），所以按钮的可用性与禁用原因只能有**一处**
  * 事实来源，否则两处的禁用状态会漂移。组件只负责把这里的模型渲染成按钮并把
  * `RunCommand` 派发出去。
+ *
+ * 终止态口径（04 §1.1）：**`failed`（判负）** 与 **已退出** 都是终止态，两者都禁用执行类动作
+ * （试运行 / 单步 / 运行 N 步），**回退类（后退一步 / 撤销 / 重置）与「提交判题」不受影响**。
+ * 判定只看 `RunMenuInput.terminal` 这一个字段，由调用方用 `viewmodel/session.ts` 的
+ * `terminalReasonOf()` 从**调试实例投影**派生，不允许各处自己拼 `status`。
  */
 import { MAX_STEP_COUNT, type HistoryDepthView } from '@pwn2block/shared';
 import type { PayloadArtifact } from '../compiler/artifact';
@@ -13,7 +18,7 @@ import {
   MESSAGE_NEED_COMPILE,
   MESSAGE_STALE,
 } from './program';
-import type { PageMode } from './session';
+import type { PageMode, TerminalReason } from './session';
 
 /** 工具栏能做的事。「编译」是本地操作，不是 API 请求，所以单独一类。 */
 export type RunCommand =
@@ -48,11 +53,13 @@ export interface RunMenuInput {
   readonly cursor: number;
   readonly allowedActions: readonly string[];
   /**
-   * 程序已退出（04 §1.1）。调用方用 `viewmodel/session.ts` 的 `isExitedProjection()` 派生：
-   * `lastStop.reason === 'exit'` **并上** `status === 'exited'`——判胜那一刻程序已经结束时
-   * `status` 是 `satisfied`，只看 `status` 会漏判（09 §8 第 10 条）。
+   * 终止态（04 §1.1）：`failed` 判负或 `exited` 已结束，`undefined` 表示还能继续执行。
+   * 调用方用 `viewmodel/session.ts` 的 `terminalReasonOf()` 从调试实例投影派生。
+   *
+   * 这里刻意带**原因**而不是一个布尔：两条来路的禁用文案不同（判负 ≠ 已退出），
+   * 但仍然只有一个字段、一处判据，不存在两个并列布尔互相漂移的可能。
    */
-  readonly exited: boolean;
+  readonly terminal?: TerminalReason;
 }
 
 interface Gate {
@@ -86,12 +93,29 @@ function debugBlocked(input: RunMenuInput): string | undefined {
   return undefined;
 }
 
-/** 已退出 = 终止态（04 §1.1）：执行类动作会被服务端拒绝，回退类与「提交判题」不受影响。 */
+/**
+ * 已退出 = 程序执行到结束（04 §1.1）：执行类动作会被服务端拒绝，回退类与「提交判题」不受影响。
+ * 判胜那一刻程序也可能已经结束，此时 `status` 是 `satisfied`，只有 `lastStop.reason` 能说明。
+ */
 export const MESSAGE_EXITED =
   '程序已退出：执行类动作会被服务端拒绝，请用「后退一步」「撤销」「重置」重来，或直接「提交判题」';
 
+/**
+ * 判负 = `failed`：运行时异常或命中失败条件（03 §2.1）。
+ * 与「已退出」分开写：判负未必是 `exit` 造成的，说成「已退出」会让学习者找错方向。
+ */
+export const MESSAGE_FAILED =
+  '程序已被判负（运行出错或命中失败条件）：执行类动作会被服务端拒绝，请用「后退一步」「撤销」「重置」重来，或直接「提交判题」';
+
+/** 终止态原因 → 禁用文案：两条来路都要给出出路，且都必须逐字可读（05 §6）。 */
+const MESSAGE_TERMINAL: Readonly<Record<TerminalReason, string>> = {
+  failed: MESSAGE_FAILED,
+  exited: MESSAGE_EXITED,
+};
+
+/** 终止态（failed / 已退出）一律禁执行类动作（04 §1.1）。 */
 function terminalBlocked(input: RunMenuInput): string | undefined {
-  return input.exited ? MESSAGE_EXITED : undefined;
+  return input.terminal === undefined ? undefined : MESSAGE_TERMINAL[input.terminal];
 }
 
 function firstReason(...reasons: readonly (string | undefined)[]): string | undefined {

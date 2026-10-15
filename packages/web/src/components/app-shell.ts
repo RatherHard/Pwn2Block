@@ -25,7 +25,7 @@ import {
 import { diffProjections } from '../viewmodel/diff';
 import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
-import { statusLine, statusMarker, statusTextOf, isExitedProjection, type PageMode } from '../viewmodel/session';
+import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode } from '../viewmodel/session';
 import { runMenuModel, type RunCommand } from '../viewmodel/toolbar';
 import { verdictModel } from '../viewmodel/verdict';
 import {
@@ -405,9 +405,9 @@ export class Pwn2BlockApp extends LitElement {
       history: state.history,
       cursor: state.cursor,
       allowedActions: state.challenge?.allowedActions ?? [],
-      // 退出信息与控制器取同一份派生（04 §1.1）：`satisfied` + `lastStop.reason === 'exit'`
-      // 也是终止态，执行类按钮必须禁用并写出原因（05 §6）。
-      exited: page === undefined ? false : isExitedProjection(page.projection),
+      // 终止态与控制器取同一份派生（04 §1.1）：`failed` 与「已退出」都禁执行类动作，
+      // 两者的禁用原因不同（判负 ≠ 已退出），所以传原因而不是布尔（05 §6）。
+      terminal: page === undefined ? undefined : terminalReasonOf(page.projection),
     });
   }
 
