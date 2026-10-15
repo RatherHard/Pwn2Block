@@ -105,7 +105,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `stdin` | `{hex, pos}`：已 `feed` 的全部字节和当前读位置。题目未声明 stdin 时省略 |
 | `stdout` | `{hex}`：程序写到 stdout 的全部字节。题目未声明 stdout 时省略 |
 | `disasm[]` | 服务端对非隐藏的 `x` 区域线性反汇编：`{addr, bytes, text, target?}` |
-| `lastStop` | `{reason: exit\|exception\|limit\|step, addr?}` |
+| `lastStop` | `{reason: exit\|exception\|limit\|step, addr?}`。**`reason === 'exit'` 就是「程序已退出」**（与引擎 `isExited()` 同一判据，§1.1）：它是前端判断已退出的**唯一**来源，不另设 `exited` 布尔字段——两个事实来源迟早漂移（[09](09-契约冻结.md) §8 第 10 条） |
 | `error?` | `{code, message, note}`，message 来自模板，note 来自题目 `errorNotes` |
 
 字段名与类型以 `packages/shared/src/projection.ts` 的 `ProjectionSchema` 为准：它是单一事实来源，文档与它不一致时以代码为准并立刻改文档。
