@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.6",
     "@pwn2block/engine": "workspace:*",
     "@pwn2block/shared": "workspace:*",
     "fastify": "^5.12.7"
