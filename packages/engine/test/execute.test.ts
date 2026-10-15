@@ -237,6 +237,14 @@ describe('stepOnce：栈与函数调用', () => {
     const outcome = stepOnce(env, state);
     expect(reg(outcome.state, 'RAX')).toBe(0x55n);
   });
+
+  it('mov RAX, [RBP-0x8] 的负位移寻址不变（回绕到 RBP-8，D4 · BG05 只改渲染）', () => {
+    const { env, state } = start(code(0x03, p64(0xfffffffffffffff8n)));
+    poke(env, state, STACK_SLOT, p64(0x5an));
+    const outcome = stepOnce(env, state);
+    expect(reg(outcome.state, 'RAX')).toBe(0x5an);
+    expect(reg(outcome.state, 'RIP')).toBe(0x1009n);
+  });
 });
 
 describe('stepOnce：跳转与条件', () => {

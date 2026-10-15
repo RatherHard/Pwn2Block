@@ -86,13 +86,45 @@ function decodeOperand(
 }
 
 /**
+ * 位移 → 伪汇编文本：把 W 字节的无符号位移按**二补数**解读，负位移写成 `-0x…`。
+ *
+ * 口径（本任务定）：`disp` 由 `bytesToBigIntLE` 读成无符号值，宽度来自 `lookup.wordBytes`
+ * （`archBits / 8`），所以最高位为 1 时它就是负数——`base + disp` 靠回绕得到同一地址
+ * （`instructions.ts` 的 `effectiveAddress`），**寻址语义不受这里影响**，这里只决定显示。
+ * 于是 64 位 `0xfffffffffffffff8` → `-0x8`，32 位 `0xfffffff8` → `-0x8`；32 位
+ * `0x80000000` 是二补数最小值（取负仍是自己），按同一约定渲染成 `-0x80000000`。
+ * `disp === 0` 仍渲染 `+0x0`，与既有输出逐字一致。
+ *
+ * 只对 `mem` 的位移这样做：`imm` 既可能是地址也可能是负数，按有符号解释会误导，见
+ * `renderInstruction` 的说明。
+ */
+function renderDisplacement(disp: bigint, wordBytes: number): string {
+  if (!Number.isInteger(wordBytes) || wordBytes < 1) {
+    throw new Error(`位移渲染需要正的整数字节宽度，实际收到 ${wordBytes}`);
+  }
+  const bits = BigInt(wordBytes * 8);
+  const signBit = 1n << (bits - 1n);
+  if (disp >= signBit) return `-${formatHex((1n << bits) - disp)}`;
+  return `+${formatHex(disp)}`;
+}
+
+/**
  * 伪汇编文本。
  *
  * 规则：操作数里有内联数值（`imm` / `mem:R+disp`）时必须渲染真实值，例如
- * `mov RAX, 0x10`、`mov RAX, [RBP+0x8]`；没有内联数值时优先用出题人声明的
- * `mnemonic` 显示名（例如 `syscall const:60` → `syscall exit`，02 §4）。
+ * `mov RAX, 0x10`、`mov RAX, [RBP+0x8]`、`mov RAX, [RBP-0x8]`；没有内联数值时优先用
+ * 出题人声明的 `mnemonic` 显示名（例如 `syscall const:60` → `syscall exit`，02 §4）。
+ *
+ * `wordBytes`（= `lookup.wordBytes`）只用于解读 `mem` 位移的符号：位移的宽度信息不在
+ * `DecodedOperand` 里，单看 `0xfffffffffffffff8` 无法区分「64 位的 -8」和「一个真的很大的
+ * 64 位位移」，必须由调用方从编码表带进来。**`imm` 保持无符号原样渲染**：它是地址还是
+ * 负数无法从形态判断，改动会造成新的误导。
  */
-export function renderInstruction(item: EncodingItem, operands: readonly DecodedOperand[]): string {
+export function renderInstruction(
+  item: EncodingItem,
+  operands: readonly DecodedOperand[],
+  wordBytes: number,
+): string {
   const hasInline = item.operands.some((operand) => operand === 'imm' || isMemOperand(operand));
   if (item.mnemonic !== undefined && !hasInline) return item.mnemonic;
 
@@ -103,7 +135,7 @@ export function renderInstruction(item: EncodingItem, operands: readonly Decoded
       case 'imm':
         return formatHex(operand.value);
       case 'mem':
-        return `[${operand.base}+${formatHex(operand.disp)}]`;
+        return `[${operand.base}${renderDisplacement(operand.disp, wordBytes)}]`;
       case 'const':
         return String(operand.nr);
     }
@@ -168,7 +200,7 @@ export function decodeAt(bytes: Uint8Array, ip: bigint, lookup: EncodingLookup):
     operands,
     length: offset,
     bytes: bytes.slice(0, offset),
-    text: renderInstruction(item, operands),
+    text: renderInstruction(item, operands, wordBytes),
     target: transferTarget(item.op, operands),
   };
   return { ok: true, instruction };
