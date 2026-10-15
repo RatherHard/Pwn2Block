@@ -29,6 +29,10 @@ import { rejectError } from './vm-errors';
  *
  * - **请求层**：一批动作在第一个真正生效的动作前压一份快照，一次请求一次撤销。
  *   被拒绝的动作不压快照（04 §2），所以整批都被拒绝的请求不产生历史。
+ * - **被拒 ⇒ 状态不变**（04 §2，`applyOne` 里的不变式）：内存字节、寄存器、`undoStack`、
+ *   `stepRing`、`failures` 全部停在动作请求前。积木的整块回滚由 `applyBlock` 用
+ *   `restore(guard)` 派生**新内存句柄**实现，所以这个句柄必须写回 `current`——`MemoryApi`
+ *   是可变句柄，丢弃它就丢掉了回滚（D4 · BG06 修的正是这一条）。
  * - **指令层**：`step` / `run` 每条指令前压一份轻量快照，进环形缓冲，窗口默认 64。
  * - `undo` / `step_back` 自身不压栈，否则无法连续后退；`reset` 压栈，因此可被撤销。
  * - `failures` 单调递增，不随回退减少（04 §3）；回退类动作把 `failed` 状态搬回来也不计入
@@ -134,6 +138,18 @@ function materializeSnapshot(
   };
 }
 
+/**
+ * 把指令层环形缓冲**就地**还原成 `saved`。
+ *
+ * 不能用 `stepRing = [...]` 重建：闭包里的 `hooks` 与 `doStepBack` 都持有这个数组的引用，
+ * 换引用会让它们继续操作旧数组。缓冲区上限是 `limits.stepBackWindow`（默认 64），
+ * 逐项回填最多几十个引用，代价可以忽略。
+ */
+function restoreRing(ring: HistoryEntry[], saved: readonly HistoryEntry[]): void {
+  ring.length = 0;
+  for (const entry of saved) ring.push(entry);
+}
+
 export function createDebugInstance(env: EngineEnv): DebugInstance {
   const undoStack: HistoryEntry[] = [];
   const stepRing: HistoryEntry[] = [];
@@ -221,6 +237,9 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
     // 快照必须在**真正生效前**压，但拒绝的动作不压（04 §2）。
     // 写原语的隐藏 / 权限校验发生在动作内部，所以这里先压、被拒时再撤回。
     const pushedNow = !mark.pushed;
+    // 指令层缓冲的副本：块内的 `step` / `run` 会经 `StepHooks` 往里压快照，而缓冲满了会
+    // `shift()` 丢最旧一条，所以被拒时「截回原长度」还原不了内容，得先留一份（≤ 窗口大小的引用）。
+    const ringGuard = [...stepRing];
     markRequest(mark);
 
     const outcome =
@@ -229,8 +248,16 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
         : applyPrimitive(env, current, action, hooks);
 
     if (!outcome.ok) {
-      // 被拒绝的动作状态不变（写原语先校验后落笔，积木内部自带整块回滚），
-      // 因此这份刚压的快照等于原地不动的状态，撤掉它才不会污染 undo 历史。
+      // 被拒绝的动作不修改状态（04 §2）。三件事都要在这里做：
+      // 1. 写回 `outcome.state`。`MemoryApi` 是**可变句柄**（写入就地换页表），而积木的回滚态
+      //    是 `applyBlock` 用 `restore(guard)` 派生的**新**句柄（actions.ts）；丢弃它等于丢弃
+      //    回滚，块内已生效的前几跳会留在旧句柄里，调试实例与判题实例（`replaySubmit` 无条件
+      //    写回）因此不一致。写原语的拒绝分支回的就是入参状态对象，写回是空操作。
+      // 2. 把指令层缓冲还原到动作前：那些位置属于被回滚掉的时间线，否则 `step_back` 会退到
+      //    一个不存在的过去。
+      // 3. 撤掉刚压的请求层快照：它等于原地不动的状态，留着会污染 undo 历史。
+      current = outcome.state;
+      restoreRing(stepRing, ringGuard);
       if (pushedNow) {
         undoStack.pop();
         mark.pushed = false;
