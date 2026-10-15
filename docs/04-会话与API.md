@@ -62,6 +62,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
   - `pop` / `ret` 会从栈上读值，所以读取的栈槽同样必须落在已映射、非隐藏、可读的 VMA 内。否则 `pop` 就成了读隐藏内容的通道。
   - 不满足时**拒绝**（`rejected`），状态不变，不压快照。
   - 错误码：未映射或越权为 `inaccessible_address`，落在隐藏 VMA 为 `hidden_address`。布局是公开的，区分二者不泄露任何内容，反而有教学价值。
+  - **“状态不变”的粒度是动作（含它所在的整块积木），不是整个请求**（D4 口径，§5 的“遇到第一个被拒绝就停”配套）：同一批里**前面已经成功**的动作照常生效（`executed` 就是“实际生效的动作数”），**被拒的那个及其所在的 `block` 整块回滚**，**它之后的动作一律不执行**——哪怕后面那些本来合法。三种情形各有用例钉住：`tests/integration/rejected-batch-semantics.test.ts`。这条粒度不能反过来理解成“一批里有一个被拒就整批回滚”：那会让学习者在一个请求里先写内存、后面误点一个不允许的动作时，前面那次成功的写入凭空消失；也不能理解成“拒绝后继续跑完”，那违反 §5 的分片语义。
 - `feed` 后 stdin 缓冲累计超过 4KB 时拒绝。
 - 已执行的动作若触发指令异常，实例进入 `failed`。
 
@@ -134,9 +135,9 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 
 `actions` 批量接口（调试实例）：
 
-- 按顺序执行，遇到第一个被拒绝的动作、进入 `failed` 或程序**已退出**（同样看 `isExited()`）即停止，后续动作不执行。
+- 按顺序执行，遇到第一个被拒绝的动作、进入 `failed` 或程序**已退出**（同样看 `isExited()`）即停止，后续动作不执行。**被拒之前**的动作已经生效并留在状态里——“状态不变”是**动作粒度**（§2 的口径）：被拒的那个及其所在整块 `block` 整块回滚，前面的照常生效，后面的不执行。
 - 单批动作数上限是 `MAX_ACTIONS_PER_REQUEST`（512），比 `submit` 的 `MAX_SUBMIT_ACTIONS`（4096）小：程序区动作更多时，前端按 512 分片**串行**发送，并在客户端跨片保持「遇到第一个拒绝或终态就停」的语义（[05](05-前端交互.md) §3）。
-- 返回 `{results: [{ok, action, error?}], executed, projection, history}`，`executed` 为实际执行的动作数。
+- 返回 `{results: [{ok, action, error?}], executed, projection, history}`，`executed` 为实际执行的动作数；`results` 只含**实际尝试过**的动作，拒绝之后的不补齐占位（`results.length` 因此可能小于请求里的动作数）。
 - 整批只压一份请求层快照，见 §3。
 - `history: {undo, stepBack}` 是两层回退各自的可回退深度，供前端在无可退时禁用按钮并给出原因（[05](05-前端交互.md) §6）；`GET /api/sessions/:id` 与 `POST /api/sessions` 同样返回它。
 - 响应字段以 `packages/shared/src/api.ts` 的 Schema 为准；请求体是 `strictObject`，多余字段一律被拒。
