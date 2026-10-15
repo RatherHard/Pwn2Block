@@ -1,5 +1,6 @@
 import type { Action, ActionName } from './actions';
 import type { PrivateChallenge, PublicChallenge } from './challenge';
+import type { EncodingItem, EncodingLookup } from './encoding';
 import type { InstanceStatus, LastStop, StopReason, Verdict, VmError } from './errors';
 import type { ArchBits, Perm, PermChar, VmaId, VmaKind, VmaLayout } from './primitives';
 import type { DisasmEntry } from './projection';
@@ -21,7 +22,17 @@ export interface Flags {
 
 export const NO_FLAGS: Flags = Object.freeze({ ZF: false, CF: false, SF: false });
 
-/** 内存状态句柄：G 在 `packages/engine/src/memory` 实现，对 B/C 不透明。 */
+/**
+ * 内存状态句柄：G 在 `packages/engine/src/memory` 实现，对 B/C 不透明。
+ *
+ * **它是可变句柄**：`MemoryApi.write / copy` 只有 `MemResult` 一个返回值，写操作靠"整块页表指针换新"
+ * 生效，所以句柄本身会被原地推进。页表与页内容不可变，因此快照仍是 O(1)、旧快照绝不会被污染。
+ *
+ * 于是有一条必须靠纪律兜住的规则：**要"留住某一时刻"，必须先 fork**
+ * —— `memory.restore(memory.snapshot(state.memory))` —— 再把 fork 存进历史。
+ * 直接把同一个句柄放进多个 `ReplayFrame.state`、undo 栈或逐动作 diff 里，
+ * 旧状态会看到后来的写入（08 的 G 在 D1 交接里指出过这个风险）。
+ */
 export interface MemoryState {
   readonly kind: 'cow-memory';
 }
@@ -41,6 +52,11 @@ export interface MemFault {
 }
 
 export type MemCheck = { readonly ok: true } | MemFault;
+
+/**
+ * `bytes` 的语义：`read` 是读到的字节；`write` 是实际写入的字节副本；`copy` 是拷出的源字节副本。
+ * 写类操作只用 `ok` 判断成败也完全可以。
+ */
 export type MemResult = { readonly ok: true; readonly bytes: Uint8Array } | MemFault;
 
 /** 初始内容补丁，已解析成引擎形态（`at` 为整数，`bytes` 为字节）。 */
@@ -65,6 +81,8 @@ export interface VmaInit {
  *
  * 关键语义：**这里不做隐藏检查**。隐藏只是“不进入投影”，程序指令照常读写隐藏 VMA（02 §3）；
  * 隐藏区的拒绝属于动作层（B 的 `applyAction`）与投影层（C）。
+ *
+ * `len === 0` 一律通过且不触碰任何字节，不构成"地址是否映射"的探测手段。
  */
 export interface MemoryApi {
   readonly pageSize: number;
@@ -107,6 +125,11 @@ export interface VmState {
   readonly steps: number;
   readonly lastStop?: LastStop;
   readonly error?: VmError;
+  /**
+   * 程序以 `exit` 结束时的退出码（02 §5.2：标准退出码语义取自 `RDI` 那一套 ABI）。
+   * 只有 `status === 'exited'` 时有意义；`exited` 谓词与 D2 之后的错误说明会用到。
+   */
+  readonly exitCode?: bigint;
 }
 
 export interface StepOutcome {
@@ -204,5 +227,22 @@ export interface EngineRuntime {
   readVmaVisible(state: VmState, vmaId: VmaId): Uint8Array | undefined;
 }
 
-/** 引擎对外的唯一入口（B 实现）。 */
-export type CreateRuntime = (pub: PublicChallenge, priv: PrivateChallenge) => EngineRuntime;
+/**
+ * 引擎对外的唯一入口（B 实现）。
+ *
+ * 引擎不读文件、不读环境变量，所以**引用 `{preset, add, remove}` 的题目必须把展开后的编码表
+ * 传进来**（`options.encoding`）。调用方（服务端加载、`challenge:solve`、验收测试）本来就已经
+ * 通过 `checkChallengePair()` 拿到了展开结果，直接转交即可。
+ */
+export interface RuntimeOptions {
+  /** preset 展开后的编码表；题目 `encoding` 直接用完整表时可省略。 */
+  readonly encoding?: readonly EncodingItem[];
+  /** 已经建好的查询表；与 `encoding` 同时给出时优先使用它。 */
+  readonly lookup?: EncodingLookup;
+}
+
+export type CreateRuntime = (
+  pub: PublicChallenge,
+  priv: PrivateChallenge,
+  options?: RuntimeOptions,
+) => EngineRuntime;

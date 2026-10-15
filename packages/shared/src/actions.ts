@@ -141,9 +141,17 @@ export function runMaxSteps(action: RunAction): number {
   return action.maxSteps ?? MAX_RUN_MAX_STEPS;
 }
 
-/** 回退类动作不受 `allowedActions` 约束（04 §2）。 */
+/**
+ * 回退类动作不受 `allowedActions` 约束（04 §2）。
+ *
+ * 出题人积木（`block`）同样始终可用：03 §3 明确"出题人积木的展开动作不受 `allowedActions`
+ * 限制，这是它存在的意义"——出题人正是靠它做到"禁用裸 `write_bytes`，只允许通过 `gets` 溢出"。
+ * 积木本身的合法性由 `expandBlock` 按 `authorBlocks` 校验，未声明的 id 回 `unknown_action`，
+ * 所以这里放宽不会开一个后门。
+ */
 export function isAllowedByChallenge(pub: PublicChallenge, name: ActionName): boolean {
   if ((CONTROL_ACTION_TYPES as readonly string[]).includes(name)) return true;
+  if (name === 'block') return true;
   return pub.allowedActions.includes(name);
 }
 

@@ -43,6 +43,18 @@ describe('动作 Schema', () => {
     expect(isAllowedByChallenge(ret2winPublic, 'write_bytes')).toBe(false);
     expect(isAllowedByChallenge(ret2winPublic, 'call')).toBe(false);
   });
+
+  it('出题人积木始终可用：展开动作才是不受 allowedActions 限制的那一层（03 §3）', () => {
+    // ret2win 的 allowedActions 里没有 block，但参考解法正是用 gets 积木溢出。
+    expect(ret2winPublic.allowedActions).not.toContain('block');
+    expect(isAllowedByChallenge(ret2winPublic, 'block')).toBe(true);
+    const expanded = expandBlock(ret2winPublic, {
+      type: 'block',
+      id: 'gets',
+      args: { data: '41' },
+    });
+    expect(expanded.ok).toBe(true);
+  });
 });
 
 describe('出题人积木的服务端展开', () => {

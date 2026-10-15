@@ -24,6 +24,12 @@ tmp/
 *.sqlite3
 *.db
 
+# Editor and OS files, test reports
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Editors and operating systems
 .idea/
 .vscode/

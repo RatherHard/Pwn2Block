@@ -30,7 +30,8 @@
 | `failed` | 运行时异常，或命中失败条件 |
 | `exited` | 程序已结束但未满足成功条件 |
 
-- 处于 `failed` 或 `exited` 时，执行类动作被拒绝，回退类动作仍可用。`satisfied` 不限制任何动作。
+- 处于 `failed` 或 `exited` 时，执行类动作被拒绝，回退类动作仍可用。`satisfied` 不限制任何动作：满足成功条件后仍可继续写内存或执行，只有 `failed` / `exited` 会中断后续动作。
+- `executed` 的计数口径：`step` / `run` 的结果里是指令数；`actions` / `submit` 响应里是**实际生效的动作数**（被拒绝的不计，一个 `block` 算一个动作）。
 - 调试实例里没有 `won`：判胜只属于判题实例，它不是一个可停留的会话状态，而是一次提交的结果。
 
 MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送请求即可，“刷新页面”通过 `GET` 当前状态恢复。
@@ -40,8 +41,8 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | 动作 | 参数 | 类别 |
 |---|---|---|
 | `write_bytes` | `addr`, `hex` | 写原语 |
-| `push` / `pop` | `value` / — | 写原语 |
-| `call` / `ret` | `addr` / — | 写原语：直接操纵栈与 ip，**不执行指令** |
+| `push` / `pop` | `value` / — | 写原语。`pop` 读栈槽校验（映射、可读、可见）后**丢弃值**，只把 `sp` 前移 W：它是个"弹栈"动作，没有目标寄存器 |
+| `call` / `ret` | `addr` / — | 写原语：直接操纵栈与 ip，**不执行指令**。`call` 压入的是**当前 ip**（不是下一条，因为没执行这条调用），`ret` 弹出到 ip |
 | `feed` | `hex` | 往 stdin 缓冲追加字节，**不执行指令**，见 02 §5.3 |
 | `block` | `id`, `args` | 出题人积木，服务端展开为上面几类原子动作 |
 | `step` | `count?` | 执行 N 条指令，默认 1 |
@@ -51,6 +52,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `reset` | — | 回到初始状态（可被 undo） |
 
 - 题目通过 `allowedActions` 限定可用动作。回退类动作始终可用，不受 `allowedActions` 约束。
+- 出题人积木（`block`）同样始终可用：不受约束的是积木的**展开动作**（[03](03-题目包格式.md) §3）。积木本身的合法性由 `authorBlocks` 决定，未声明的 id 报 `unknown_action`。
 - **MVP 没有断点。** 题目只有几条指令，`step` 就够用；`run` 退化成“我看够了，跑完它”。
   - 代价是循环类题目不好观察：单步太慢，`run` 会冲过头。所以 `step` 带 `count`，`run` 带 `maxSteps`，界面上暴露成“运行 N 步”。
   - 断点原本用来“停在 ret 之前”。现在的替代手段是冲过去再 `step_back` 倒回来，见 §3。
@@ -95,13 +97,16 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `status` | 实例状态，见 §1.1 |
 | `steps` | 已执行指令数 |
 | `failures` | 被拒绝 + 失败的动作计数，用于解锁提示 |
-| `registers` | 全部寄存器，值为 hex 字符串；另含 `flags: {ZF, CF, SF}` |
+| `registers` | 全部寄存器，按题目包声明顺序的 `[{name, value}]`，值为 hex 字符串 |
+| `flags` | `{ZF, CF, SF}`，布尔值 |
 | `vmas[]` | 全部 VMA 的布局 `{id, kind, label, start, size, perm, hidden}`；仅非隐藏的带 `hex` |
 | `stdin` | `{hex, pos}`：已 `feed` 的全部字节和当前读位置。题目未声明 stdin 时省略 |
 | `stdout` | `{hex}`：程序写到 stdout 的全部字节。题目未声明 stdout 时省略 |
 | `disasm[]` | 服务端对非隐藏的 `x` 区域线性反汇编：`{addr, bytes, text, target?}` |
 | `lastStop` | `{reason: exit\|exception\|limit\|step, addr?}` |
 | `error?` | `{code, message, note}`，message 来自模板，note 来自题目 `errorNotes` |
+
+字段名与类型以 `packages/shared/src/projection.ts` 的 `ProjectionSchema` 为准：它是单一事实来源，文档与它不一致时以代码为准并立刻改文档。
 
 - 投影里**没有 flag**。flag 只在提交判胜时由 `/submit` 返回，见 §5.1。
 - 题目加载时校验可见字节总量上限（建议 256KB），保证全量投影代价可控。
@@ -119,13 +124,15 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `GET` | `/api/sessions/:id` | 调试实例的当前投影，用于刷新恢复 |
 | `POST` | `/api/sessions/:id/actions` | `{actions: [...]}`，作用于调试实例，见下 |
 | `POST` | `/api/sessions/:id/submit` | `{actions: [...]}`，作用于判题实例，见 §5.1 |
-| `DELETE` | `/api/sessions/:id` | 主动结束会话 |
+| `DELETE` | `/api/sessions/:id` | 主动结束会话，成功回 200 `{ok: true}`；重复删除回 404 `not_found`，已被回收的会话回 404 `session_expired` |
 
 `actions` 批量接口（调试实例）：
 
 - 按顺序执行，遇到第一个被拒绝的动作或进入 `failed`/`exited` 即停止，后续动作不执行。
-- 返回 `{results: [{ok, error?}], executed, projection}`，`executed` 为实际执行的动作数。
+- 返回 `{results: [{ok, action, error?}], executed, projection, history}`，`executed` 为实际执行的动作数。
 - 整批只压一份请求层快照，见 §3。
+- `history: {undo, stepBack}` 是两层回退各自的可回退深度，供前端在无可退时禁用按钮并给出原因（[05](05-前端交互.md) §6）；`GET /api/sessions/:id` 与 `POST /api/sessions` 同样返回它。
+- 响应字段以 `packages/shared/src/api.ts` 的 Schema 为准；请求体是 `strictObject`，多余字段一律被拒。
 
 ### 5.1 提交判题
 

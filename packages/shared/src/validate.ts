@@ -482,6 +482,16 @@ export function flagEnvVarName(challengeId: string): string {
   return `FLAG_${challengeId.toUpperCase().replace(/-/g, '_')}`;
 }
 
+/**
+ * 从私有包的 `flag` 字段解出环境变量名：`"env:FLAG_RET2WIN"` → `"FLAG_RET2WIN"`。
+ * flag 是字面量（本地题目包）时返回 `undefined`。
+ *
+ * 服务端加载器与出题 CLI 都用它，不要各自复刻正则（03 §2.2、06 §6）。
+ */
+export function flagEnvNameOf(priv: PrivateChallenge): string | undefined {
+  return ENV_FLAG_RE.exec(priv.flag)?.[1];
+}
+
 /** 编码表引用 preset 时报告用了哪个 preset，便于 CLI 去读 `presets/<name>.json`。 */
 export function presetNameOf(pub: PublicChallenge): string | undefined {
   return isEncodingSpec(pub.encoding) ? pub.encoding.preset : undefined;
