@@ -30,6 +30,7 @@ import { mapActionResults, projectReplay, projectState, projectionContextOf } fr
 import { engineRuntimeFactory } from './runtime';
 import { SessionStore } from './sessions';
 import type { Session, SessionStoreOptions } from './sessions';
+import { registerStatic } from './static';
 
 /**
  * Fastify 应用（04 §5）。引擎、API、静态托管同进程（07 §7）。
@@ -51,6 +52,10 @@ export interface BuildAppOptions {
   readonly sessions?: SessionStoreOptions;
   /** 限流与并发会话上限（04 §6）。缺省即开启，默认值与依据见 `limits.ts`。 */
   readonly rateLimit?: RateLimitOptions;
+  /** 前端构建产物的静态根，默认仓库根的 `packages/web/dist`；不存在不算启动错误（见 `static.ts`）。 */
+  readonly staticRoot?: string;
+  /** 是否注册静态托管，默认 `true`；关掉后非 `/api/**` 的路径全部 404。 */
+  readonly serveStatic?: boolean;
 }
 
 /** 限流的对外文案：固定字符串，不回显请求内容，也不含任何内部信息（04 §6）。 */
@@ -64,6 +69,17 @@ function fail(reply: FastifyReply, code: ApiErrorCode, message: string): Fastify
   return reply.code(API_ERROR_STATUS[code]).send(ApiErrorSchema.parse({ code, message }));
 }
 
+/** 请求 URL 的路径部分（去掉查询串）。 */
+function pathOf(url: string): string {
+  const query = url.indexOf('?');
+  return query === -1 ? url : url.slice(0, query);
+}
+
+/** 路径是否落在 API 面：`/api` 与 `/api/**`。用于 404 文案，不用于限流判定。 */
+function isApiPath(pathname: string): boolean {
+  return pathname === '/api' || pathname.startsWith('/api/');
+}
+
 /**
  * 限流只作用于 API（04 §6）。
  * - 静态资源不算：一次页面加载要取几十个文件，计入配额会把正常浏览打成 429。
@@ -71,8 +87,7 @@ function fail(reply: FastifyReply, code: ApiErrorCode, message: string): Fastify
  */
 function isRateLimitedRequest(request: FastifyRequest): boolean {
   if (!request.url.startsWith('/api/')) return false;
-  const [path] = request.url.split('?');
-  return path !== '/api/health';
+  return pathOf(request.url) !== '/api/health';
 }
 
 /** 提交接口用**独立**的桶：它每次都要跑一遍完整回放，代价与普通请求不同量级（04 §6）。 */
@@ -283,7 +298,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     return missingSession(reply, removed === 'expired');
   });
 
-  app.setNotFoundHandler((_request, reply) => fail(reply, 'not_found', '接口不存在'));
+  // 静态托管（07 §7）：它注册的是最低优先级的通配路由，真实 API 路由永远先匹配（04 §5）。
+  // 放在 API 路由之后只是可读性考虑；命中优先级由路由具体程度决定，与注册顺序无关。
+  if (options.serveStatic ?? true) registerStatic(app, options.staticRoot);
+
+  /**
+   * `/api/**` 的未命中必须在 API 面落成 404（04 §5）。
+   * 静态托管注册了 `/*` 通配路由，若不挡一层，产物目录里恰好有 `api/xxx` 文件时未知接口
+   * 会被静态面接走（01 §6 第 1 条）。`/api/*` 比 `/*` 更具体，优先级更高。
+   */
+  const apiNotFound = (_request: FastifyRequest, reply: FastifyReply): FastifyReply =>
+    fail(reply, 'not_found', '接口不存在');
+  app.all('/api', apiNotFound);
+  app.all('/api/*', apiNotFound);
+
+  // 其余未命中一律 404，且是固定形状的 `ApiError`：不做 SPA 回退（`static.ts` 的说明），
+  // 也不回显请求路径（01 §6：不泄露服务端目录结构）。
+  app.setNotFoundHandler((request, reply) =>
+    fail(reply, 'not_found', isApiPath(pathOf(request.url)) ? '接口不存在' : '资源不存在'),
+  );
 
   // 错误响应不含堆栈、文件路径与私有包字段（04 §6）。
   app.setErrorHandler((error: FastifyError, request, reply) => {
@@ -291,6 +324,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     if (status === 400) return fail(reply, 'invalid_request', '请求体不是合法 JSON');
     if (status === 413) return fail(reply, 'invalid_request', '请求体超过大小上限');
     if (status === 415) return fail(reply, 'invalid_request', '请求体必须是 application/json');
+    // 静态层对穿越 / 非规范路径的拒绝是 403（`@fastify/static` 的 forbiddenPathError）。
+    // 对外统一成 404：既不区分「不存在」与「被判定为穿越」，也不把这类探测记成 500 内部错误。
+    if (status === 403) return fail(reply, 'not_found', '资源不存在');
     request.log.error({ err: error }, '未处理的请求错误');
     return fail(reply, 'internal', '服务端内部错误');
   });
