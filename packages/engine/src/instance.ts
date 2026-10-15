@@ -1,3 +1,4 @@
+import { isControlAction } from '@pwn2block/shared';
 import type {
   Action,
   ActionResult,
@@ -30,7 +31,8 @@ import { rejectError } from './vm-errors';
  *   被拒绝的动作不压快照（04 §2），所以整批都被拒绝的请求不产生历史。
  * - **指令层**：`step` / `run` 每条指令前压一份轻量快照，进环形缓冲，窗口默认 64。
  * - `undo` / `step_back` 自身不压栈，否则无法连续后退；`reset` 压栈，因此可被撤销。
- * - `failures` 单调递增，不随回退减少（04 §3）。
+ * - `failures` 单调递增，不随回退减少（04 §3）；回退类动作把 `failed` 状态搬回来也不计入
+ *   （04 §4：只数被拒绝的动作与把实例推进到 `failed` 的执行类动作）。
  * - 快照覆盖全部 VM 状态：内存 + `VmState` 的其余字段（寄存器、标志、revealed、
  *   stdin、stdout、文件偏移、退出码）。回退后 `revealed` 一并回滚，区域重新隐藏。
  *   “覆盖哪些字段”由 G 的 `VmStateSnapshot` 单点定义；`status / steps / lastStop / error`
@@ -259,7 +261,11 @@ export function createDebugInstance(env: EngineEnv): DebugInstance {
       }
       executed += 1;
       if (current.status === 'failed') {
-        failureCount += 1;
+        // `failures` 只数两类（04 §4、09 §8 第 1 条）：被拒绝的动作，以及把实例**推进**到
+        // `failed` 的执行类动作。回退类动作（`undo` / `step_back` / `reset`）恢复出一个
+        // `failed` 状态不算推进，一律不加——它们自己成功了，只是把旧状态搬了回来。
+        // 中断仍然照旧：进入 `failed` 就停在这一步，后续动作不执行（04 §5）。
+        if (!isControlAction(action)) failureCount += 1;
         break;
       }
       if (current.status === 'exited') break;

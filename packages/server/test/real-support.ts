@@ -60,6 +60,27 @@ export async function createSession(
   return CreateSessionResponseSchema.parse(response.json()).sessionId;
 }
 
+/**
+ * 主动结束会话（04 §5 的 `DELETE`）。批量跑序列的用例必须逐个回收：
+ * 存活会话既占内存，也占 04 §6 的每 IP 会话配额（默认 32）。
+ */
+export async function deleteSession(app: FastifyInstance, sessionId: string): Promise<void> {
+  const response = await app.inject({ method: 'DELETE', url: `/api/sessions/${sessionId}` });
+  expect(response.statusCode).toBe(200);
+}
+
+/**
+ * 契约测试用的限流配置：只放宽「普通请求」的配额。
+ *
+ * 这些文件在**同一个 `buildApp()`** 里连发上千次 HTTP 请求（08 §5 要求真实 HTTP 路径），
+ * 默认的 600 次/分钟会先把契约测试自己打成 429（04 §6 的防护本身由 `limits.ts` 的用例覆盖）。
+ * **会话上限保持缺省**（每 IP 32）：批量用例如果忘了 `deleteSession`，会在第 33 个会话上
+ * `rate_limited`，正好当作「有没有泄漏会话」的探针。
+ */
+export const TEST_RATE_LIMIT = {
+  request: { limit: 20_000, windowMs: 60_000 },
+} as const;
+
 export async function getState(
   app: FastifyInstance,
   sessionId: string,
