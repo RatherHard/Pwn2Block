@@ -32,10 +32,13 @@ jobs:
         run: pnpm typecheck
       - name: Lint
         run: pnpm lint
-      - name: 单元与集成测试
-        run: pnpm test
+      # 必须在测试之前构建：`packages/server/test/c04-static.test.ts` 里有两条**真实产物**用例
+      # （对 `packages/web/dist` 实际发请求），产物缺席时整组跳过。先构建才能让静态托管与发布
+      # 边界在 CI 里真的被执行，而不是被 skip 掉当成通过。
       - name: 构建前端产物
         run: pnpm build
+      - name: 单元与集成测试
+        run: pnpm test
       - name: 校验全部题目包
         run: pnpm challenge:check --all
       - name: 跑全部题目参考解法
