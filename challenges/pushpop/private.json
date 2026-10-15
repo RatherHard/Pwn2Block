@@ -1,0 +1,60 @@
+{
+  "registers": ["RSP", "RBP", "RAX", "RCX", "RDI", "RIP"],
+  "roles": { "sp": "RSP", "bp": "RBP", "ip": "RIP" },
+  "initRegisters": {
+    "RSP": "0x7fffff00",
+    "RBP": "0x7fffff20",
+    "RIP": "0x400000"
+  },
+  "vmas": [
+    {
+      "id": "text",
+      "kind": "code",
+      "start": "0x400000",
+      "size": "0x1000",
+      "perm": "rx",
+      "hidden": false,
+      "init": [
+        {
+          "at": "0x400000",
+          "hex": "585950510e"
+        }
+      ]
+    },
+    {
+      "id": "stack",
+      "kind": "stack",
+      "start": "0x7fffe000",
+      "size": "0x2000",
+      "perm": "rw",
+      "hidden": false,
+      "init": [
+        {
+          "at": "0x7fffff00",
+          "hex": "efbeaddeefbeadde"
+        }
+      ]
+    }
+  ],
+  "win": {
+    "all": [
+      { "reg_eq": { "reg": "RAX", "value": "0x1337" } },
+      { "reg_eq": { "reg": "RCX", "value": "0x0bad" } }
+    ]
+  },
+  "fail": [
+    {
+      "all": [
+        { "exited": {} },
+        { "not": { "reg_eq": { "reg": "RAX", "value": "0x1337" } } }
+      ]
+    },
+    {
+      "all": [
+        { "exited": {} },
+        { "not": { "reg_eq": { "reg": "RCX", "value": "0x0bad" } } }
+      ]
+    }
+  ],
+  "flag": "env:FLAG_PUSHPOP"
+}
