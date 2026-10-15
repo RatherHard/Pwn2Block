@@ -8,7 +8,7 @@
 ## 0. 勾选规则：未验收不勾选，核心检查必须打在真实对象上
 
 - 状态三态：`未验收` / `部分` / `通过`。**当前口径（D3 / F01-b）**：S01「部分」、**S02「通过」**、
-  S03「部分」、**S04「部分」**、S05/S06「未验收」。S01/S03 的逐条复核归 F02（D4）。
+  S03「部分」、**S04「部分」**、**S05「部分」**、S06「未验收」。S01/S03 的逐条复核归 F02（D4）。
 - 未验收 / 部分的条件用 `describe.skip` + `it.todo` 承载：**跳过就是跳过**，不写任何会让 CI 假通过的占位断言，
   也不把 mock、样例或 shared 层单测当作真实接口验收（08 §1：「mock 通过不算真实接口验收」）。
 - 勾选规则（08 §1）：`[ ]` 未验收，`[x]` 已验收。进行中/阻塞/待集成写交接记录。
@@ -22,7 +22,7 @@
 
 | 命令 | 作用 |
 |---|---|
-| `pnpm exec vitest run tests/acceptance` | 跑本目录（D3：S01 28 条、S02 12 条、S03 14 条、S04 7 条真实执行；S04 剩 4 条、S05 9 条、S06 8 条仍为 todo） |
+| `pnpm exec vitest run tests/acceptance` | 跑本目录（D3 实测：**70 条真实执行 + 13 条 `todo`**；逐文件：S01 28、S02 13、S03 14、S04 7+4、S05 8+1、S06 0+8） |
 | `pnpm exec eslint tests` | 本目录 lint |
 | `pnpm e2e` | Playwright 八步闭环，默认整组跳过，见 §4 |
 
@@ -37,7 +37,7 @@
 | **S02** 判题边界 | 调试 `satisfied` 不发 flag、不记录通过；`submit` 从初态回放，不能借用手工调试状态，且不修改调试实例 | 第 8、9 条 + 提交隔离 | F（B/C 配合） | **通过**（D3）：§5 的 11 条条件逐条真实用例，另加真实首题一节，逐条对照见 §3.1 | 真实对象：真实 `buildApp` + `inject`、真实引擎 `replaySubmit`（B03 纯回放）、临时 `verdict-lab`/`fail-first-lab` + 真实首题 `challenges/ret2win`；文件：`s02-verdict-boundary.test.ts`；**G2 · D4** |
 | **S03** 请求边界 | 伪造快照/成功标记、未知动作、未允许的动作被拒绝；拒绝不修改状态；回退动作按契约仍可用 | 第 11、12 条 | F（C 配合） | **部分**：14 条用例已在 D2 换成真实 HTTP + 真实引擎，F02（D4）尚未逐条复核 §5 全部条件 | 真实对象：真实 Fastify 实例（`buildApp` + `inject`）与请求 Schema；文件：`s03-request-boundary.test.ts`；**G2 · D4** |
 | **S04** payload 边界 | `block` 由服务端展开，不相信客户端提供的展开结果；读状态 payload 被 `rejected`，而不是变成零 | 第 10、13 条 | F（C/H 配合） | **部分**（D3）：第 10 条 + `submit` 动作 Schema/上限共 6 条按原文通过；第 13 条 `reads_state`（3 条）与「编译上限服务端复核」（1 条）无法按原文验证，如实保留 `todo`，见 §8 | 真实对象：真实服务端 + 引擎的 `expandBlock` 路径（真实内存变化观测 + 真实判胜）；文件：`s04-payload-boundary.test.ts`；**G2 · D4** |
-| **S05** flag 边界 | 缺失环境变量，或虚拟文件/隐藏 VMA 内容包含注入的 flag 真值时拒绝加载；只用测试哨兵值 | 第 7 条 | F（C/E 配合） | 未验收 | 真实对象：真实服务端题目加载（`challenges/ret2win` + 环境变量注入/缺失）+ 哨兵值；文件：`s05-flag-boundary.test.ts`；**G2 · D4** |
+| **S05** flag 边界 | 缺失环境变量，或虚拟文件/隐藏 VMA 内容包含注入的 flag 真值时拒绝加载；只用测试哨兵值 | 第 7 条 | F（C/E 配合） | **部分**（D3）：08 §5 的两类拒绝（缺 env / 内容含注入真值，含大小写变体）共 8 条真实用例通过；「加载失败的服务端告警/日志」1 条保留 `todo`（无日志出口，见 §8 缺口 4） | 真实对象：真实 `buildApp` + `inject` + 真实首题 `challenges/ret2win` + 真实首题副本注入哨兵 + shared 的 `checkChallengePair` 原因核对；文件：`s05-flag-boundary.test.ts`；**G2 · D4** |
 | **S06** 发布边界 | 检查构建产物和实际静态 HTTP 路径，不能取得 `private.json`、`solution.md`、环境文件或注入的 flag 哨兵值 | 补充条目（08 §5 明说） | F（A/C 配合） | 未验收 | 真实对象：真实构建产物（`dist/`）与真实静态托管的 HTTP 路径（含目录穿越变体）；文件：`s06-publish-boundary.test.ts`；**G3 · D5** |
 
 `docs/08` §5 明确的映射关系（照抄）：S01 覆盖第 1–2 条；S02 覆盖第 8–9 条并验证提交隔离；S03 覆盖第 11–12 条；
@@ -47,24 +47,30 @@ S04 覆盖第 10、13 条；S05 覆盖第 7 条；S06 补充静态发布检查�
 
 - [~] **S01 隐藏内容边界** — 部分：28 条用例已在 D2 换成**真实引擎 + 真实 HTTP**（投影 / 录像 / 错误正文
   与真实隐藏 VMA）；F02（D4）尚未逐条复核 §5 全部条件，所以不勾选。
-- [x] **S02 判题边界** — **通过（D3）**：08 §5 的 11 条条件逐条真实用例 + 真实首题一节，
-  命令与结果见 §3.1；差异项只有「不记录通过」的可观察口径（见 §8 缺口 3）。
+- [x] **S02 判题边界** — **通过（D3）**：08 §5 的 11 条条件逐条真实用例 + 真实首题两节
+  （含「判胜 payload 接尾随执行动作」的回归用例），命令与结果见 §3.1；
+  差异项只有「不记录通过」的可观察口径（见 §8 缺口 3）。
 - [~] **S03 请求边界** — 部分：14 条用例已在 D2 换成真实 HTTP + 真实引擎；F02（D4）尚未逐条复核。
-- [~] **S04 payload 边界** — **部分（D3）**：6 条按原文真实通过（第 10 条全部条件 + `submit` 动作
-  Schema 与 `MAX_SUBMIT_ACTIONS`），另加 1 条「线上格式无法表达读状态」的附加口径用例；
-  **4 条如实保留 `todo`**（`reads_state` ×3、编译上限服务端复核 ×1，见 §8 缺口 1、2）。
-- [ ] **S05 flag 边界** — 未验收（骨架，全部条件 `todo`）。
+- [~] **S04 payload 边界** — **部分（D3）**：**7 条真实**（第 10 条全部条件 3 条 + `unknown_action` /
+  `invalid_arguments` / `submit` 动作 Schema 与 `MAX_SUBMIT_ACTIONS` 各 1 条，另加 1 条「线上格式
+  无法表达读状态」的附加口径用例）；**4 条如实保留 `todo`**（`reads_state` ×3、编译上限服务端复核 ×1，
+  见 §8 缺口 1、2）。
+- [~] **S05 flag 边界** — **部分（D3）**：**8 条真实**（缺 `FLAG_RET2WIN` 时真实首题不加载 + 503、
+  注入哨兵后的正对照、真实首题副本未注入的消融对照、虚拟文件含注入真值、隐藏 VMA 含注入真值、
+  大小写变体同样被拒、`challenges/**` 与 `.env.example` 里没有真值、503 正文不泄露细节）；
+  **1 条如实保留 `todo`**（加载失败的服务端告警/日志没有出口，见 §8 缺口 4）。
 - [ ] **S06 发布边界** — 未验收（骨架，全部条件 `todo`）。
 
-D3 的可交付结论：**S02 全部条件在真实对象上通过；S04 部分通过，差的 4 条是契约缺口（不是实现缺陷，
-也不改产品代码凑绿）；S01/S03 已接真实对象、逐条复核归 F02；S05/S06 仍未验收。**
+D3 的可交付结论：**S02 全部条件在真实对象上通过；S04 与 S05 部分通过**（S04 差 4 条、S05 差 1 条，
+都是契约/可观察性缺口，不是实现缺陷，也不改产品代码凑绿）；**S01/S03 已接真实对象、逐条复核归 F02；
+S06 仍未验收。**
 
-### 3.1 S02 / S04 逐条对照与命令（D3 记录）
+### 3.1 S02 / S04 / S05 逐条对照与命令（D3 记录）
 
-命令：`pnpm exec vitest run tests/acceptance` → `4 passed | 2 skipped`，`61 passed | 21 todo`；
+命令：`pnpm exec vitest run tests/acceptance` → `5 passed | 1 skipped`，`70 passed | 13 todo`；
 `pnpm exec tsc -p tsconfig.json`（含 `tests/acceptance/**`）→ 退出码 0。
 
-**S02 · 08 §5 条件 → 用例 → 结果**（文件 `s02-verdict-boundary.test.ts`，12 条全绿）
+**S02 · 08 §5 条件 → 用例 → 结果**（文件 `s02-verdict-boundary.test.ts`，13 条全绿）
 
 | 08 §5 / 07 §5 条件 | 用例（`it` 名摘要） | 实测结果 |
 |---|---|---|
@@ -80,6 +86,7 @@ D3 的可交付结论：**S02 全部条件在真实对象上通过；S04 部分�
 | 03 §2.1 / 04 §5.1：`fail` 优先 | 命中 `fail` 时即使 `win` 也成立仍判 `failed` | 通过（两个只差 `fail` 谓词的实验台 + 末帧 `FLAG=0x1` 的证据） |
 | 04 §5.1：提交次数不限 | 连续多次 `submit` 结果互相独立 | 通过（三次判胜/判负交错后整份响应仍相等） |
 | 真实首题（README §2 的对象要求） | 真实 `challenges/ret2win` + 真实 `presets/x86ish.json` 一节 | 通过（同一会话：调试 `satisfied` 不发 flag → 提交判胜发哨兵 flag，调试实例逐字段不变） |
+| 04 §5.1：程序退出后判题实例不能交互 | 判胜 payload 末尾接执行类动作仍判 `won` | 通过（`[gets, step3]`、`+step1`、`+2×step1` 都判 `won` 且发 flag；尾随动作未执行：`executed=2`、`results` 长度 2；返回地址指向退出路径的对照判 `failed` 且无 flag） |
 
 **S04 · 08 §5 条件 → 用例 → 结果**（文件 `s04-payload-boundary.test.ts`，7 条真实 + 4 条 `todo`）
 
@@ -93,6 +100,19 @@ D3 的可交付结论：**S02 全部条件在真实对象上通过；S04 部分�
 | 04 §6：submit 动作 Schema 与上限 | 动作超 `MAX_SUBMIT_ACTIONS` 被拒、动作是 `strictObject` | 通过（4 个多字段动作被拒；4097 被拒、4096 被接受） |
 | **第 13 条：读状态 payload 被 `rejected`（`reads_state`）** | **保留 `todo`（3 条）** | **无法按原文验证**：服务端没有该拒绝路径，线上格式也无法表达读状态（见 §8 缺口 1） |
 | **05 §4：编译上限在服务端复核** | **保留 `todo`（1 条）** | **无法验证**：请求体只有扁平动作，服务端看不到循环/表达式结构（见 §8 缺口 2） |
+
+**S05 · 08 §5 条件 → 用例 → 结果**（文件 `s05-flag-boundary.test.ts`，8 条真实 + 1 条 `todo`）
+
+| 08 §5 / 07 §5 条件 | 用例（`it` 名摘要） | 实测结果 |
+|---|---|---|
+| 缺失环境变量 → 拒绝加载该题 | 缺失 `FLAG_RET2WIN`：真实首题不加载、不出现在列表里，请求它回 503 `challenge_unavailable` | 通过（服务照常启动；列表为空；详情与会话都 503；磁盘上没有的 id 仍 404 作反向对照） |
+| 同上（正对照，**必须成对**） | 注入哨兵后同一真实首题正常加载：列表含 `ret2win`、建会话 200 | 通过（公开包不含 `flag`/私有字段/哨兵；建会话 `projection.status='ready'`） |
+| 第 7 条：虚拟文件内容含 flag 真值 | 虚拟文件内容包含注入的哨兵真值：拒绝加载该题 | 通过（原因精确为 `files.3 虚拟文件内容包含 flag 真值，拒绝加载`；列表为空 + 503） |
+| 第 7 条：隐藏 VMA 内容含 flag 真值 | 隐藏 VMA 内容包含注入的哨兵真值：拒绝加载该题 | 通过（原因为 `vmas.secret 隐藏 VMA 的内容包含 flag 真值，拒绝加载`；列表为空 + 503） |
+| 大小写变体 | 哨兵真值的大小写变体同样被拒绝 | 通过（先证明逐字节精确匹配不到、忽略大小写能匹配，再断言拒绝原因与 503） |
+| 哨兵值只用 `TEST_FLAG_SENTINEL`（不把真值写进仓库） | `challenges/**` 的 flag 字段只写 `env:FLAG_<ID 大写>`，仓库里没有 flag 真值 | 通过（逐题断言 flag 字段形态 + 题目内容不含哨兵/`flag{`；`.env.example` 的取值只能是文档化哨兵） |
+| 拒绝加载不下发细节（04 §6） | 拒绝加载时不下发细节：503 正文是固定文案，不含命中位置、文件路径或私有包内容 | 通过（缺 env 与内容泄漏两条路径都逐字断言固定 message 与两个字段，且无路径/文件名/issue 文案/堆栈） |
+| **加载失败的服务端告警/日志** | **保留 `todo`（1 条）** | **黑盒不可观察**：实现里没有加载失败日志出口，`issuesFor()` 不在包导出面（见 §8 缺口 4） |
 
 ## 4. E2E 骨架（`tests/e2e/**`）
 
@@ -126,7 +146,7 @@ T01–T06 不计入七天完成率，也**不得隐藏或预先勾选**（08 §7
 
 | 已有覆盖 | 与本目录的关系 |
 |---|---|
-| `packages/shared/test/challenge.test.ts` 的「flag 真值泄露检查（S05 语义）」 | S05 的 shared 层语义已覆盖；S05 的**服务端加载路径**仍未验收 |
+| `packages/shared/test/challenge.test.ts` 的「flag 真值泄露检查（S05 语义）」 | shared 层语义；S05 的**服务端加载路径**（真实首题 + 注入哨兵的副本）已由 `s05-flag-boundary.test.ts` 覆盖，剩下的只有「加载失败的服务端告警」（§8 缺口 4） |
 | `packages/shared/test/challenge.test.ts` / `actions.test.ts` 的私有包与积木展开反例 | S03/S04 的 shared 层基础；S04 的 **REST 端到端**已由 `s04-payload-boundary.test.ts` 覆盖 |
 | `packages/web/src/compiler/forbidden-state.test.ts`（H 的单测） | 读状态积木的**编译期**拒绝（`MESSAGE_READS_STATE`）；它不等于 S04 第 13 条的**服务端** `reads_state`（见 §8 缺口 1） |
 | `s01-hidden-boundary.test.ts` 的字段白名单 | S01 的一部分；S01 的其余条件已在同一文件里用真实引擎 + 真实 HTTP 执行 |
@@ -161,9 +181,17 @@ T01–T06 不计入七天完成率，也**不得隐藏或预先勾选**（08 §7
    `recordSubmit`，而 `GET /api/sessions/:id` 不返回提交次数或通过记录，所以这条只能按
    「响应字段集合与全新会话一致 + `satisfied` 后提交赢不了的 payload 仍判 `incomplete`」来验证
    （S02 用例内已写明）。若 A 认为口径不够强（例如要求响应里出现可断言的提交记录），需要 C 提供观察点。
-4. **根 `.gitignore` 未包含 `test-results/` 与 `playwright-report/`**（`eslint.config.js` 已经忽略它们）。
-   D1 的 Playwright 配置把产物写到 `.tmp/playwright`（`.tmp/` 已在 `.gitignore` 内），避免污染集成提交；
-   如果 D5 想改用默认目录，需要 A 一并补 `.gitignore`。
-5. ~~根 `tsconfig.json` 没有 `@pwn2block/*` 的 `paths` 映射~~ —— **已解决（D3 复核）**：
+4. **加载失败没有服务端告警/日志出口**（S05 保留的那条 `todo`）：`loadChallengeDir` 只把失败原因放进
+   内部的 `ChallengeStore.issuesFor()`，`buildApp()` 不为加载失败打印任何日志（`app.ts` 里唯一的
+   `log.warn` 是「引擎装配失败」那条）；`packages/server/src/index.ts` 只导出 `buildApp`，
+   `issuesFor()` 不在包导出面里（深路径导入过不了根 `tsconfig.json` 的 `paths`），
+   `BuildAppOptions.logger` 只收布尔值、没有注入 `stream`/自定义 logger 的口子，
+   所以黑盒验收**无法观察**这条。契约口径也不唯一：06 §6「缺失时拒绝加载这道题并报错」目前由
+   HTTP 503 + `challenge:check` CLI 的诊断文案承担（CLI 侧有真实证据）。
+   需要 C 决定并实现「加载失败 → 一条可诊断的服务端告警（且不含私有字段、文件路径、内部堆栈）」，
+   或由 A 明确「503 + CLI 诊断」就是 06 §6 的完整口径、把该条从 S05 移除。
+5. ~~根 `.gitignore` 未包含 `test-results/` 与 `playwright-report/`~~ —— **已解决（D3 复核）**：
+   根 `.gitignore` 现在含 `test-results/`、`playwright-report/`、`blob-report/`、`playwright/.cache/`。
+6. ~~根 `tsconfig.json` 没有 `@pwn2block/*` 的 `paths` 映射~~ —— **已解决（D3 复核）**：
    根 `tsconfig.json` 现在有 `shared`/`engine`/`server`/`authoring` 四条 `paths`，
    `tests/acceptance/**` 可以按包名导入，`pnpm exec tsc -p tsconfig.json` 退出码 0。

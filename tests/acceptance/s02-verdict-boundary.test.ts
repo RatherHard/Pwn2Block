@@ -53,9 +53,10 @@ import type { TempChallengeRoot } from './support';
  *
  * 1. `verdict-lab` / `fail-first-lab` 临时题目包（真实 Schema 构造，写进临时目录）：
  *    §5 的 11 条条件逐条一个用例，断言用 `stateFieldsOf` / `collectKeys` / 原始响应正文做精确比较。
- * 2. 真实首题 `challenges/ret2win` + 真实 `presets/x86ish.json`：把 D1/D2 记的「验收对象是真实首题」
- *    这一条补上（E02 已交付）。A03 的 `tests/integration/ret2win-end-to-end.test.ts` 是日常集成，
- *    **不计入**本组验收（08 §1：前置证据不算验收）。
+ * 2. 真实首题 `challenges/ret2win` + 真实 `presets/x86ish.json`（两条用例）：把 D1/D2 记的「验收对象是
+ *    真实首题」这一条补上（E02 已交付），并用它钉住「判胜 payload 末尾接执行类动作仍判 won」这条
+ *    引擎回归（`isExited()` 才是「已退出」的事实，`status` 在 win+exit 时是 `satisfied`）。
+ *    A03 的 `tests/integration/ret2win-end-to-end.test.ts` 是日常集成，**不计入**本组验收（08 §1：前置证据不算验收）。
  *
  * 两个实验台只差 `fail` 谓词：`verdict-lab` 的 `win` 是 `FLAG == 0x1`、`fail` 为空；
  * `fail-first-lab` 的 `fail` 也是 `FLAG == 0x1`。于是同一个 payload 在两个台上分别判 `won` 与 `failed`，
@@ -63,7 +64,8 @@ import type { TempChallengeRoot } from './support';
  *
  * 为什么不沿用「真实首题才叫验收」的 D2 阻塞结论：08 §5 与 README §2 把 S02 的对象定为
  * 「真实 `/submit` + 判题实例（B03 纯回放）」，临时题目包用的是同一套真实服务端与真实引擎，
- * 差别只在题目数据；真实首题一节（本文件最后一段）额外覆盖了题目数据这一维。
+ * 差别只在题目数据；真实首题两条用例（本文件最后一段）额外覆盖了题目数据这一维。
+ * 全文件共 13 条真实用例（临时实验台 11 条 + 真实首题 2 条）。
  */
 
 // ---------------------------------------------------------------------------
@@ -685,5 +687,54 @@ describe('S02 判题边界 · 真实首题 challenges/ret2win（真实 preset + 
     expect(after.projection.failures).toBe(debugState.projection.failures);
     expect(after.history).toEqual(debugState.history);
     expect(after.projection.status).toBe('satisfied');
+  });
+
+  it('判胜 payload 末尾接执行类动作仍判 won：程序退出后判题实例不再执行动作（引擎 isExited 口径的回归）', async () => {
+    const api = makeApi(realApp);
+
+    // 参考解法的写入字节里最后 8 字节是返回地址；换成 0x400003（syscall exit）就走向判负路径。
+    const loseData = '41'.repeat(16) + '42'.repeat(8) + '0300400000000000';
+
+    // 同一份判胜 payload，只在末尾追加执行类动作：三者必须都判 won 并下发 flag。
+    const withTrailing = [
+      [...ret2winSolutionActions],
+      [...ret2winSolutionActions, { type: 'step', count: 1 }],
+      [...ret2winSolutionActions, { type: 'step', count: 1 }, { type: 'step', count: 1 }],
+    ];
+    for (const payload of withTrailing) {
+      const outcome = await api.submit(await api.newSession('ret2win'), payload);
+      expect(outcome.body.verdict).toBe('won');
+      expect(outcome.body.flag).toBe(TEST_FLAG_SENTINEL);
+      expect(outcome.body.replay.initial.status).toBe('ready');
+    }
+
+    // 尾随动作根本没有执行：`ret` + `syscall 99`（win，不退出）+ `syscall 60`（exit）之后程序已经结束
+    // ——`status` 显示 `satisfied`（成功条件成立），但「已退出」这个事实由 `lastStop.reason='exit'` /
+    // `isExited()` 表达。判题实例不能交互，所以后续 action 一律不执行（04 §5.1）。
+    const longest = await api.submit(await api.newSession('ret2win'), [
+      ...ret2winSolutionActions,
+      { type: 'step', count: 1 },
+      { type: 'step', count: 1 },
+    ]);
+    expect(longest.body.executed).toBe(2);
+    expect(longest.body.results).toHaveLength(2);
+    expect(longest.body.results.map((item) => item.ok)).toEqual([true, true]);
+    const lastFrame = longest.body.replay.frames.at(-1);
+    expect(lastFrame?.kind).toBe('action');
+    expect(lastFrame?.label).toBe('step');
+    expect(lastFrame?.status).toBe('satisfied');
+    expect(lastFrame?.registers.find((item) => item.name === 'FLAG')?.value).toBe('0x1');
+
+    // 对照：返回地址指向退出路径（lose）的 payload 判 failed，且**不下发** flag。
+    const lose = await api.submit(await api.newSession('ret2win'), [
+      { type: 'block', id: 'gets', args: { data: loseData } },
+      { type: 'step', count: 3 },
+    ]);
+    expect(lose.body.verdict).toBe('failed');
+    expect(lose.body.flag).toBeUndefined();
+    expect(Object.keys(lose.body)).not.toContain('flag');
+    expect(lose.raw).not.toContain(TEST_FLAG_SENTINEL);
+    expect(lose.body.replay.initial.status).toBe('ready');
+    // `won` 之外不出现 flag：这里与上面「verdict 四态完整」那条互为补充（那条覆盖另外两态）。
   });
 });
