@@ -3,7 +3,9 @@ import { buildEncodingLookup, bytesToHex, hexToBytes } from '@pwn2block/shared';
 import type { EncodingItem } from '@pwn2block/shared';
 import { decodeAt, maxInstructionBytes, renderInstruction } from '../src/decode';
 import type { DecodedInstruction, DecodedOperand } from '../src/decode';
-import { p32, p64 } from './helpers/challenge';
+import { disassembleState } from '../src/disasm';
+import { createInitialState } from '../src/env';
+import { code, p32, p64, testKit } from './helpers/challenge';
 
 const ITEMS: EncodingItem[] = [
   { opcode: '0x90', op: 'nop', operands: [] },
@@ -191,6 +193,72 @@ describe('decodeAt：边界与不可变性', () => {
 
   it('renderInstruction 在没有操作数时回 op 本身', () => {
     const nop = ITEMS[0] as EncodingItem;
-    expect(renderInstruction(nop, [])).toBe('nop');
+    expect(renderInstruction(nop, [], 8)).toBe('nop');
+  });
+});
+
+describe('renderInstruction：mem 位移按有符号显示（D4 · BG05）', () => {
+  // opcode 0x03 → `mov mem:RBP+disp, reg:RAX`，无 mnemonic，渲染必然回落到真实值。
+  const memToReg = ITEMS[3] as EncodingItem;
+  const args = (base: string, disp: bigint): DecodedOperand[] => [
+    { kind: 'mem', base, disp },
+    { kind: 'reg', name: 'RAX' },
+  ];
+
+  it('64 位：0xfffffffffffffff8 是 -8，渲染成 [RBP-0x8]', () => {
+    expect(renderInstruction(memToReg, args('RBP', 0xfffffffffffffff8n), 8)).toBe('mov [RBP-0x8], RAX');
+  });
+
+  it('64 位：0x8 仍是正位移 [RBP+0x8]（回归，逐字不变）', () => {
+    expect(renderInstruction(memToReg, args('RBP', 0x8n), 8)).toBe('mov [RBP+0x8], RAX');
+  });
+
+  it('64 位：disp = 0 仍是 [RBP+0x0]（现状逐字不变）', () => {
+    expect(renderInstruction(memToReg, args('RBP', 0n), 8)).toBe('mov [RBP+0x0], RAX');
+  });
+
+  it('64 位：0x7fffff08 是正位移，不得被误判成负数', () => {
+    expect(renderInstruction(memToReg, args('RBP', 0x7fffff08n), 8)).toBe('mov [RBP+0x7fffff08], RAX');
+  });
+
+  it('32 位（wordBytes = 4）：0xfffffff8 是 -8，渲染成 [EBP-0x8]', () => {
+    expect(renderInstruction(memToReg, args('EBP', 0xfffffff8n), 4)).toBe('mov [EBP-0x8], RAX');
+  });
+
+  it('32 位：0x80000000 是二补数最小值，按同一口径渲染成 [EBP-0x80000000]', () => {
+    // 取负仍是自己（0x100000000 - 0x80000000 = 0x80000000），约定按 `-0x80000000` 显示。
+    expect(renderInstruction(memToReg, args('EBP', 0x80000000n), 4)).toBe('mov [EBP-0x80000000], RAX');
+  });
+
+  it('32 位：0x7ffffff8 是正位移', () => {
+    expect(renderInstruction(memToReg, args('EBP', 0x7ffffff8n), 4)).toBe('mov [EBP+0x7ffffff8], RAX');
+  });
+
+  it('字节宽度非法时显式抛错，不静默渲染', () => {
+    expect(() => renderInstruction(memToReg, args('RBP', 0x8n), 0)).toThrow(/字节宽度/);
+  });
+});
+
+describe('decodeAt：负位移走真实字节（D4 · BG05）', () => {
+  it('64 位：04 + 8 字节小端 0xfffffffffffffff8 → mov RAX, [RBP-0x8]', () => {
+    const instruction = decodeOk(hexToBytes(`04${p64(0xfffffffffffffff8n)}`));
+    // 解码出的数值不变：disp 仍是无符号 0xfffffffffffffff8，改的只是渲染。
+    expect(instruction.operands).toEqual([
+      { kind: 'reg', name: 'RAX' },
+      { kind: 'mem', base: 'RBP', disp: 0xfffffffffffffff8n },
+    ]);
+    expect(instruction.text).toBe('mov RAX, [RBP-0x8]');
+  });
+
+  it('32 位：04 + 4 字节小端 0xfffffff8 → mov RAX, [RBP-0x8]', () => {
+    const instruction = decodeOk(hexToBytes(`04${p32(0xfffffff8n)}`), BASE, lookup32);
+    expect(instruction.operands[1]).toEqual({ kind: 'mem', base: 'RBP', disp: 0xfffffff8n });
+    expect(instruction.text).toBe('mov RAX, [RBP-0x8]');
+  });
+
+  it('反汇编端到端：真实内存里的栈帧写法显示为 [RBP-0x8]', () => {
+    const kit = testKit({ code: code(0x03, p64(0xfffffffffffffff8n)) });
+    const entries = disassembleState(kit.env, createInitialState(kit.env));
+    expect(entries.map((entry) => entry.text)).toEqual(['mov RAX, [RBP-0x8]']);
   });
 });
