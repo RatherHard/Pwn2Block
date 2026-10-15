@@ -35,9 +35,7 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
     },
   },
-  {
-    // CLI 与服务端入口需要向终端输出
-    files: ['packages/authoring/src/**/*.ts', 'packages/server/src/index.ts'],
-    rules: { 'no-console': 'off' },
-  },
+  // 不要为「需要向终端输出」的包整体关掉 no-console：authoring 与 server 的入口
+  // 已经用 process.stdout/stderr.write 输出（且 console.warn/error 本就在允许列表里），
+  // 整体豁免只会让 console.log 溜进生产代码。D3 复核确认那条豁免是死配置，已删除。
 );
