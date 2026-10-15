@@ -1,0 +1,13 @@
+{
+  "id": "preset-user",
+  "title": "预设编码表用例",
+  "briefing": "引用默认 preset 的最小题目包，用于测试 preset 展开与跨包寄存器校验。",
+  "archBits": 64,
+  "encoding": { "preset": "x86ish" },
+  "syscallAbi": { "nr": "RAX", "args": ["RDI", "RSI", "RDX"], "ret": "RAX" },
+  "syscalls": [
+    { "nr": 60, "name": "exit", "kind": "exit", "doc": "exit(code)" },
+    { "nr": 1, "name": "write", "kind": "write", "doc": "write(fd, buf, count)" }
+  ],
+  "allowedActions": ["step", "run", "undo", "reset"]
+}

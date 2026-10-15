@@ -1,0 +1,18 @@
+{
+  "registers": ["RSP", "RBP", "RIP"],
+  "roles": { "sp": "RSP", "bp": "RBP", "ip": "RIP" },
+  "initRegisters": { "RSP": "0x7fffff00", "RBP": "0x7fffff10", "RIP": "0x400000" },
+  "vmas": [
+    {
+      "id": "text",
+      "kind": "code",
+      "start": "0x400100",
+      "size": "0x1000",
+      "perm": "rx",
+      "hidden": false,
+      "init": [{ "at": "0x400100", "hex": "c9c3" }]
+    }
+  ],
+  "win": { "reg_eq": { "reg": "RIP", "value": "0x400100" } },
+  "flag": "env:FLAG_BROKEN"
+}

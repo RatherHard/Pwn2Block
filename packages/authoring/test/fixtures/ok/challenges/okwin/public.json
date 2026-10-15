@@ -1,0 +1,11 @@
+{
+  "id": "okwin",
+  "title": "通过用例夹具",
+  "briefing": "只用于 check --all 的全绿用例：自带编码表，不依赖 preset。",
+  "archBits": 64,
+  "encoding": [
+    { "opcode": "0xc9", "op": "leave", "operands": [] },
+    { "opcode": "0xc3", "op": "ret", "operands": [] }
+  ],
+  "allowedActions": ["step", "run", "undo", "reset"]
+}

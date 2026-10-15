@@ -1,0 +1,5 @@
+[
+  { "opcode": "0xc3", "op": "ret", "operands": [] },
+  { "opcode": "0x50", "op": "push", "operands": ["reg:RAX"] },
+  { "opcode": "0x50", "op": "push", "operands": ["reg:RDI"] }
+]

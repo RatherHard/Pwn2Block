@@ -1,0 +1,96 @@
+[
+  { "opcode": "0xb8", "op": "mov", "operands": ["reg:RAX", "imm"] },
+  { "opcode": "0xb9", "op": "mov", "operands": ["reg:RCX", "imm"] },
+  { "opcode": "0xba", "op": "mov", "operands": ["reg:RDX", "imm"] },
+  { "opcode": "0xbb", "op": "mov", "operands": ["reg:RBX", "imm"] },
+  { "opcode": "0xbc", "op": "mov", "operands": ["reg:RSP", "imm"] },
+  { "opcode": "0xbd", "op": "mov", "operands": ["reg:RBP", "imm"] },
+  { "opcode": "0xbe", "op": "mov", "operands": ["reg:RSI", "imm"] },
+  { "opcode": "0xbf", "op": "mov", "operands": ["reg:RDI", "imm"] },
+  { "opcode": "0x88", "op": "mov", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x89", "op": "mov", "operands": ["reg:RDX", "reg:RAX"] },
+  { "opcode": "0x8a", "op": "mov", "operands": ["reg:RCX", "reg:RDX"] },
+  { "opcode": "0x8b", "op": "mov", "operands": ["reg:RBX", "reg:RBP"] },
+  { "opcode": "0x8d", "op": "mov", "operands": ["reg:RAX", "mem:RBP+disp"] },
+  { "opcode": "0x8e", "op": "mov", "operands": ["reg:RDX", "mem:RSP+disp"] },
+  { "opcode": "0x8f", "op": "mov", "operands": ["reg:RCX", "mem:RDI+disp"] },
+  { "opcode": "0x86", "op": "mov", "operands": ["mem:RBP+disp", "reg:RAX"] },
+  { "opcode": "0x87", "op": "mov", "operands": ["mem:RSP+disp", "reg:RDX"] },
+
+  { "opcode": "0x50", "op": "push", "operands": ["reg:RAX"] },
+  { "opcode": "0x51", "op": "push", "operands": ["reg:RCX"] },
+  { "opcode": "0x52", "op": "push", "operands": ["reg:RDX"] },
+  { "opcode": "0x53", "op": "push", "operands": ["reg:RBX"] },
+  { "opcode": "0x54", "op": "push", "operands": ["reg:RSP"] },
+  { "opcode": "0x55", "op": "push", "operands": ["reg:RBP"] },
+  { "opcode": "0x56", "op": "push", "operands": ["reg:RSI"] },
+  { "opcode": "0x57", "op": "push", "operands": ["reg:RDI"] },
+  { "opcode": "0x68", "op": "push", "operands": ["imm"] },
+
+  { "opcode": "0x58", "op": "pop", "operands": ["reg:RAX"] },
+  { "opcode": "0x59", "op": "pop", "operands": ["reg:RCX"] },
+  { "opcode": "0x5a", "op": "pop", "operands": ["reg:RDX"] },
+  { "opcode": "0x5b", "op": "pop", "operands": ["reg:RBX"] },
+  { "opcode": "0x5c", "op": "pop", "operands": ["reg:RSP"] },
+  { "opcode": "0x5d", "op": "pop", "operands": ["reg:RBP"] },
+  { "opcode": "0x5e", "op": "pop", "operands": ["reg:RSI"] },
+  { "opcode": "0x5f", "op": "pop", "operands": ["reg:RDI"] },
+
+  { "opcode": "0x00", "op": "add", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x01", "op": "add", "operands": ["reg:RDX", "reg:RBX"] },
+  { "opcode": "0x02", "op": "add", "operands": ["reg:RCX", "imm"] },
+  { "opcode": "0x04", "op": "add", "operands": ["reg:RSP", "imm"] },
+  { "opcode": "0x03", "op": "add", "operands": ["reg:RAX", "mem:RBP+disp"] },
+
+  { "opcode": "0x28", "op": "sub", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x29", "op": "sub", "operands": ["reg:RSP", "reg:RBP"] },
+  { "opcode": "0x2a", "op": "sub", "operands": ["reg:RDX", "imm"] },
+  { "opcode": "0x2b", "op": "sub", "operands": ["reg:RAX", "mem:RBP+disp"] },
+
+  { "opcode": "0x38", "op": "cmp", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x39", "op": "cmp", "operands": ["reg:RAX", "reg:RDX"] },
+  { "opcode": "0x3a", "op": "cmp", "operands": ["reg:RCX", "imm"] },
+  { "opcode": "0x3b", "op": "cmp", "operands": ["reg:RAX", "mem:RBP+disp"] },
+
+  { "opcode": "0x20", "op": "and", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x21", "op": "and", "operands": ["reg:RDX", "reg:RCX"] },
+  { "opcode": "0x24", "op": "and", "operands": ["reg:RAX", "imm"] },
+
+  { "opcode": "0x08", "op": "or", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x09", "op": "or", "operands": ["reg:RDX", "reg:RCX"] },
+  { "opcode": "0x0c", "op": "or", "operands": ["reg:RAX", "imm"] },
+
+  { "opcode": "0x30", "op": "xor", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0x31", "op": "xor", "operands": ["reg:RAX", "reg:RAX"], "mnemonic": "xor rax, rax" },
+  { "opcode": "0x34", "op": "xor", "operands": ["reg:RAX", "imm"] },
+
+  { "opcode": "0xc0", "op": "shl", "operands": ["reg:RAX", "imm"] },
+  { "opcode": "0xc1", "op": "shl", "operands": ["reg:RDX", "imm"] },
+  { "opcode": "0xd2", "op": "shl", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0xd3", "op": "shl", "operands": ["reg:RDX", "reg:RCX"] },
+
+  { "opcode": "0xc4", "op": "shr", "operands": ["reg:RAX", "imm"] },
+  { "opcode": "0xc5", "op": "shr", "operands": ["reg:RDX", "imm"] },
+  { "opcode": "0xd6", "op": "shr", "operands": ["reg:RAX", "reg:RCX"] },
+  { "opcode": "0xd7", "op": "shr", "operands": ["reg:RDX", "reg:RCX"] },
+
+  { "opcode": "0xe9", "op": "jmp", "operands": ["imm"], "mnemonic": "jmp addr" },
+  { "opcode": "0xff", "op": "jmp", "operands": ["reg:RAX"], "mnemonic": "jmp rax" },
+  { "opcode": "0x26", "op": "jmp", "operands": ["mem:RAX+disp"], "mnemonic": "jmp [rax+disp]" },
+
+  { "opcode": "0x74", "op": "je", "operands": ["imm"], "mnemonic": "je addr" },
+  { "opcode": "0x75", "op": "jne", "operands": ["imm"], "mnemonic": "jne addr" },
+  { "opcode": "0x72", "op": "jb", "operands": ["imm"], "mnemonic": "jb addr" },
+  { "opcode": "0x73", "op": "jae", "operands": ["imm"], "mnemonic": "jae addr" },
+
+  { "opcode": "0xe8", "op": "call", "operands": ["imm"], "mnemonic": "call addr" },
+  { "opcode": "0x9a", "op": "call", "operands": ["reg:RAX"], "mnemonic": "call rax" },
+  { "opcode": "0xc3", "op": "ret", "operands": [] },
+  { "opcode": "0xc9", "op": "leave", "operands": [] },
+
+  { "opcode": "0x0e", "op": "syscall", "operands": ["const:60"], "mnemonic": "syscall exit" },
+  { "opcode": "0x10", "op": "syscall", "operands": ["const:1"], "mnemonic": "syscall write" },
+  { "opcode": "0x0f", "op": "syscall", "operands": [], "mnemonic": "syscall" },
+
+  { "opcode": "0x90", "op": "nop", "operands": [] }
+]

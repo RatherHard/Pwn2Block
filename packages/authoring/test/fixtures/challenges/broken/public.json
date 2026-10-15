@@ -1,0 +1,8 @@
+{
+  "id": "broken",
+  "title": "反例夹具",
+  "briefing": "引用一个坏 preset，并且 VMA 地址未按页对齐：校验必须报错。",
+  "archBits": 64,
+  "encoding": { "preset": "bad-shape" },
+  "allowedActions": ["step", "run", "undo", "reset"]
+}
