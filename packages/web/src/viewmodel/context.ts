@@ -25,6 +25,11 @@ export interface ViewContext {
   /** 一律等于 `challenge.labels ?? []`。 */
   readonly labels: readonly Label[];
   readonly diff: ProjectionDiff;
+  /**
+   * 指令视图不可用时的说明（09 §3.4）：判题结果模式下，录像期间代码段被改写时，
+   * 指令区必须显示这句而不是过期反汇编。未设置表示可用。
+   */
+  readonly disasmNotice?: string;
 }
 
 /** 构造上下文时**不接受**派生字段：`roles` 来自投影，`labels` 来自公开包。 */

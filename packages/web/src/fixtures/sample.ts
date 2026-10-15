@@ -1,12 +1,17 @@
 /**
- * D1 的样例数据（05 §2.2–2.5）：用 `ret2win`（`shared/src/fixtures.ts`）的公开包与 VM 布局，
+ * **仅供测试**：D1 的样例数据（05 §2.2–2.5），保留下来给 `packages/web/test/**` 当夹具用。
+ *
+ * D02 起生产代码路径不再 import 本文件（首屏走真实 `GET /api/challenges`，
+ * 投影来自 `POST /api/sessions`）；页面壳里那条「样例切换条」已经删除。
+ * 新增生产代码请直接用真实投影，不要引这里的常量。
+ *
+ * 用 `ret2win`（`shared/src/fixtures.ts`）的公开包与 VM 布局，
  * 手工构造两份**完整投影**，让四种视图在真实契约（`ProjectionSchema`）下先跑起来。
  *
  * 约定：
  * - 投影里的每个字段都经过 `ProjectionSchema.parse`，形状或类型写错会立刻抛错；
  * - 不含 `win` / `fail` / `flag` / 私有包内容——样例与真实投影遵守同一套“隐藏即不下发”的规则；
- * - 隐藏 VMA（`key`，紧贴栈顶之上）**只有布局、没有 `hex`**，用于演示 `??` 与「隐藏」标记；
- * - 真实数据在 D4 换成 `GET /api/challenges/:id` 与 `/api/sessions`（本文件的导出随之退场）。
+ * - 隐藏 VMA（`key`，紧贴栈顶之上）**只有布局、没有 `hex`**，用于演示 `??` 与「隐藏」标记。
  */
 import {
   ProjectionSchema,

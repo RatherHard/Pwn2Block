@@ -90,7 +90,7 @@ export function statusTextOf(projection: Projection, mode: PageMode): StatusText
   if (mode === 'verdict') {
     return {
       tone: 'info',
-      text: '判题结果模式：提交后在这里显示判定结论与回放录像（D02 接入）。调试实例的状态不受影响。',
+      text: '判题结果模式：右边是判定结论与回放录像，左侧视图读的是录像里的某一帧；调试实例没有被提交改动，随时可以「回到调试」。',
     };
   }
   return debugText(projection);

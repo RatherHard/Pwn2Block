@@ -2,13 +2,16 @@
  * 顶部菜单与模式切换（05 §1）。
  *
  * - **视图**：勾选显示 / 隐藏各视图，可上下移动列表顺序（拖动排序见 D03）；
- * - **运行**：与 payload 工具栏等价的一组按钮，D02 接入后启用；
+ * - **运行**：与 payload 工具栏**等价**——两处渲染的是同一个 `pwn2block-run-menu` 组件
+ *   和同一份 `RunButtonModel[]`（`viewmodel/toolbar.ts`），所以可用性与禁用原因不会漂移；
  * - **模式切换**：调试模式（默认）/ 判题结果，对应 04 §1 的两个实例。
  *
- * 组件不持有状态：勾选与切模式都派发事件，由页面壳改 `PageState`。
+ * 组件不持有状态：勾选、切模式与运行命令都派发事件，由页面壳改 `PageState` / 调控制器。
+ * 模式切换对读屏可见（05 §7）：按钮带 `aria-pressed`，状态栏另有一行「调试模式 / 判题结果」。
  */
 import { LitElement, css, html } from 'lit';
 import { MODE_NAMES, type PageMode } from '../viewmodel/session';
+import type { RunButtonModel } from '../viewmodel/toolbar';
 import {
   VIEW_DESCRIPTIONS,
   VIEW_KINDS,
@@ -19,18 +22,7 @@ import {
   type ViewManagerState,
 } from '../viewmodel/views';
 import { sharedStyles, terminalTheme } from '../theme';
-
-/** 运行菜单的按钮（05 §3）：D1 只呈现，接线在 D02。 */
-const RUN_BUTTONS = [
-  ['编译', '把积木编译成原子动作序列，显示在程序区，不提交'],
-  ['试运行', '把程序区剩余动作提交到调试实例'],
-  ['单步', '提交程序区的下一个动作'],
-  ['运行 N 步', '提交 step 带 count（06 §2 断点的替代品）'],
-  ['后退一步', '提交 step_back，倒回一条指令'],
-  ['撤销', '提交 undo，回退上一次提交'],
-  ['重置', '提交 reset，程序区高亮回到开头'],
-  ['提交判题', '把完整动作序列发到 /submit，切到判题结果模式'],
-] as const;
+import './run-menu';
 
 export class Pwn2BlockTopBar extends LitElement {
   static override styles = [
@@ -75,7 +67,7 @@ export class Pwn2BlockTopBar extends LitElement {
         z-index: 10;
         margin-top: 0.2rem;
         min-width: 34rem;
-        max-width: 44rem;
+        max-width: 48rem;
         padding: 0.5rem;
         background: var(--p2b-panel);
         border: 1px solid var(--p2b-line);
@@ -105,11 +97,6 @@ export class Pwn2BlockTopBar extends LitElement {
         display: flex;
         gap: 0.4rem;
       }
-      .run-buttons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.3rem;
-      }
       kbd {
         border: 1px solid var(--p2b-line);
         border-radius: 2px;
@@ -122,18 +109,27 @@ export class Pwn2BlockTopBar extends LitElement {
     mode: { attribute: false },
     views: { attribute: false },
     available: { attribute: false },
+    runModel: { attribute: false },
+    busy: { type: Boolean },
+    pending: { type: Number },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）；默认值在构造函数里赋。 */
   declare mode: PageMode;
   declare views: ViewManagerState;
   declare available: readonly ViewKind[];
+  declare runModel: readonly RunButtonModel[];
+  declare busy: boolean;
+  declare pending: number;
 
   constructor() {
     super();
     this.mode = 'debug';
     this.views = createViewManagerState();
     this.available = VIEW_KINDS;
+    this.runModel = [];
+    this.busy = false;
+    this.pending = 0;
   }
 
   override render() {
@@ -155,15 +151,11 @@ export class Pwn2BlockTopBar extends LitElement {
           <details class="menu">
             <summary>运行</summary>
             <div class="menu-body">
-              <div class="run-buttons">
-                ${RUN_BUTTONS.map(
-                  ([label, title]) =>
-                    html`<button type="button" disabled title="${title}（D02 接入）">${label}</button>`,
-                )}
-              </div>
-              <p class="note">
-                前七个按钮只作用于调试实例；只有「提交判题」是那一次正式射击（05 §3）。D1 只搭骨架，接线在 D02。
-              </p>
+              <pwn2block-run-menu
+                .model=${this.runModel}
+                .busy=${this.busy}
+                .pending=${this.pending}
+              ></pwn2block-run-menu>
             </div>
           </details>
         </nav>
@@ -174,6 +166,7 @@ export class Pwn2BlockTopBar extends LitElement {
                 type="button"
                 class=${this.mode === mode ? 'on' : ''}
                 aria-pressed=${this.mode === mode ? 'true' : 'false'}
+                title=${mode === 'debug' ? '查看调试实例' : '查看提交后的判定结论与回放录像'}
                 @click=${() => this.switchMode(mode)}
               >
                 ${MODE_NAMES[mode]}

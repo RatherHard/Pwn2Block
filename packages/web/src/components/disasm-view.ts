@@ -81,6 +81,19 @@ export class Pwn2BlockDisasmView extends LitElement {
   private focusMiss = '';
 
   override render() {
+    const notice = this.context?.disasmNotice;
+    if (notice !== undefined) {
+      return html`
+        <header>
+          <h2>指令视图</h2>
+        </header>
+        <p class="error" role="status" aria-live="polite">${notice}</p>
+        <p class="note">
+          录像帧不带逐帧反汇编（09 §3.4），代码段在回放中被改写后无法保证这一帧的指令；
+          前端不解码，也不会继续显示过期反汇编（03 §4）。回放里的寄存器与栈视图不受影响。
+        </p>
+      `;
+    }
     const rows = this.disasmRows();
     const funcs = funcLabels(this.context?.labels);
     return html`
@@ -177,11 +190,18 @@ export class Pwn2BlockDisasmView extends LitElement {
     this.requestUpdate();
   }
 
-  /** `ip` 行与刚点过的目标行自动滚入视野（05 §2.3）。 */
+  /**
+   * `ip` 行与刚点过的目标行自动滚入视野（05 §2.3）。
+   *
+   * 先做能力检测：`scrollIntoView` 不是所有环境都有（jsdom 就没有），
+   * 缺了它只是不滚动，不该把一次渲染变成未捕获异常。
+   */
   override updated(): void {
     const selector = this.focusedAddr === undefined ? 'tr.ip' : 'tr.focused';
     const element = this.renderRoot.querySelector(selector);
-    if (element instanceof HTMLElement) element.scrollIntoView({ block: 'nearest' });
+    if (!(element instanceof HTMLElement)) return;
+    if (typeof element.scrollIntoView !== 'function') return;
+    element.scrollIntoView({ block: 'nearest' });
   }
 }
 
