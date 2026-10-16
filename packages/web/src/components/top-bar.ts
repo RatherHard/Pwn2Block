@@ -222,6 +222,8 @@ export class Pwn2BlockTopBar extends LitElement {
     this.pending = 0;
   }
 
+  private draggedView?: ViewKind;
+
   override render() {
     return html`
       <div class="bar">
@@ -231,7 +233,7 @@ export class Pwn2BlockTopBar extends LitElement {
             <summary>视图</summary>
             <div class="menu-body">
               <ul>
-                ${VIEW_KINDS.map((kind) => this.renderViewItem(kind))}
+                ${this.views.order.map((kind) => this.renderViewItem(kind))}
               </ul>
               <p class="note">
                 同时显示 2 个槽位，用 <kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>Ctrl</kbd>+<kbd>↓</kbd> 或纵向滚动切换。
@@ -272,7 +274,20 @@ export class Pwn2BlockTopBar extends LitElement {
     const enabled = this.available.includes(kind);
     const shown = enabled && isShown(this.views, kind);
     return html`
-      <li>
+      <li data-kind=${kind}
+        @dragover=${(event: DragEvent) => {
+          if (this.draggedView !== undefined) event.preventDefault();
+        }}
+        @drop=${(event: DragEvent) => this.dropView(event, kind)}
+      >
+        <span draggable="true" title="拖动排序" aria-hidden="true"
+          @dragstart=${(event: DragEvent) => {
+            this.draggedView = kind;
+            event.dataTransfer?.setData('text/plain', kind);
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+          }}
+          @dragend=${() => { this.draggedView = undefined; }}
+        >⠿</span>
         <label>
           <input
             type="checkbox"
@@ -293,6 +308,14 @@ export class Pwn2BlockTopBar extends LitElement {
         </span>
       </li>
     `;
+  }
+
+  private dropView(event: DragEvent, target: ViewKind): void {
+    const source = this.draggedView;
+    this.draggedView = undefined;
+    if (source === undefined) return;
+    event.preventDefault();
+    this.move(source, this.views.order.indexOf(target) - this.views.order.indexOf(source));
   }
 
   private switchMode(mode: PageMode): void {

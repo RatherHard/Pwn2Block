@@ -244,7 +244,8 @@ export class Pwn2BlockStackView extends LitElement {
       roles: this.context.roles,
       labels: this.context.labels,
       diff: this.context.diff,
-      startAddr: this.jumpBase === undefined ? undefined : this.baseAddr() + BigInt(this.alignOffset),
+      startAddr: this.jumpBase,
+      alignOffset: this.alignOffset,
     });
   }
 

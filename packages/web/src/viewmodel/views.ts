@@ -121,16 +121,15 @@ export function toggleView(state: ViewManagerState, kind: ViewKind): ViewManager
   return setViewShown(state, kind, !isShown(state, kind));
 }
 
-/** 列表排序：把 `kind` 在 `order` 里前后移动一位（拖动排序在 D03 换成指针拖动）。 */
+/** 列表排序：按钮移动一位，拖动按源与目标的位置差移动；两者使用同一入口。 */
 export function moveView(state: ViewManagerState, kind: ViewKind, delta: number): ViewManagerState {
   const index = state.order.indexOf(kind);
   if (index < 0 || delta === 0) return state;
-  const target = index + (delta > 0 ? 1 : -1);
-  if (target < 0 || target >= state.order.length) return state;
+  const target = index + delta;
+  if (!Number.isInteger(target) || target < 0 || target >= state.order.length) return state;
   const order = [...state.order];
-  const moved = order[index] as ViewKind;
-  order[index] = order[target] as ViewKind;
-  order[target] = moved;
+  order.splice(index, 1);
+  order.splice(target, 0, kind);
   return { ...state, order, shown: sortByOrder(order, state.shown) };
 }
 

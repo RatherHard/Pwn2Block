@@ -223,6 +223,25 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
   });
 
+  it('Ctrl+方向键在视图内切换，但不抢走影子根内输入框的按键', async () => {
+    const { app } = await mountApp(createFakeApi());
+    const manager = app.renderRoot.querySelector('pwn2block-view-manager');
+    const stack = manager?.renderRoot.querySelector('pwn2block-stack-view');
+    const input = stack?.renderRoot.querySelector('input');
+    if (!manager || !input) throw new Error('视图未挂载');
+    const key = () => new KeyboardEvent('keydown', {
+      key: 'ArrowDown', ctrlKey: true, bubbles: true, composed: true, cancelable: true,
+    });
+    const typing = key();
+    input.dispatchEvent(typing);
+    await settle(app);
+    expect(typing.defaultPrevented).toBe(false);
+    expect(manager.views.offset).toBe(0);
+    manager.dispatchEvent(key());
+    await settle(app);
+    expect(manager.views.offset).toBe(1);
+  });
+
   it('调试实例已退出（satisfied + lastStop exit）：执行类按钮禁用并写出原因，提交与回退仍可用', async () => {
     // 判胜那一刻程序已经结束：status 是 satisfied，退出事实只在 lastStop 上（04 §1.1）。
     const api = createFakeApi({

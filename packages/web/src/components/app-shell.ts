@@ -249,13 +249,14 @@ export class Pwn2BlockApp extends LitElement {
   private started = false;
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    const target = event.target as { tagName?: string; isContentEditable?: boolean } | null;
+    // 嵌套影子根会把 event.target 重定向为组件宿主，真实输入框在 composedPath 首项。
+    const target = event.composedPath()[0] as { tagName?: string; isContentEditable?: boolean } | undefined;
     const delta = viewScrollDelta({
       key: event.key,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       altKey: event.altKey,
-      target,
+      target: target ?? null,
     });
     if (delta === 0) return;
     event.preventDefault();

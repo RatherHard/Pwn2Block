@@ -65,6 +65,8 @@ export interface StackViewInput {
   readonly diff?: ProjectionDiff;
   /** 窗口起点；省略时自动锚定到 `sp`。 */
   readonly startAddr?: bigint;
+  /** 行首偏移在跟随与手动跳转时都生效。 */
+  readonly alignOffset?: number;
   readonly rowCount?: number;
   readonly rowBytes?: number;
 }
@@ -122,7 +124,7 @@ export function buildStackRows(input: StackViewInput): readonly StackRowModel[] 
   const diff = input.diff ?? EMPTY_DIFF;
   const spValue = registers.get(input.roles.sp) ?? 0n;
   // `startAddr` 原样使用（调用方负责对齐，便于实现“对齐偏移”，05 §2.2）；省略时自动锚定 sp。
-  const base = input.startAddr === undefined ? defaultBase(reader, spValue, rowBytes) : input.startAddr;
+  const base = (input.startAddr ?? defaultBase(reader, spValue, rowBytes)) + BigInt(input.alignOffset ?? 0);
   const vmaStarts = new Map(reader.vmas.map((item) => [item.vma.id, item.start]));
 
   const rows: StackRowModel[] = [];

@@ -100,8 +100,6 @@ export class Pwn2BlockViewManager extends LitElement {
     this.available = [];
   }
 
-  private viewportElement?: HTMLElement;
-
   override render() {
     const shown = this.views?.shown ?? [];
     if (shown.length === 0) {
@@ -152,20 +150,16 @@ export class Pwn2BlockViewManager extends LitElement {
     }
   }
 
-  override firstUpdated(): void {
-    this.viewportElement = this.renderRoot.querySelector<HTMLElement>('.viewport') ?? undefined;
-    this.syncScroll();
-  }
-
   override updated(changed: PropertyValues): void {
     if (changed.has('views')) this.syncScroll();
   }
 
-  /** 一个槽位的高度是视口的一半，`offset` 即窗口起点（05 §2.1）。 */
+  /** 按实际槽位位置滚动：最小高度和响应式布局都可能改变半屏高度（05 §2.1）。 */
   private syncScroll(): void {
-    const element = this.viewportElement;
-    if (element === undefined || this.views === undefined) return;
-    const target = (this.views.offset * element.clientHeight) / SLOT_COUNT;
+    const element = this.renderRoot.querySelector<HTMLElement>('.viewport');
+    const slot = this.renderRoot.querySelector<HTMLElement>(`[data-index="${this.views?.offset}"]`);
+    if (element === null || slot === null || typeof element.scrollTo !== 'function') return;
+    const target = slot.getBoundingClientRect().top - element.getBoundingClientRect().top + element.scrollTop;
     if (Math.abs(element.scrollTop - target) > 1) element.scrollTo({ top: target, behavior: 'smooth' });
   }
 }
