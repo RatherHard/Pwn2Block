@@ -41,10 +41,10 @@ export class Pwn2BlockMemoryView extends LitElement {
       }
       tr.selected td,
       tr.selected th {
-        background: #1d2a22;
+        color: var(--p2b-ip);
       }
       th.id {
-        color: var(--p2b-accent);
+        color: var(--p2b-addr);
         font-weight: 400;
       }
       button.pick {
@@ -56,7 +56,7 @@ export class Pwn2BlockMemoryView extends LitElement {
         text-decoration: underline dotted;
       }
       .perm {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
       .dump {
         margin-top: 0.5rem;

@@ -40,10 +40,6 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         cursor: pointer;
         font-weight: 700;
       }
-      summary::before {
-        color: var(--p2b-accent);
-        content: '◈';
-      }
       .content {
         max-height: min(28vh, 16rem);
         overflow: auto;
@@ -54,16 +50,16 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         max-width: 75rem;
         margin: 0.75rem 0 0;
         padding: 0.75rem 0.85rem;
-        border: 1px solid var(--p2b-line-soft);
-        border-radius: 0.55rem;
+        border: 1px solid var(--p2b-line);
+        border-radius:0;
         color: var(--p2b-dim);
-        background: rgb(7 17 31 / 42%);
+        background: var(--p2b-bg);
         overflow-wrap: anywhere;
       }
       .hints {
         margin-top: 0.75rem;
         padding-top: 0.75rem;
-        border-top: 1px solid var(--p2b-line-soft);
+        border-top: 1px solid var(--p2b-line);
       }
       .hints h3 {
         margin: 0 0 0.4rem;
@@ -80,11 +76,11 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         display: inline-block;
         margin-right: 0.45rem;
         padding: 0.1rem 0.4rem;
-        border: 1px solid rgb(199 167 255 / 36%);
-        border-radius: 999px;
+        border: 1px solid var(--p2b-hidden);
+        border-radius:0;
         color: var(--p2b-hidden);
-        background: rgb(199 167 255 / 9%);
-        font-size: 0.75rem;
+        background: var(--p2b-bg);
+        font-size:inherit;
       }
       .hint-actions {
         display: flex;
@@ -94,7 +90,7 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         margin: 0.65rem 0 0;
       }
       .locked {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
     `,
   ];

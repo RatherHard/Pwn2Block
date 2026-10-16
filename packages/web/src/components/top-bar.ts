@@ -33,39 +33,23 @@ export class Pwn2BlockTopBar extends LitElement {
         display: block;
         flex: none;
         border-bottom: 1px solid var(--p2b-line);
-        background: rgb(5 12 15 / 96%);
-        box-shadow: 0 10px 30px rgb(0 0 0 / 24%);
+        background: var(--p2b-bg);
       }
       .bar {
         display: flex;
         align-items: center;
         gap: 1rem;
-        min-height: 4.1rem;
-        padding: 0.7rem 1rem;
+        min-height: var(--p2b-topbar-h);
+        padding: 0.4rem 1rem;
       }
       .brand {
         display: inline-flex;
         align-items: center;
         gap: 0.55rem;
         color: var(--p2b-fg);
-        font-size: 1rem;
+        font-weight: 700;
         letter-spacing: 0.04em;
         white-space: nowrap;
-      }
-      .brand::before {
-        display: grid;
-        width: 1.85rem;
-        height: 1.85rem;
-        place-items: center;
-        border: 1px solid rgb(94 225 194 / 55%);
-        border-radius: 0.55rem;
-        color: #06151a;
-        background: var(--p2b-accent);
-        box-shadow: 0 0 22px rgb(94 225 194 / 22%);
-        content: '>';
-        font-family: "SFMono-Regular", Consolas, monospace;
-        font-size: 1.1rem;
-        font-weight: 800;
       }
       nav {
         display: flex;
@@ -80,7 +64,7 @@ export class Pwn2BlockTopBar extends LitElement {
         min-height: 2rem;
         padding: 0.3rem 0.75rem;
         border: 1px solid transparent;
-        border-radius: 2px;
+        border-radius:0;
         color: var(--p2b-dim);
         cursor: pointer;
         list-style: none;
@@ -94,7 +78,7 @@ export class Pwn2BlockTopBar extends LitElement {
       .menu[open] > summary {
         border-color: var(--p2b-line);
         color: var(--p2b-fg);
-        background: rgb(26 48 76 / 60%);
+        background: var(--p2b-bg);
       }
       .menu[open] > summary::after {
         content: '⌃';
@@ -111,9 +95,8 @@ export class Pwn2BlockTopBar extends LitElement {
         margin-top: 0.45rem;
         padding: 0.8rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 2px;
-        background: rgb(7 18 21 / 98%);
-        box-shadow: 0 22px 50px rgb(0 0 0 / 42%);
+        border-radius:0;
+        background: var(--p2b-bg);
       }
       ul {
         list-style: none;
@@ -126,10 +109,11 @@ export class Pwn2BlockTopBar extends LitElement {
         align-items: center;
         gap: 0.65rem;
         padding: 0.45rem 0.35rem;
-        border-radius: 0.45rem;
+        border-radius:0;
       }
       li:hover {
-        background: rgb(40 69 100 / 30%);
+        color: var(--p2b-bg);
+        background: var(--p2b-fg);
       }
       li + li {
         margin-top: 0.2rem;
@@ -144,7 +128,7 @@ export class Pwn2BlockTopBar extends LitElement {
       }
       .desc {
         color: var(--p2b-dim);
-        font-size: 0.82rem;
+        font-size:inherit;
       }
       .order {
         display: flex;
@@ -159,9 +143,9 @@ export class Pwn2BlockTopBar extends LitElement {
         gap: 0.35rem;
         margin-left: auto;
         padding: 0.2rem;
-        border: 1px solid var(--p2b-line-soft);
-        border-radius: 2px;
-        background: rgb(7 18 21 / 92%);
+        border: 1px solid var(--p2b-line);
+        border-radius:0;
+        background: var(--p2b-bg);
       }
       .modes button {
         min-height: 1.9rem;
@@ -169,15 +153,16 @@ export class Pwn2BlockTopBar extends LitElement {
         background: transparent;
       }
       .modes button:hover:not(:disabled) {
-        background: rgb(44 80 94 / 52%);
+        color: var(--p2b-bg);
+        background: var(--p2b-fg);
       }
       kbd {
         padding: 0.1rem 0.35rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.3rem;
+        border-radius:0;
         color: var(--p2b-fg);
-        background: rgb(7 17 31 / 55%);
-        font-size: 0.75rem;
+        background: var(--p2b-bg);
+        font-size:inherit;
       }
       @media (max-width: 620px) {
         .bar {

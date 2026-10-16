@@ -104,30 +104,30 @@ export interface BlocklyBridge {
 
 const DEFAULT_RENDERER = 'thrasos';
 
-/** Terminal styled Blockly theme built on the Classic theme. */
+/** 严格 TUI 风格的 Blockly 主题（设计 §1）：纯色，不用阴影和高饱和配色。 */
 const TERMINAL_THEME = Blockly.Theme.defineTheme('pwn2block-terminal', {
   name: 'pwn2block-terminal',
   base: Blockly.Themes.Classic,
   componentStyles: {
-    workspaceBackgroundColour: '#061014',
-    toolboxBackgroundColour: '#08171a',
-    toolboxForegroundColour: '#d7f7ed',
-    flyoutBackgroundColour: '#0b2023',
-    flyoutForegroundColour: '#d7f7ed',
+    workspaceBackgroundColour: '#0c0c0c',
+    toolboxBackgroundColour: '#0c0c0c',
+    toolboxForegroundColour: '#c8c8c8',
+    flyoutBackgroundColour: '#0c0c0c',
+    flyoutForegroundColour: '#c8c8c8',
     flyoutOpacity: 0.98,
-    scrollbarColour: '#2a5c5a',
-    scrollbarOpacity: 0.8,
-    insertionMarkerColour: '#5ee1c2',
+    scrollbarColour: '#3a3a3a',
+    scrollbarOpacity: 1,
+    insertionMarkerColour: '#e8e8e8',
     insertionMarkerOpacity: 0.45,
-    markerColour: '#ffd166',
-    cursorColour: '#5ee1c2',
-    selectedGlowColour: '#5ee1c2',
+    markerColour: '#e5c07b',
+    cursorColour: '#e8e8e8',
+    selectedGlowColour: '#e8e8e8',
     selectedGlowOpacity: 0.3,
   },
   fontStyle: {
-    family: '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+    family: 'ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace',
     weight: '500',
-    size: 12,
+    size: 14,
   },
 });
 
@@ -250,6 +250,7 @@ export function mountBlockly(
     maxInstances: BLOCK_MAX_INSTANCES,
     renderer: options.renderer ?? DEFAULT_RENDERER,
     theme: TERMINAL_THEME,
+    grid: { colour: '#1a1a1a', spacing: 20, length: 1 },
     ...(options.readOnly === true ? { readOnly: true } : {}),
   });
 

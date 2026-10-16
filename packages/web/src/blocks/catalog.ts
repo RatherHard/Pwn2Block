@@ -63,11 +63,11 @@ export const FEED_ORDER_TIP =
 export const TOOLBOX_CATEGORY_META: Readonly<
   Record<BlockCategory, { readonly name: string; readonly colour: string }>
 > = {
-  start: { name: '开始', colour: '#7fb08a' },
-  generic: { name: '通用', colour: '#8fa8d6' },
-  bytes: { name: '字节', colour: '#d6b98f' },
-  action: { name: '动作', colour: '#d69f9f' },
-  author: { name: '出题人积木', colour: '#b39fd6' },
+  start: { name: '开始', colour: '#5f7f66' },
+  generic: { name: '通用', colour: '#5f6f8f' },
+  bytes: { name: '字节', colour: '#8f7f5f' },
+  action: { name: '动作', colour: '#8f5f5f' },
+  author: { name: '出题人积木', colour: '#7a6a8f' },
 };
 
 // ---------------------------------------------------------------------------

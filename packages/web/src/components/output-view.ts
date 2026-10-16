@@ -30,18 +30,18 @@ export class Pwn2BlockOutputView extends LitElement {
         gap: 0.4rem;
         align-items: baseline;
         padding: 0.1rem 0.3rem;
-        border-bottom: 1px solid #1a231f;
+        border-bottom: 1px solid var(--p2b-line);
       }
       li:last-child {
         border-bottom: none;
       }
       li.ok .mark,
       li.ok .label {
-        color: var(--p2b-accent);
+        color: var(--p2b-ip);
       }
       li.warn .mark,
       li.warn .label {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
       li.error .mark,
       li.error .label {

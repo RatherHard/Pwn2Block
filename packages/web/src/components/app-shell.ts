@@ -67,22 +67,15 @@ export class Pwn2BlockApp extends LitElement {
         height: 100dvh;
         min-height: 0;
         overflow: hidden;
-        background:
-          linear-gradient(var(--p2b-terminal-grid) 1px, transparent 1px),
-          linear-gradient(90deg, var(--p2b-terminal-grid) 1px, transparent 1px),
-          radial-gradient(circle at 12% -10%, rgb(42 93 111 / 22%), transparent 34rem),
-          radial-gradient(circle at 92% 0%, rgb(44 67 126 / 18%), transparent 30rem),
-          var(--p2b-bg);
-        background-size: 32px 32px, 32px 32px, auto, auto, auto;
+        background: var(--p2b-bg);
       }
       .briefing {
         flex: none;
         margin: 0 1rem;
         border: 1px solid var(--p2b-line);
         border-top: 0;
-        border-radius: 0 0 3px 3px;
-        background: rgb(5 12 15 / 92%);
-        box-shadow: 0 10px 24px rgb(0 0 0 / 14%);
+        border-radius:0;
+        background: var(--p2b-bg);
       }
       .notice {
         display: flex;
@@ -91,23 +84,20 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 2px;
-        background: rgb(7 17 21 / 94%);
+        border-radius:0;
+        background: var(--p2b-bg);
       }
       .notice.error {
-        border-color: rgb(255 127 149 / 42%);
-        background: rgb(77 29 46 / 38%);
+        border-color: var(--p2b-error);
         color: var(--p2b-error);
       }
       .notice.warn {
-        border-color: rgb(244 184 96 / 42%);
-        background: rgb(74 53 25 / 38%);
-        color: var(--p2b-warn);
+        border-color: var(--p2b-changed);
+        color: var(--p2b-changed);
       }
       .notice.ok {
-        border-color: rgb(94 225 194 / 42%);
-        background: rgb(15 70 67 / 30%);
-        color: var(--p2b-accent);
+        border-color: var(--p2b-ip);
+        color: var(--p2b-ip);
       }
       .notice.info {
         color: var(--p2b-dim);
@@ -119,32 +109,31 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 2px;
-        background: rgb(5 12 15 / 94%);
-        box-shadow: 0 10px 24px rgb(0 0 0 / 20%);
+        border-radius:0;
+        background: var(--p2b-bg);
       }
       .status.ok {
-        border-color: rgb(94 225 194 / 35%);
-        color: var(--p2b-accent);
+        border-color: var(--p2b-ip);
+        color: var(--p2b-ip);
       }
       .status.warn {
-        border-color: rgb(244 184 96 / 35%);
-        color: var(--p2b-warn);
+        border-color: var(--p2b-changed);
+        color: var(--p2b-changed);
       }
       .status.error {
-        border-color: rgb(255 127 149 / 35%);
+        border-color: var(--p2b-error);
         color: var(--p2b-error);
       }
       .status.info {
         color: var(--p2b-fg);
       }
       .status .mode {
-        color: var(--p2b-accent);
+        color: var(--p2b-fg);
         font-weight: 700;
       }
       .status .marker {
         margin-right: 0.3rem;
-        font-size: 0.9rem;
+        font-size:inherit;
       }
       main {
         flex: 1;
@@ -161,16 +150,15 @@ export class Pwn2BlockApp extends LitElement {
         min-height: 0;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius: 3px;
-        box-shadow: var(--p2b-shadow);
+        border-radius:0;
       }
       .left {
         display: flex;
         flex-direction: column;
-        background: rgb(5 12 15 / 90%);
+        background: var(--p2b-bg);
       }
       .right {
-        background: rgb(5 12 15 / 96%);
+        background: var(--p2b-bg);
       }
       .boot {
         flex: 1;
@@ -194,8 +182,8 @@ export class Pwn2BlockApp extends LitElement {
         gap: 1rem;
         padding: 0.9rem 1rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.65rem;
-        background: rgb(22 40 64 / 62%);
+        border-radius:0;
+        background: var(--p2b-bg);
       }
       .boot .lead {
         color: var(--p2b-dim);

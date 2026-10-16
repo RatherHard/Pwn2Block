@@ -41,14 +41,14 @@ export class Pwn2BlockStackView extends LitElement {
       }
       tr.changed td,
       tr.changed th {
-        background: #2a2713;
+        color: var(--p2b-changed);
       }
       th.addr {
-        color: var(--p2b-accent);
+        color: var(--p2b-addr);
         font-weight: 400;
       }
       .anchor {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
       .byte {
         display: inline-block;
@@ -59,7 +59,7 @@ export class Pwn2BlockStackView extends LitElement {
         color: var(--p2b-hidden);
       }
       .byte.unmapped {
-        color: #33403b;
+        color: var(--p2b-dim);
       }
       .byte.changed {
         color: var(--p2b-changed);

@@ -70,7 +70,7 @@ export class Pwn2BlockIoView extends LitElement {
       }
       th.fd,
       th.nr {
-        color: var(--p2b-accent);
+        color: var(--p2b-addr);
         font-weight: 400;
       }
       td.doc,

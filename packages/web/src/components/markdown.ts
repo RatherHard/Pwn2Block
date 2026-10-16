@@ -1,7 +1,7 @@
 /**
  * 把 `viewmodel/briefing.ts` 解析出的节点树渲染成 Lit 模板（设计 §5.2）。
  *
- * 所有文本只经 Lit 插值，不用 `innerHTML` / `unsafeHTML`：题面里的原始 HTML
+ * 不注入原始 HTML，只经 Lit 插值：题面里的原始 HTML
  * 永远只是字符串，不会被当成标签解释。链接只渲染文字，不生成 `<a>`，不放出外链。
  */
 import { css, html, type CSSResult, type TemplateResult } from 'lit';
@@ -112,8 +112,8 @@ export const markdownStyles: CSSResult = css`
     margin: 0.3rem 0;
   }
   .md code {
-    font-family: Consolas, monospace;
-    color: var(--p2b-accent);
+    font-family: var(--p2b-font);
+    color: var(--p2b-fg);
     padding: 0.05rem 0.2rem;
     overflow-wrap: anywhere;
   }
@@ -121,7 +121,7 @@ export const markdownStyles: CSSResult = css`
     margin: 0.65rem 0;
     padding: 0.6rem 0.7rem;
     overflow-x: auto;
-    border: 1px solid var(--p2b-line-soft);
+    border: 1px solid var(--p2b-line);
     color: var(--p2b-fg);
   }
   .md pre code {

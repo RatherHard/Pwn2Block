@@ -32,10 +32,10 @@ export class Pwn2BlockRegistersView extends LitElement {
         font-weight: 400;
       }
       td.name {
-        color: var(--p2b-accent);
+        color: var(--p2b-fg);
       }
       td.name .role {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
       td.value button {
         background: none;
@@ -53,13 +53,13 @@ export class Pwn2BlockRegistersView extends LitElement {
         color: var(--p2b-dim);
       }
       .flag-on {
-        color: var(--p2b-accent);
+        color: var(--p2b-ip);
       }
       .flag-off {
         color: var(--p2b-dim);
       }
       .copied {
-        color: var(--p2b-accent);
+        color: var(--p2b-ip);
       }
       .copy-error {
         color: var(--p2b-error);

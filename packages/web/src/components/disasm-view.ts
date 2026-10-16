@@ -38,21 +38,21 @@ export class Pwn2BlockDisasmView extends LitElement {
       }
       tr.ip th,
       tr.ip td {
-        background: #1d2a22;
+        color: var(--p2b-ip);
       }
       tr.ip th.addr::before {
         content: '▶ ';
-        color: var(--p2b-accent);
+        color: var(--p2b-ip);
       }
       tr.focused td,
       tr.focused th {
         outline: 1px dashed var(--p2b-focus);
       }
       tr.changed td {
-        background: #2a2713;
+        color: var(--p2b-changed);
       }
       th.addr {
-        color: var(--p2b-accent);
+        color: var(--p2b-addr);
         font-weight: 400;
       }
       td.bytes {

@@ -30,7 +30,7 @@ export class Pwn2BlockProgramView extends LitElement {
         padding: 0;
       }
       li {
-        border-bottom: 1px solid #1a231f;
+        border-bottom: 1px solid var(--p2b-line);
       }
       li:last-child {
         border-bottom: none;
@@ -43,22 +43,20 @@ export class Pwn2BlockProgramView extends LitElement {
         text-align: left;
         background: none;
         border: 1px solid transparent;
-        border-radius: 2px;
+        border-radius:0;
         padding: 0.05rem 0.3rem;
       }
       button.row:hover:not(:disabled) {
         border-color: var(--p2b-line);
       }
       li.current button.row {
-        background: #1d2a22;
-        border-color: var(--p2b-accent);
+        border-color: var(--p2b-ip);
       }
       li.done button.row {
         color: var(--p2b-dim);
       }
       /* 被拒绝的那一步（05 §6）：颜色之外还有 × 与「被拒绝」文字（05 §7）。 */
       li.rejected button.row {
-        background: #2a1614;
         border-color: var(--p2b-error);
       }
       li.rejected .type,
@@ -84,7 +82,7 @@ export class Pwn2BlockProgramView extends LitElement {
         min-width: 2.2rem;
       }
       .type {
-        color: var(--p2b-accent);
+        color: var(--p2b-fg);
         min-width: 7.5rem;
       }
       li.done .type {
@@ -98,7 +96,7 @@ export class Pwn2BlockProgramView extends LitElement {
         color: var(--p2b-dim);
       }
       li.current .tag {
-        color: var(--p2b-accent);
+        color: var(--p2b-ip);
       }
       .empty {
         margin: 0;
@@ -110,7 +108,7 @@ export class Pwn2BlockProgramView extends LitElement {
         gap: 0.6rem;
       }
       .stale {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
     `,
   ];

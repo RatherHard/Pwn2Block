@@ -43,7 +43,7 @@ export class Pwn2BlockViewManager extends LitElement {
         min-height: 3.3rem;
         padding: 0.6rem 0.8rem;
         border-bottom: 1px solid var(--p2b-line);
-        background: linear-gradient(180deg, rgb(12 29 32 / 96%), rgb(6 16 19 / 96%));
+        background: var(--p2b-bg);
       }
       .head-title {
         display: inline-flex;
@@ -54,9 +54,8 @@ export class Pwn2BlockViewManager extends LitElement {
       .head h2 {
         margin: 0;
       }
-      .prompt,
       .window-title {
-        color: var(--p2b-accent);
+        color: var(--p2b-fg);
       }
       .pager {
         display: inline-flex;
@@ -83,10 +82,7 @@ export class Pwn2BlockViewManager extends LitElement {
         min-height: 13rem;
         overflow: hidden;
         border-bottom: 1px solid var(--p2b-line);
-        background: rgb(3 10 12 / 82%);
-      }
-      .slot + .slot {
-        background: rgb(6 16 19 / 88%);
+        background: var(--p2b-bg);
       }
       .terminal-window {
         display: flex;
@@ -101,32 +97,12 @@ export class Pwn2BlockViewManager extends LitElement {
         flex: none;
         min-height: 2rem;
         padding: 0.35rem 0.65rem;
-        border-bottom: 1px solid var(--p2b-line-soft);
+        border-bottom: 1px solid var(--p2b-line);
         color: var(--p2b-dim);
-        background: rgb(7 18 21 / 96%);
-        font-size: 0.72rem;
+        background: var(--p2b-bg);
+        font-size:inherit;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-      }
-      .window-lights {
-        display: inline-flex;
-        gap: 0.25rem;
-      }
-      .window-lights i {
-        display: block;
-        width: 0.45rem;
-        height: 0.45rem;
-        border: 1px solid rgb(255 255 255 / 18%);
-        border-radius: 50%;
-        background: var(--p2b-line);
-      }
-      .window-lights i:first-child { background: var(--p2b-error); }
-      .window-lights i:nth-child(2) { background: var(--p2b-warn); }
-      .window-lights i:nth-child(3) { background: var(--p2b-accent); }
-      .window-state {
-        margin-left: auto;
-        color: var(--p2b-accent);
-        font-size: 0.65rem;
       }
       .window-body {
         flex: 1;
@@ -181,7 +157,7 @@ export class Pwn2BlockViewManager extends LitElement {
     const slots = slotKinds(this.views);
     return html`
       <div class="head">
-        <div class="head-title"><span class="prompt">root@pwn2block:~$</span><h2>\u89c6\u56fe</h2></div>
+        <div class="head-title"><h2>\u89c6\u56fe</h2></div>
         <span class="note">${this.views.offset + 1}\u2013${Math.min(this.views.offset + SLOT_COUNT, shown.length)} / ${shown.length}</span>
         <span class="note">Ctrl+\u2191 / Ctrl+\u2193</span>
         <div class="pager" aria-label="view pager">
@@ -218,10 +194,7 @@ export class Pwn2BlockViewManager extends LitElement {
     return html`
       <div class="terminal-window" aria-label=${`${VIEW_TITLES[kind]}\u7ec8\u7aef\u7a97\u53e3`}>
         <div class="window-bar">
-          <span class="window-lights" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="window-title">/proc/pwn2block/${kind}</span>
-          <span>${VIEW_TITLES[kind]}</span>
-          <span class="window-state">LIVE</span>
+          <span class="window-title">${VIEW_TITLES[kind]}</span>
         </div>
         <div class="window-body">${this.renderView(kind)}</div>
       </div>

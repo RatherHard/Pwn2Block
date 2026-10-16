@@ -24,8 +24,7 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         padding: 0.85rem 1rem;
         border-top: 1px solid var(--p2b-line);
         border-bottom: 1px solid var(--p2b-line);
-        background: linear-gradient(135deg, rgb(17 31 51 / 96%), rgb(13 24 41 / 96%));
-        box-shadow: 0 12px 28px rgb(0 0 0 / 16%);
+        background: var(--p2b-bg);
       }
       .banner {
         display: flex;
@@ -35,19 +34,19 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         flex-wrap: wrap;
       }
       .banner .mark {
-        font-size: 1.1rem;
+        font-size:inherit;
       }
       .banner strong {
-        font-size: 1rem;
+        font-size:inherit;
         letter-spacing: 0.04em;
       }
       .ok .mark,
       .ok strong {
-        color: var(--p2b-accent);
+        color: var(--p2b-ip);
       }
       .warn .mark,
       .warn strong {
-        color: var(--p2b-warn);
+        color: var(--p2b-changed);
       }
       .error .mark,
       .error strong {
@@ -59,10 +58,10 @@ export class Pwn2BlockVerdictPanel extends LitElement {
       .emphasize {
         margin: 0.55rem 0 0;
         padding: 0.55rem 0.7rem;
-        border-left: 3px solid var(--p2b-warn);
-        border-radius: 0.3rem;
-        color: var(--p2b-warn);
-        background: rgb(74 53 25 / 24%);
+        border-left: 3px solid var(--p2b-changed);
+        border-radius:0;
+        color: var(--p2b-changed);
+        background: var(--p2b-bg);
       }
       .flag {
         display: flex;
@@ -73,10 +72,10 @@ export class Pwn2BlockVerdictPanel extends LitElement {
       }
       .flag code {
         padding: 0.35rem 0.65rem;
-        border: 1px solid var(--p2b-accent);
-        border-radius: 0.45rem;
-        color: var(--p2b-accent);
-        background: rgb(8 35 38 / 72%);
+        border: 1px solid var(--p2b-ip);
+        border-radius:0;
+        color: var(--p2b-ip);
+        background: var(--p2b-bg);
         user-select: all;
       }
       .meta {
@@ -93,12 +92,12 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         flex-wrap: wrap;
         margin-top: 0.7rem;
         padding-top: 0.7rem;
-        border-top: 1px solid var(--p2b-line-soft);
+        border-top: 1px solid var(--p2b-line);
       }
       input[type='range'] {
         flex: 1;
         min-width: 12rem;
-        accent-color: var(--p2b-accent);
+        accent-color: var(--p2b-fg);
       }
       .pos {
         color: var(--p2b-dim);

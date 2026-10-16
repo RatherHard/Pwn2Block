@@ -1,36 +1,33 @@
-﻿/**
- * Pwn2Block 的基础主题。
+/**
+ * Pwn2Block 的严格 TUI 主题（设计 §1）。
  *
- * 页面用深色工作台承载题面、状态和调试数据；正文使用无衬线字体，地址、指令和
- * 二进制数据保留等宽字体，减少视觉噪声，也让真正需要对齐的内容更容易扫读。
+ * 只用一个背景色，不用渐变、阴影、半透明和圆角；面板之间靠边框分隔，层级靠颜色、
+ * 粗体和反显区分，不调字号。每种颜色只表示一种语义（见下方 token 表）。
  */
 import { css } from 'lit';
 
 export const terminalTheme = css`
   :host {
-    --p2b-bg: #08111f;
-    --p2b-bg-alt: #0d1829;
-    --p2b-panel: #111f33;
-    --p2b-panel-raised: #162840;
-    --p2b-line: #263b56;
-    --p2b-line-soft: #1b2d45;
-    --p2b-fg: #e8eef7;
-    --p2b-dim: #91a4bd;
-    --p2b-accent: #5ee1c2;
-    --p2b-accent-strong: #23c9a6;
-    --p2b-changed: #ffd166;
-    --p2b-warn: #f4b860;
-    --p2b-error: #ff7f95;
-    --p2b-hidden: #c7a7ff;
-    --p2b-focus: #70a7ff;
-    --p2b-shadow: 0 18px 45px rgb(0 0 0 / 32%);
-    --p2b-terminal-black: #05090b;
-    --p2b-terminal-grid: rgb(94 225 194 / 5%);
+    --p2b-bg: #0c0c0c;
+    --p2b-fg: #c8c8c8;
+    --p2b-dim: #7a7a7a;
+    --p2b-line: #3a3a3a;
+    --p2b-addr: #8fa1b3;
+    --p2b-changed: #e5c07b;
+    --p2b-error: #e06c75;
+    --p2b-hidden: #c678dd;
+    --p2b-ip: #98c379;
+    --p2b-code: #d19a66;
+    --p2b-stack: #56b6c2;
+    --p2b-data: #61afef;
+    --p2b-focus: #e8e8e8;
+    --p2b-font: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace;
+    --p2b-size: 14px;
+    --p2b-topbar-h: 2.5rem;
     color-scheme: dark;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 13px;
+    font-family: var(--p2b-font);
+    font-size:var(--p2b-size);
     line-height: 1.5;
-    letter-spacing: 0.01em;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
   }
@@ -45,30 +42,13 @@ export const sharedStyles = css`
   h3 {
     margin: 0;
     color: var(--p2b-fg);
-    font-size: 0.78rem;
+    font-size:inherit;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  h2 {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  h2::before {
-    width: 0.42rem;
-    height: 0.42rem;
-    border-radius: 999px;
-    background: var(--p2b-accent);
-    box-shadow: 0 0 0 4px rgb(94 225 194 / 10%);
-    content: "";
+    letter-spacing: 0.04em;
   }
 
   h3 {
     color: var(--p2b-dim);
-    font-size: 0.7rem;
   }
 
   button,
@@ -79,44 +59,36 @@ export const sharedStyles = css`
 
   button {
     min-height: 2rem;
-    padding: 0.34rem 0.7rem;
+    padding: 0.34rem 0.4rem;
     border: 1px solid var(--p2b-line);
-    border-radius: 3px;
+    border-radius:0;
     color: var(--p2b-fg);
-    background: linear-gradient(180deg, rgb(20 38 42 / 96%), rgb(10 23 27 / 96%));
+    background: var(--p2b-bg);
     font-family: inherit;
     cursor: pointer;
-    transition:
-      border-color 140ms ease,
-      background 140ms ease,
-      color 140ms ease,
-      transform 140ms ease;
   }
 
-  button:hover:not(:disabled) {
-    border-color: var(--p2b-accent);
-    color: var(--p2b-accent);
-    background: linear-gradient(180deg, rgb(31 67 87 / 96%), rgb(22 49 69 / 96%));
-    transform: translateY(-1px);
+  button::before {
+    content: '[ ';
   }
 
+  button::after {
+    content: ' ]';
+  }
+
+  button:hover:not(:disabled),
+  button[aria-selected='true'],
+  button[aria-pressed='true'],
+  button.on,
   button:active:not(:disabled) {
-    transform: translateY(0);
+    color: var(--p2b-bg);
+    background: var(--p2b-fg);
   }
 
   button:disabled {
     color: var(--p2b-dim);
-    background: rgb(18 31 49 / 70%);
+    background: var(--p2b-bg);
     cursor: not-allowed;
-    opacity: 0.62;
-  }
-
-  button[aria-pressed='true'],
-  button.on {
-    border-color: var(--p2b-accent);
-    color: #06151a;
-    background: var(--p2b-accent);
-    box-shadow: 0 0 0 3px rgb(94 225 194 / 10%);
   }
 
   input[type='text'],
@@ -125,20 +97,19 @@ export const sharedStyles = css`
     min-height: 2rem;
     padding: 0.3rem 0.55rem;
     border: 1px solid var(--p2b-line);
-    border-radius: 2px;
+    border-radius:0;
     color: var(--p2b-fg);
-    background: var(--p2b-terminal-black);
+    background: var(--p2b-bg);
     outline: none;
   }
 
   input[type='text']:focus,
   input[type='number']:focus {
     border-color: var(--p2b-focus);
-    box-shadow: 0 0 0 3px rgb(112 167 255 / 13%);
   }
 
   input[type='checkbox'] {
-    accent-color: var(--p2b-accent);
+    accent-color: var(--p2b-fg);
   }
 
   a,
@@ -158,43 +129,37 @@ export const sharedStyles = css`
   .mono,
   .bytes,
   .text {
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-family: var(--p2b-font);
   }
 
   table {
     width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    overflow: hidden;
-    border: 1px solid var(--p2b-line-soft);
-    border-radius: 2px;
-    background: rgb(5 12 15 / 82%);
+    border-collapse: collapse;
+    border: 1px solid var(--p2b-line);
+    background: var(--p2b-bg);
   }
 
   th,
   td {
-    padding: 0.42rem 0.55rem;
+    padding: 0.3rem 0.55rem;
     text-align: left;
     white-space: nowrap;
   }
 
   thead th {
     color: var(--p2b-dim);
-    background: rgb(24 42 66 / 70%);
-    font-size: 0.7rem;
     font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
 
   tbody tr:not(:last-child) td,
   tbody tr:not(:last-child) th {
-    border-bottom: 1px solid var(--p2b-line-soft);
+    border-bottom: 1px solid var(--p2b-line);
   }
 
   tbody tr:hover td,
   tbody tr:hover th {
-    background: rgb(50 83 111 / 18%);
+    color: var(--p2b-bg);
+    background: var(--p2b-fg);
   }
 
   .mono-dim {
@@ -215,12 +180,36 @@ export const sharedStyles = css`
 
   .panel {
     border: 1px solid var(--p2b-line);
-    border-radius: 3px;
-    background: var(--p2b-panel);
-    box-shadow: var(--p2b-shadow);
+    border-radius:0;
+    background: var(--p2b-bg);
   }
 
   .note {
     color: var(--p2b-dim);
+  }
+
+  /* .box 容器：实线边框，标题嵌在上边框里（┌─ 标题 ──┐）。 */
+  .box {
+    position: relative;
+    border: 1px solid var(--p2b-line);
+    border-radius:0;
+    background: var(--p2b-bg);
+  }
+
+  .box > .box-title {
+    position: absolute;
+    top: -0.7em;
+    left: 0.6rem;
+    padding: 0 0.3rem;
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
+  }
+
+  .box > .box-title::before {
+    content: '─ ';
+  }
+
+  .box > .box-title::after {
+    content: ' ─';
   }
 `;
