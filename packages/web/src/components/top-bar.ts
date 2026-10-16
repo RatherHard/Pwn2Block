@@ -119,7 +119,7 @@ export class Pwn2BlockTopBar extends LitElement {
       }
       li {
         display: grid;
-        grid-template-columns: 12rem minmax(12rem, 1fr) auto;
+        grid-template-columns: auto 12rem minmax(12rem, 1fr) auto;
         align-items: center;
         gap: 0.65rem;
         padding: 0.45rem 0.35rem;
@@ -130,6 +130,14 @@ export class Pwn2BlockTopBar extends LitElement {
       }
       li + li {
         margin-top: 0.2rem;
+      }
+      .drag-handle {
+        padding: 0.25rem;
+        cursor: grab;
+        user-select: none;
+      }
+      .drag-handle:active {
+        cursor: grabbing;
       }
       .desc {
         color: var(--p2b-dim);
@@ -186,10 +194,15 @@ export class Pwn2BlockTopBar extends LitElement {
           min-width: min(36rem, calc(100vw - 1.4rem));
         }
         li {
-          grid-template-columns: 1fr auto;
+          grid-template-columns: auto 1fr auto;
         }
         li .desc {
           grid-column: 1 / -1;
+          grid-row: 2;
+        }
+        li .order {
+          grid-column: 3;
+          grid-row: 1;
         }
       }
     `,
@@ -280,7 +293,7 @@ export class Pwn2BlockTopBar extends LitElement {
         }}
         @drop=${(event: DragEvent) => this.dropView(event, kind)}
       >
-        <span draggable="true" title="拖动排序" aria-hidden="true"
+        <span class="drag-handle" draggable="true" title="拖动排序" aria-hidden="true"
           @dragstart=${(event: DragEvent) => {
             this.draggedView = kind;
             event.dataTransfer?.setData('text/plain', kind);
