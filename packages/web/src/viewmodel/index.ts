@@ -19,6 +19,7 @@ export * from './pointer';
 export * from './program';
 export * from './queue';
 export * from './reader';
+export * from './region';
 export * from './registers';
 export * from './replay';
 export * from './roles';

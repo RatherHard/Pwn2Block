@@ -5,6 +5,7 @@ import {
   buildStackRows,
   findRowIndex,
   refollowBase,
+  stackRowPrefix,
 } from '../src/viewmodel/stack';
 import { diffProjections } from '../src/viewmodel/diff';
 import { alignDown } from '../src/viewmodel/format';
@@ -33,6 +34,7 @@ describe('栈视图行投影（05 §2.2）', () => {
     expect(rows.length).toBe(DEFAULT_STACK_ROWS);
     expect(rows[0]?.cells.length).toBe(8);
     expect(rows[0]?.addr).toBe(alignDown(0x7fffff00n, 8) - BigInt(DEFAULT_ROWS_BEFORE_SP * 8));
+    expect(rows[0]?.prefix).toBe('00:0000');
   });
 
   it('sp / bp 所在行带锚点标签', () => {
@@ -41,6 +43,13 @@ describe('栈视图行投影（05 §2.2）', () => {
     const bpRow = rows.find((row) => row.addr === 0x7fffff10n);
     expect(spRow?.anchors).toEqual([{ role: 'sp', name: 'RSP' }]);
     expect(bpRow?.anchors).toEqual([{ role: 'bp', name: 'RBP' }]);
+    expect(spRow?.prefix).toBe(stackRowPrefix(4, 8));
+  });
+
+  it('stackRowPrefix：两位十六进制行号 + 四位十六进制字节偏移', () => {
+    expect(stackRowPrefix(0, 8)).toBe('00:0000');
+    expect(stackRowPrefix(3, 8)).toBe('03:0018');
+    expect(stackRowPrefix(17, 4)).toBe('11:0044');
   });
 
   it('labels 按类别着色并显示名称', () => {
@@ -63,7 +72,22 @@ describe('栈视图行投影（05 §2.2）', () => {
       expect(row.cells.every((cell) => cell.vmaId === 'key')).toBe(true);
       expect(row.hiddenVmaIds).toEqual(['key']);
       expect(row.chain).toBeUndefined();
+      // 整行都在隐藏 VMA 里，字读不出来：region 必须退到 unmapped，不能从隐藏字节猜颜色。
+      expect(row.region).toBe('unmapped');
     }
+  });
+
+  it('行字不可完全读取（跨到未映射区）时 region 退到 unmapped，不从隐藏/未映射字节推导颜色', () => {
+    const projection = makeProjection({
+      registers: { RSP: '0x500000', RBP: '0x500000', RIP: '0x400000' },
+      vmas: [
+        makeVma({ id: 'tiny', kind: 'stack', start: '0x500000', size: '0x4', hex: '41424344' }),
+      ],
+    });
+    const rows = buildStackRows({ projection, archBits: BASE, roles: projection.roles, rowCount: 1 });
+    // 只有 4 字节映射，8 字节的字跨到未映射区：readWordLE 返回 undefined。
+    expect(rows[0]?.chain).toBeUndefined();
+    expect(rows[0]?.region).toBe('unmapped');
   });
 
   it('未映射的地址显示为空', () => {
@@ -81,10 +105,10 @@ describe('栈视图行投影（05 §2.2）', () => {
     const rows = startRows();
     const pointerRow = rows.find((row) => row.addr === 0x7fffff20n);
     const retRow = rows.find((row) => row.addr === 0x7fffff18n);
-    expect(pointerRow?.chain?.arrows).toBe('→ 0x7fffff00');
+    expect(pointerRow?.chain?.arrows).toBe('—▸ 0x7fffff00');
     expect(pointerRow?.chain?.annotation).toBe('buf');
-    expect(retRow?.chain?.arrows).toBe('→ 0x400003');
-    expect(retRow?.chain?.annotation).toBe('syscall exit');
+    expect(retRow?.chain?.arrows).toBe('—▸ 0x400003');
+    expect(retRow?.chain?.annotation).toBe('◂— syscall exit');
   });
 
   it('不是指针的值不显示跳转链（0 号地址是数据）', () => {
@@ -92,7 +116,7 @@ describe('栈视图行投影（05 §2.2）', () => {
     expect(rows.find((row) => row.addr === 0x7fffff00n)?.chain).toBeUndefined();
     // 保存的 rbp 槽位里存的是 0x7fffff40，是栈内可见地址 → 有链，但只有一跳
     const savedBp = rows.find((row) => row.addr === 0x7fffff10n)?.chain;
-    expect(savedBp?.arrows).toBe('→ 0x7fffff40');
+    expect(savedBp?.arrows).toBe('—▸ 0x7fffff40');
     expect(savedBp?.annotation).toBeUndefined();
   });
 
@@ -108,8 +132,8 @@ describe('栈视图行投影（05 §2.2）', () => {
     const pointerRow = rows.find((row) => row.addr === 0x7fffff20n);
     expect(bufRow?.ascii).toBe('AAAAAAAA');
     expect(bufRow?.chain).toBeUndefined(); // 0x4141… 不是地址
-    expect(retRow?.chain?.annotation).toBe('syscall win');
-    expect(pointerRow?.chain?.arrows).toBe('→ 0x7fffff00');
+    expect(retRow?.chain?.annotation).toBe('◂— syscall win');
+    expect(pointerRow?.chain?.arrows).toBe('—▸ 0x7fffff00');
     expect(pointerRow?.chain?.annotation).toBe('buf · "AAAAAAAA"');
   });
 

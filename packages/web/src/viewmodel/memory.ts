@@ -38,22 +38,32 @@ export interface VmaListRow {
   /** 隐藏 VMA 没有内容，只能浏览布局（01 §6 第 2 条）。 */
   readonly hasContent: boolean;
   readonly sizeText: string;
+  /** `formatAddr(start)`：定宽起始地址，便于列对齐。 */
+  readonly startText: string;
+  /** `formatAddr(start + size)`：定宽结束地址（左闭右开）。 */
+  readonly endText: string;
 }
 
 export function buildVmaList(projection: Projection, archBits: number): readonly VmaListRow[] {
-  return projection.vmas.map((vma: VmaView) => ({
-    id: vma.id,
-    kind: vma.kind,
-    kindName: VMA_KIND_NAMES[vma.kind],
-    label: vma.label,
-    start: parseHex(vma.start),
-    size: parseHex(vma.size),
-    range: formatRange(parseHex(vma.start), parseHex(vma.size), archBits),
-    perm: vma.perm,
-    hidden: vma.hidden,
-    hasContent: vma.hex !== undefined,
-    sizeText: formatSize(parseHex(vma.size)),
-  }));
+  return projection.vmas.map((vma: VmaView) => {
+    const start = parseHex(vma.start);
+    const size = parseHex(vma.size);
+    return {
+      id: vma.id,
+      kind: vma.kind,
+      kindName: VMA_KIND_NAMES[vma.kind],
+      label: vma.label,
+      start,
+      size,
+      range: formatRange(start, size, archBits),
+      perm: vma.perm,
+      hidden: vma.hidden,
+      hasContent: vma.hex !== undefined,
+      sizeText: formatSize(size),
+      startText: formatAddr(start, archBits),
+      endText: formatAddr(start + size, archBits),
+    };
+  });
 }
 
 /** 隐藏 VMA 的说明文案：不解释内容，只说明为什么没有内容。 */

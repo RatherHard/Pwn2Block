@@ -14,6 +14,7 @@ import { alignDown, formatAddr, printableAsciiOfBytes } from './format';
 import { labelAt, labelKindColor, labelKindName } from './labels';
 import { describePointerChain, resolvePointerChain, type PointerDescription } from './pointer';
 import { createProjectionReader, type ByteState } from './reader';
+import { valueRegion, type ValueRegion } from './region';
 
 /** 默认窗口行数：够看 sp 周围的局部变量，也能看到紧邻的映射边界（隐藏区显示 `??`）。 */
 export const DEFAULT_STACK_ROWS = 40;
@@ -55,6 +56,10 @@ export interface StackRowModel {
   readonly ascii?: string;
   readonly chain?: PointerDescription;
   readonly hiddenVmaIds: readonly string[];
+  /** pwndbg 风格行前缀：`00:0000`（两位十六进制行号 + 四位十六进制字节偏移）。 */
+  readonly prefix: string;
+  /** 该行字值指向的区域；字不可完全读取时退到 `unmapped`（不从隐藏/未映射字节推导颜色）。 */
+  readonly region: ValueRegion;
 }
 
 export interface StackViewInput {
@@ -138,6 +143,8 @@ export function buildStackRows(input: StackViewInput): readonly StackRowModel[] 
       word === undefined
         ? undefined
         : describePointerChain(resolvePointerChain(reader, word, { labels: input.labels }));
+    // 字不可完全读取（部分隐藏或跨到未映射区）时退到 unmapped：绝不从隐藏字节推导颜色（01 §6 第 2 条）。
+    const region = word === undefined ? 'unmapped' : valueRegion(reader, word);
     const hiddenVmaIds = [...new Set(cells.filter((c) => c.state === 'hidden').map((c) => c.vmaId ?? '?'))];
 
     rows.push({
@@ -152,6 +159,8 @@ export function buildStackRows(input: StackViewInput): readonly StackRowModel[] 
       ascii: asciiBytes.length === 0 ? undefined : printableAsciiOfBytes(asciiBytes, rowBytes),
       chain,
       hiddenVmaIds,
+      prefix: stackRowPrefix(index, rowBytes),
+      region,
     });
   }
   return rows;
@@ -177,6 +186,13 @@ function buildCells(
     cells.push({ addr, state: info.state, vmaId: info.vmaId, text, changed });
   }
   return cells;
+}
+
+/** pwndbg 风格行前缀：两位十六进制行号 + 冒号 + 四位十六进制字节偏移（`index * wordBytes`）。 */
+export function stackRowPrefix(index: number, wordBytes: number): string {
+  const row = index.toString(16).padStart(2, '0');
+  const offset = (index * wordBytes).toString(16).padStart(4, '0');
+  return `${row}:${offset}`;
 }
 
 function byteText(byte: number): string {

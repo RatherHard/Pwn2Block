@@ -11,6 +11,14 @@ import { formatAddr, formatAddrShort, formatHexSpaced } from './format';
 import { labelAt } from './labels';
 import { createProjectionReader } from './reader';
 
+/** 命中 `kind = func` 标注时给出 `名字+十进制偏移`（`vuln+4`）；未命中或非函数标注返回 undefined。 */
+export function symbolAt(labels: readonly Label[] | undefined, addr: bigint): string | undefined {
+  const label = labelAt(labels, addr);
+  if (!label || label.kind !== 'func') return undefined;
+  const offset = addr - parseHex(label.addr);
+  return `${label.name}+${offset.toString(10)}`;
+}
+
 export interface DisasmRowModel {
   readonly index: number;
   readonly addr: bigint;
@@ -25,6 +33,8 @@ export interface DisasmRowModel {
   readonly funcName?: string;
   readonly isIp: boolean;
   readonly changed: boolean;
+  /** pwndbg 风格符号：`vuln+4`；只认 func 标注，见 `symbolAt`。 */
+  readonly symbol?: string;
 }
 
 export interface DisasmViewInput {
@@ -66,6 +76,7 @@ export function buildDisasmRows(input: DisasmViewInput): readonly DisasmRowModel
       funcName: label?.kind === 'func' ? label.name : undefined,
       isIp: input.ip !== undefined && addr === input.ip,
       changed,
+      symbol: symbolAt(input.labels, addr),
     };
   });
 }

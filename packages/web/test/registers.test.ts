@@ -1,8 +1,10 @@
+import { parseHex } from '@pwn2block/shared';
 import { describe, expect, it } from 'vitest';
 import { diffProjections } from '../src/viewmodel/diff';
-import { FLAG_DESCRIPTIONS, buildRegisterRows, flagRow } from '../src/viewmodel/registers';
+import { FLAG_DESCRIPTIONS, buildRegisterRows, flagRow, flagsLine } from '../src/viewmodel/registers';
+import { valueRegion } from '../src/viewmodel/region';
 import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START } from '../src/fixtures/sample';
-import { hexOf, makeProjection, makeVma } from './helpers';
+import { hexOf, makeProjection, makeReader, makeVma } from './helpers';
 
 const LABELS = [
   { name: 'buf', addr: '0x7fffff00', size: 16, kind: 'buffer' as const },
@@ -82,5 +84,25 @@ describe('寄存器视图行投影（05 §2.4）', () => {
     expect(rows.flags.map((flag) => flag.changed)).toEqual([true, false, true]);
     expect(rows.flags[0]?.description).toBe(FLAG_DESCRIPTIONS.ZF);
     expect(flagRow(projection.flags, 'CF', diff).changed).toBe(false);
+  });
+
+  it('flagsLine：置位大写、清零小写，按 ZF CF SF 顺序拼成一行', () => {
+    const projection = makeProjection({ flags: { ZF: true, CF: false, SF: false } });
+    const diff = diffProjections(makeProjection({ flags: { ZF: false, CF: false, SF: false } }), projection);
+    const rows = buildRegisterRows({ projection, archBits: 64, roles: projection.roles, diff });
+    expect(flagsLine(rows.flags)).toBe('FLAGS [ ZF cf sf ]');
+  });
+
+  it('寄存器行的 region 与 valueRegion 一致', () => {
+    const reader = makeReader(SAMPLE_PROJECTION_START);
+    const rows = buildRegisterRows({
+      projection: SAMPLE_PROJECTION_START,
+      archBits: 64,
+      roles: SAMPLE_PROJECTION_START.roles,
+    });
+    for (const row of rows.registers) {
+      const value = parseHex(row.hex);
+      expect(row.region).toBe(valueRegion(reader, value));
+    }
   });
 });

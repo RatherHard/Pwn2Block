@@ -9,6 +9,7 @@ import {
   dumpMaxOffset,
   hiddenNotice,
 } from '../src/viewmodel/memory';
+import { formatAddr } from '../src/viewmodel/format';
 import { SAMPLE_PROJECTION_START } from '../src/fixtures/sample';
 import { hexOf, makeProjection, makeVma } from './helpers';
 
@@ -22,6 +23,8 @@ describe('自由视图 VMA 列表（05 §2.5）', () => {
     expect(stack?.perm).toBe('rw');
     expect(stack?.sizeText).toBe('0x2000');
     expect(stack?.hasContent).toBe(true);
+    expect(stack?.startText).toBe(formatAddr(stack!.start, 64));
+    expect(stack?.endText).toBe(formatAddr(stack!.start + stack!.size, 64));
   });
 
   it('隐藏 VMA：有布局、没有内容，标「隐藏」', () => {

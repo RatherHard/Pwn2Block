@@ -10,6 +10,7 @@ import { EMPTY_DIFF, type FlagName, type ProjectionDiff } from './diff';
 import { formatAddr, formatDecimal } from './format';
 import { labelKindName, labelAt } from './labels';
 import { createProjectionReader } from './reader';
+import { valueRegion, type ValueRegion } from './region';
 import { type RegisterRole } from './roles';
 
 export const FLAG_NAMES: readonly FlagName[] = ['ZF', 'CF', 'SF'];
@@ -32,6 +33,8 @@ export interface RegisterRowModel {
   readonly targetKind: RegisterTargetKind;
   /** 指向说明：`stack` / `标注「buf」（缓冲区）` / `隐藏 VMA「key」`。 */
   readonly targetText: string;
+  /** 值所指区域（pwndbg 风格着色），与 `valueRegion` 一致。 */
+  readonly region: ValueRegion;
 }
 
 export interface FlagRowModel {
@@ -93,6 +96,7 @@ export function buildRegisterRows(input: RegisterViewInput): RegisterViewRows {
       role: roleOf(item.name, input.roles),
       targetKind: target.kind,
       targetText: target.text,
+      region: valueRegion(reader, value),
     };
   });
 
@@ -108,4 +112,10 @@ export function flagRow(flags: FlagsView, name: FlagName, diff: ProjectionDiff):
     value: flags[name],
     changed: diff.flags.has(name),
   };
+}
+
+/** pwndbg 风格一行：`FLAGS [ ZF cf sf ]`。置位的标志名大写，清零的小写，顺序取自入参。 */
+export function flagsLine(flags: readonly FlagRowModel[]): string {
+  const names = flags.map((flag) => (flag.value ? flag.name.toUpperCase() : flag.name.toLowerCase()));
+  return `FLAGS [ ${names.join(' ')} ]`;
 }

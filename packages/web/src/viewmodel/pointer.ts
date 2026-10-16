@@ -2,7 +2,7 @@
  * 跳转链解析（05 §2.2）：把栈槽 / 寄存器里的值当指针跟随，最多 3 跳。
  *
  * pwndbg 风格附注的三个来源都在这里汇总：
- * - 跳转链 `→ 0x… → 0x…`（最多 `MAX_POINTER_HOPS` 跳）；
+ * - 跳转链 `—▸ 0x… —▸ 0x…`（最多 `MAX_POINTER_HOPS` 跳）；
  * - 链落到可执行区域时的伪汇编——**取自投影 `disasm`，前端不解码**；
  * - 可打印字节的 ASCII。
  *
@@ -107,12 +107,18 @@ export function resolvePointerChain(
 }
 
 export interface PointerDescription {
-  /** `→ 0x7fffff00 → 0x4141414141414141` 这样的链文本。 */
+  /** `—▸ 0x7fffff00 —▸ 0x4141414141414141` 这样的链文本（pwndbg 风格箭头）。 */
   readonly arrows: string;
   /** 终点说明：伪汇编 / 标注名 / ASCII / 隐藏 VMA。 */
   readonly annotation?: string;
   /** 终点处是否隐藏（内容不下发，只能显示布局）。 */
   readonly hidden: boolean;
+}
+
+/** 终点的伪汇编 + 标注部分：`◂— ret (win)` / `◂— syscall exit` / 只有标注名时就是 `label`。 */
+function disasmPart(text: string | undefined, label: string | undefined): string | undefined {
+  if (text !== undefined) return label === undefined ? `◂— ${text}` : `◂— ${text} (${label})`;
+  return label;
 }
 
 /**
@@ -125,17 +131,17 @@ export function describePointerChain(chain: PointerChain): PointerDescription | 
   const first = chain.hops[0];
   if (!first || first.state === 'unmapped') return undefined;
 
-  const arrows = chain.hops.map((hop) => formatAddrShort(hop.addr)).join(' → ');
+  const arrows = chain.hops.map((hop) => `—▸ ${formatAddrShort(hop.addr)}`).join(' ');
   const last = chain.hops[chain.hops.length - 1];
   const parts: string[] = [];
   if (last) {
     if (last.state === 'hidden') parts.push(`隐藏 VMA「${last.vmaId ?? '?'}」`);
-    if (chain.text) parts.push(chain.text);
-    if (chain.label) parts.push(chain.label);
+    const disasm = disasmPart(chain.text, chain.label);
+    if (disasm !== undefined) parts.push(disasm);
     if (chain.ascii) parts.push(`"${chain.ascii}"`);
   }
   return {
-    arrows: `→ ${arrows}`,
+    arrows,
     annotation: parts.length > 0 ? parts.join(' · ') : undefined,
     hidden: chain.hops.some((hop) => hop.state === 'hidden'),
   };

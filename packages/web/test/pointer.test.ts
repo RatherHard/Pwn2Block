@@ -63,7 +63,7 @@ describe('跳转链解析（05 §2.2）', () => {
     expect(chain.hops[1]?.word).toBeUndefined();
     expect(chain.ascii).toBeUndefined();
     const described = describePointerChain(chain);
-    expect(described?.arrows).toBe('→ 0x100000 → 0x600000');
+    expect(described?.arrows).toBe('—▸ 0x100000 —▸ 0x600000');
     expect(described?.annotation).toBe('隐藏 VMA「secret」');
     expect(described?.hidden).toBe(true);
   });
@@ -89,8 +89,8 @@ describe('跳转链解析（05 §2.2）', () => {
       labels: [{ name: 'win', addr: '0x300000', size: 1, kind: 'func' }],
     });
     const described = describePointerChain(chain);
-    expect(described?.arrows).toBe('→ 0x100000 → 0x300000');
-    expect(described?.annotation).toBe('ret · win');
+    expect(described?.arrows).toBe('—▸ 0x100000 —▸ 0x300000');
+    expect(described?.annotation).toBe('◂— ret (win)');
   });
 
   it('终点是普通数据时没有 ASCII、没有伪汇编、也没有附注', () => {

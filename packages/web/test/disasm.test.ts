@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDisasmRows, findDisasmRow, isClickableTarget } from '../src/viewmodel/disasm';
+import { buildDisasmRows, findDisasmRow, isClickableTarget, symbolAt } from '../src/viewmodel/disasm';
 import { diffProjections } from '../src/viewmodel/diff';
 import { funcLabels } from '../src/viewmodel/labels';
 import { SAMPLE_PROJECTION_AFTER, SAMPLE_PROJECTION_START } from '../src/fixtures/sample';
@@ -47,6 +47,25 @@ describe('指令视图行投影（05 §2.3）', () => {
     expect(rows[0]?.funcName).toBe('vuln');
     expect(funcLabels([{ name: 'vuln', addr: '0x400000', size: 4, kind: 'func' }])).toHaveLength(1);
     expect(funcLabels(undefined)).toHaveLength(0);
+  });
+
+  it('symbolAt：只认 func 标注，偏移十进制，范围外返回 undefined', () => {
+    const labels = [{ name: 'vuln', addr: '0x400000', size: 16, kind: 'func' as const }];
+    expect(symbolAt(labels, 0x400000n)).toBe('vuln+0');
+    expect(symbolAt(labels, 0x400004n)).toBe('vuln+4');
+    expect(symbolAt(labels, 0x400010n)).toBeUndefined();
+    expect(symbolAt([{ name: 'buf', addr: '0x400000', size: 16, kind: 'buffer' }], 0x400000n)).toBeUndefined();
+    expect(symbolAt(undefined, 0x400000n)).toBeUndefined();
+  });
+
+  it('行模型的 symbol 取自 symbolAt', () => {
+    const rows = buildDisasmRows({
+      projection: SAMPLE_PROJECTION_START,
+      archBits: 64,
+      labels: [{ name: 'vuln', addr: '0x400000', size: 4, kind: 'func' }],
+    });
+    expect(rows[0]?.symbol).toBe('vuln+0');
+    expect(rows[4]?.symbol).toBeUndefined();
   });
 
   it('字节变化的指令行被标记（差分来自投影，不是自己解码出来的）', () => {
