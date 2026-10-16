@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { Projection } from '@pwn2block/shared';
 import {
-  canvasBlocks, connCenter, connectFromToolbox, dragFromToolboxTo,
+  blockFieldTexts, canvasBlocks, connCenter, connectFromToolbox, dragFromToolboxTo,
   editBlockField, findCanvasBlock, openToolboxCategory, pickBottomConn, pickTopConn,
 } from './gestures';
 
@@ -14,7 +14,7 @@ async function capture(page: Page, info: TestInfo, name: string): Promise<void> 
   await info.attach(name, { path, contentType: 'image/png' });
 }
 
-/** 不把 DOM 可见误当作屏幕可用；允许面板内滚动，但不允许控件被裁切。 */
+/** 检查屏幕内可达；启用按钮另做试点击，确认能接收事件且不改变页面状态。 */
 async function reachable(locator: Locator, borderTolerance = 0): Promise<void> {
   await locator.scrollIntoViewIfNeeded();
   await expect(locator).toBeVisible();
@@ -22,6 +22,23 @@ async function reachable(locator: Locator, borderTolerance = 0): Promise<void> {
   if (box === null) throw new Error('控件没有实际尺寸');
   // 带边框画布在 720 高度下有不足 1 CSS px 的舍入裁切；按钮仍要求完整可见。
   await expect(locator).toBeInViewport({ ratio: 1 - borderTolerance / Math.min(box.width, box.height) });
+  const isButton = await locator.evaluate<boolean, void>('element => element.matches("button, [role=button]")');
+  if (isButton && await locator.isEnabled()) await locator.click({ trial: true });
+}
+
+/** 只比较积木身份与连接，不把刷新后可能变化的位置/尺寸当成存档内容。 */
+async function canvasStructure(page: Page) {
+  return (await canvasBlocks(page))
+    .map(({ id, cls, parentId, childClasses }) => ({ id, cls, parentId, childClasses }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** 从用户可见的编译结果核对唯一动作及参数：{ type: 'step', count: 1 }。 */
+async function expectCompiledStep(page: Page): Promise<void> {
+  const rows = page.locator('pwn2block-program-view li');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.locator('.type')).toHaveText('step');
+  await expect(rows.locator('.label')).toHaveText('执行 1 条指令');
 }
 
 async function layout(page: Page): Promise<void> {
@@ -139,7 +156,7 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       await editBlockField(page, step.id, 0, '1');
       await button('编译').click();
       const program = page.locator('pwn2block-program-view');
-      await expect(program.locator('li')).toHaveCount(1);
+      await expectCompiledStep(page);
       await reachable(program);
       await capture(page, info, '04-compiled-program');
     });
@@ -175,14 +192,36 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       await capture(page, info, '06-debug-output');
     });
 
-    await test.step('刷新接回原会话并恢复积木', async () => {
+    await test.step('刷新接回原会话，保留积木连接与字段并重新编译', async () => {
+      const before = await canvasStructure(page);
+      const start = before.find(block => block.cls.split(' ').includes('start'));
+      const step = before.find(block => block.cls.split(' ').includes('action_step'));
+      const count = before.find(block => block.cls.split(' ').includes('math_number'));
+      expect(before, '刷新前应有开始、单步及数值参数三个积木').toHaveLength(3);
+      if (start === undefined || step === undefined || count === undefined) {
+        throw new Error('刷新前程序积木不完整');
+      }
+      expect(start.parentId).toBeNull();
+      expect(step.parentId, '单步必须连接在开始下面').toBe(start.id);
+      expect(start.childClasses).toEqual([step.cls]);
+      expect(count.parentId, '数值参数必须连接到单步').toBe(step.id);
+      expect(step.childClasses).toEqual([count.cls]);
+      const fields = await blockFieldTexts(page, step.id);
+      expect(fields, '单步参数应明确为 1').toEqual(['1']);
       await page.reload();
       const [restored] = await Promise.all([
         page.waitForResponse(res => new URL(res.url()).pathname === `/api/sessions/${sessionId}`),
         button('回到胜利').click(),
       ]);
       expect(restored.status()).toBe(200);
-      await expect.poll(() => findCanvasBlock(page, 'action_step', undefined)).toBeDefined();
+      await expect.poll(() => canvasStructure(page), {
+        message: '刷新必须恢复原积木 id、类型、父子连接，不能只恢复孤立块',
+      }).toEqual(before);
+      await expect.poll(() => blockFieldTexts(page, step.id)).toEqual(fields);
+      await reachable(button('编译'));
+      await button('编译').click();
+      await expectCompiledStep(page);
+      await reachable(page.locator('pwn2block-program-view'));
       expect(creates).toBe(1);
       await capture(page, info, '07-restored');
       expect(errors).toEqual([]);

@@ -119,3 +119,40 @@ pnpm lint
 - 三尺寸执行的是桌面冒烟；原八步完整闭环仍只在 1600×1000 执行，不宣称八步闭环在全部尺寸重跑。
 - 没有执行题库独立最终 check/solve 子任务；主集成已报告该子任务遭自动安全审查拦截，**G4 缺口保留**。没有代跑 T01–T06，也不据浏览器结果宣告完整 MVP 或安全测试全部通过。
 - 主集成的 112 文件、1617 passed + 5 todo、覆盖率等是主集成提供的独立结果，不计为本 worktree 的执行证据。`docs/08`、`docs/12`、`docs/13` 由主集成更新。
+
+## Standards P2 审查收口（2026-10-16）
+
+在 `d4b9729` 上仅修改 `desktop-smoke.spec.ts` 与本文件，补强两项断言：
+
+- 刷新前记录 `canvasBlocks` 的 `id / cls / parentId / childClasses`，按 id 排序，排除 geometry；明确验证 `start → action_step → math_number` 三块连接及字段 `1`，刷新后完整比较同一份结构与字段。随后真实点击「编译」，核对程序区恰有一行、类型 `step`、参数文案 `执行 1 条指令`，对应 `{ type: 'step', count: 1 }`。不新增判题，不通过生产 API 注入画布。
+- `reachable` 对启用按钮追加 `click({ trial: true })`，检查无遮挡、稳定并可接收点击；disabled 按钮仍检查可见性，不强行点击。画布原有 1 CSS px 边框容差保持。
+
+本轮复用此前已安装依赖和同一基线的生产构建，服务仍用本文件记录的六个假 flag，执行 `$env:PORT='8797'; pnpm start`。仅运行三尺寸 smoke，未重跑原有完整闭环，未运行题目 CLI。
+
+真实测试命令（测试终端）：
+
+```powershell
+$env:PWN2BLOCK_E2E='1'
+$env:PWN2BLOCK_BASE_URL='http://127.0.0.1:8797'
+$env:FLAG_RET2WIN='flag{d7-browser-test-only}'
+$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/d7-review-smoke-r2'
+pnpm e2e --project=chromium-desktop-1280x720 --project=chromium-desktop-1440x900 --project=chromium-desktop-1920x1080
+pnpm typecheck
+pnpm lint
+```
+
+| 本轮执行 | 真实结果 | 证据 |
+| --- | --- | --- |
+| 首轮三尺寸 smoke，输出 `.tmp/d7-review-smoke` | 3 failed / 20.6s，0 skipped，exit 1 | `.tmp/d7-review-smoke.json`、同名 `.log` 与目录内截图 / trace |
+| 修正后三尺寸 smoke，输出 `.tmp/d7-review-smoke-r2` | **3 passed / 20.8s，0 skipped，0 flaky，exit 0** | `.tmp/d7-review-smoke-r2.json`、同名 `.log` |
+| 首轮 `pnpm typecheck` | 新增 `Locator.evaluate` 少一个泛型参数，exit 2；已补齐类型参数 | `.tmp/d7-review-typecheck.log` |
+| 修正后 `pnpm typecheck` | 通过，exit 0 | `.tmp/d7-review-typecheck-r2.log` |
+| `pnpm lint` | 通过，exit 0 | `.tmp/d7-review-lint.log` |
+
+首轮 smoke 失败原因是新增测试误把画布计为两块，漏算了 `math_number` 参数影子块；已在失败后及时报告，并修正为三块、增加参数块父子连接断言。没有删除或跳过失败测试，失败证据保留。随后 typecheck 的修正只补全泛型类型参数，不改变已通过 smoke 的运行行为。
+
+浏览器仍为 Playwright bundled Chromium headless shell `156.0.8078.4`。成功截图 **21 张**，目录模板为 `.tmp/d7-review-smoke-r2/desktop-smoke-桌面冒烟：布局、键盘、积木、调试、回放与刷新-chromium-desktop-<尺寸>/`，文件名沿用上述七张截图；`07-restored.png` 现在包含刷新后重新编译的程序区。截图与 JSON / 日志均保留在本 worktree，不提交 git。
+
+本轮监听 PID **12216**、启动器 PID **19376**。已核验服务命令行属于本 worktree 后按具体 PID 停止；8797 无监听，启动器及报告记录的浏览器进程均已退出。清理记录：`.tmp/d7-review-process-cleanup.json`，时间 2026-10-16 19:19:41 +08:00。未停止其他工作区服务。
+
+主线另报告 `PWN2BLOCK_E2E=0`、输出 `.tmp/d7-opt-out` 的 `pnpm e2e` 为 **13 skipped / 0 executed**，只证明开关行为，不计为通过；该结果来自主线在 `c99124f` 后追加的验证，不是本 worktree 新执行。主线 `docs/08/12/13` 仍由集成方维护。
