@@ -225,7 +225,7 @@ function stdioOf(
 
 function lastStopOf(state: VmState): LastStopView | undefined {
   const lastStop = state.lastStop;
-  if (lastStop === undefined) return undefined;
+  if (lastStop === undefined || (lastStop.reason !== 'exit' && lastStop.reason !== 'exception')) return undefined;
   return lastStop.addr === undefined
     ? { reason: lastStop.reason }
     : { reason: lastStop.reason, addr: formatHex(lastStop.addr) };

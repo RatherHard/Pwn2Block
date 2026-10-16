@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProjectionSchema, RolesSchema } from '../src/index';
+import { LastStopViewSchema, ProjectionSchema, ReplayFrameSchema, RolesSchema, StopReasonSchema } from '../src/index';
 
 /**
  * `Projection.roles` 的契约单测（A 的自测，规则 6）。
@@ -63,5 +63,22 @@ describe('Projection.roles 契约', () => {
 
   it('roles 只声明 sp / bp / ip 三个角色键', () => {
     expect(Object.keys(RolesSchema.shape).sort()).toEqual(['bp', 'ip', 'sp']);
+  });
+});
+
+
+describe('?????????', () => {
+  it.each(['exit', 'exception'])('?????????? %s', (reason) => {
+    const lastStop = { reason, addr: '0x1000' };
+    expect(ProjectionSchema.parse(projection({ lastStop })).lastStop).toEqual(lastStop);
+    expect(ReplayFrameSchema.shape.lastStop.parse(lastStop)).toEqual(lastStop);
+  });
+
+  it.each(['step', 'limit'])('?????? %s ??????????', (reason) => {
+    const lastStop = { reason, addr: '0x1000' };
+    expect(StopReasonSchema.safeParse(reason).success).toBe(true);
+    expect(LastStopViewSchema.safeParse(lastStop).success).toBe(false);
+    expect(ProjectionSchema.safeParse(projection({ lastStop })).success).toBe(false);
+    expect(ReplayFrameSchema.shape.lastStop.safeParse(lastStop).success).toBe(false);
   });
 });

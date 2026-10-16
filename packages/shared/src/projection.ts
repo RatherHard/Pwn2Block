@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { RolesSchema } from './challenge';
-import { ErrorCodeSchema, InstanceStatusSchema, StopReasonSchema } from './errors';
+import { ErrorCodeSchema, InstanceStatusSchema } from './errors';
 import { HexBytesSchema, HexSchema } from './hex';
 import {
   LabelKindSchema,
@@ -58,7 +58,8 @@ export const DisasmEntrySchema = z.object({
 export type DisasmEntry = z.infer<typeof DisasmEntrySchema>;
 
 export const LastStopViewSchema = z.object({
-  reason: StopReasonSchema,
+  // ????????????step/limit ????????
+  reason: z.enum(['exit', 'exception']),
   addr: HexSchema.optional(),
 });
 export type LastStopView = z.infer<typeof LastStopViewSchema>;

@@ -1,0 +1,164 @@
+{
+  "id": "localvar",
+  "title": "局部变量覆盖",
+  "briefing": "程序将读取 buf 后面的局部变量 access，再退出。access 初始为 0，目标是让程序读到 0x1337。\n\n栈视图标出了 16 字节的 buf 和紧邻的 8 字节 access。使用 gets(buf) 从 buf 开始连续写入，计算要填多少字节才会碰到 access；目标值按小端序存放。\n\n本题只能通过 gets(buf) 写入，不能直接指定 access 的地址。考点是越过缓冲区覆盖相邻局部变量。",
+  "archBits": 64,
+  "encoding": {
+    "preset": "x86ish",
+    "remove": [
+      "0xb8",
+      "0xb9",
+      "0xba",
+      "0xbb",
+      "0xbc",
+      "0xbd",
+      "0xbe",
+      "0xbf",
+      "0x88",
+      "0x89",
+      "0x8a",
+      "0x8b",
+      "0x8e",
+      "0x8f",
+      "0x86",
+      "0x87",
+      "0x50",
+      "0x51",
+      "0x52",
+      "0x53",
+      "0x54",
+      "0x55",
+      "0x56",
+      "0x57",
+      "0x68",
+      "0x58",
+      "0x59",
+      "0x5a",
+      "0x5b",
+      "0x5c",
+      "0x5d",
+      "0x5e",
+      "0x5f",
+      "0x00",
+      "0x01",
+      "0x02",
+      "0x04",
+      "0x03",
+      "0x28",
+      "0x29",
+      "0x2a",
+      "0x2b",
+      "0x38",
+      "0x39",
+      "0x3a",
+      "0x3b",
+      "0x20",
+      "0x21",
+      "0x24",
+      "0x08",
+      "0x09",
+      "0x0c",
+      "0x30",
+      "0x31",
+      "0x34",
+      "0xc0",
+      "0xc1",
+      "0xd2",
+      "0xd3",
+      "0xc4",
+      "0xc5",
+      "0xd6",
+      "0xd7",
+      "0xe9",
+      "0xff",
+      "0x26",
+      "0x74",
+      "0x75",
+      "0x72",
+      "0x73",
+      "0xe8",
+      "0x9a",
+      "0xc3",
+      "0xc9",
+      "0x10",
+      "0x0f",
+      "0x90"
+    ]
+  },
+  "syscallAbi": {
+    "nr": "RAX",
+    "args": [],
+    "ret": "RAX"
+  },
+  "syscalls": [
+    {
+      "nr": 60,
+      "name": "exit",
+      "kind": "exit",
+      "doc": "exit(code)"
+    }
+  ],
+  "labels": [
+    {
+      "name": "check_access",
+      "addr": "0x400000",
+      "size": 10,
+      "kind": "func"
+    },
+    {
+      "name": "buf",
+      "addr": "0x7fffff00",
+      "size": 16,
+      "kind": "buffer"
+    },
+    {
+      "name": "access",
+      "addr": "0x7fffff10",
+      "size": 8,
+      "kind": "custom"
+    }
+  ],
+  "allowedActions": [
+    "step",
+    "run",
+    "undo",
+    "reset"
+  ],
+  "hints": [
+    {
+      "text": "先比较 buf 和 access 的起始地址，二者相差多少字节？"
+    },
+    {
+      "text": "前 16 字节只填满 buf；第 17 字节才会覆盖 access 的最低有效字节。"
+    },
+    {
+      "text": "在 16 字节填充后拼接 0x1337 的 8 字节小端表示，再运行程序读取 access。",
+      "unlockAfterFailures": 3
+    }
+  ],
+  "errorNotes": {
+    "action_not_allowed": "本题只允许 gets(buf) 写入；直接 write_bytes 不属于允许的动作。",
+    "inaccessible_address": "gets(buf) 的字节必须全部落在可写的栈区域；本题只需覆盖 16 字节 buf 和 8 字节 access。",
+    "not_executable": "程序已退出，请撤销、后退一步或重置；调试满足条件后可提交判题验证完整 payload。"
+  },
+  "authorBlocks": [
+    {
+      "id": "gets",
+      "label": "gets(buf)",
+      "tooltip": "从 buf 开始连续写入，不限制为缓冲区长度",
+      "params": [
+        {
+          "name": "data",
+          "type": "bytes"
+        }
+      ],
+      "expand": [
+        {
+          "type": "write_bytes",
+          "addr": "0x7fffff00",
+          "hex": "$data"
+        }
+      ]
+    }
+  ]
+}

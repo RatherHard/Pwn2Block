@@ -19,6 +19,7 @@ jobs:
       FLAG_PUSHPOP: pwn2block-ci-sentinel
       FLAG_CALLRET: pwn2block-ci-sentinel
       FLAG_STACKFRAME: pwn2block-ci-sentinel
+      FLAG_LOCALVAR: pwn2block-ci-sentinel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
