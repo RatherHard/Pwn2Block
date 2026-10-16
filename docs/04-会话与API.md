@@ -107,7 +107,7 @@ MVP 不做 revision、baseRevision、幂等键和 clientSeq。前端串行发送
 | `stdin` | `{hex, pos}`：已 `feed` 的全部字节和当前读位置。题目未声明 stdin 时省略 |
 | `stdout` | `{hex}`：程序写到 stdout 的全部字节。题目未声明 stdout 时省略 |
 | `disasm[]` | 服务端对非隐藏的 `x` 区域线性反汇编：`{addr, bytes, text, target?}` |
-| `lastStop` | `{reason: exit\|exception\|limit\|step, addr?}`。**`reason === 'exit'` 就是「程序已退出」**（与引擎 `isExited()` 同一判据，§1.1）：它是前端判断已退出的**唯一**来源，不另设 `exited` 布尔字段——两个事实来源迟早漂移（[09](09-契约冻结.md) §8 第 10 条） |
+| `lastStop` | `{reason: exit\|exception\|limit\|step, addr?}`。**`reason === 'exit'` 就是「程序已退出」**（与引擎 `isExited()` 同一判据，§1.1）：它是前端判断已退出的**唯一**来源，不另设 `exited` 布尔字段——两个事实来源迟早漂移（[09](09-契约冻结.md) §8 第 10 条）。**类型比服务端实际产出的值宽，这是 D5 对账后的明确口径**：投影里**只会**出现 `exit` 与 `exception`。`lastStop` 属于 `VmState`、要参与快照与 `undo`，所以它只承载**状态级**停因；`step` / `limit` 是**一次 step/run 调用的停因**（引擎在 `StepOutcome.stop` 上返回），是瞬时量而不是状态，写进状态会让它每步抖动、还要跟着回滚。客户端要判断「是否撞了本次 N 步上限」，用**自己请求的步数 + 响应的 `executed` + `projection.steps`** 三者相减即可，不需要新字段。枚举保留四个值是因为 `StopReason` 同时给步进结果用（D6 待办：收窄投影侧枚举，并清掉 web fixture 里编造的 `step`/`limit`） |
 | `error?` | `{code, message, note}`，message 来自模板，note 来自题目 `errorNotes` |
 
 字段名与类型以 `packages/shared/src/projection.ts` 的 `ProjectionSchema` 为准：它是单一事实来源，文档与它不一致时以代码为准并立刻改文档。
