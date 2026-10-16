@@ -31,6 +31,7 @@ import { engineRuntimeFactory } from './runtime';
 import { SessionStore } from './sessions';
 import type { Session, SessionStoreOptions } from './sessions';
 import { registerStatic } from './static';
+import { requestIssueMessage } from './validation';
 
 /**
  * Fastify 应用（04 §5）。引擎、API、静态托管同进程（07 §7）。
@@ -118,16 +119,6 @@ function missingSession(reply: FastifyReply, expired: boolean): FastifyReply {
     : fail(reply, 'not_found', '会话不存在');
 }
 
-/** 校验失败的文案：只报字段路径与原因，不含请求内容以外的任何服务端信息。 */
-function issueMessage(error: {
-  readonly issues: readonly { readonly path: readonly PropertyKey[]; readonly message: string }[];
-}): string {
-  const first = error.issues[0];
-  if (first === undefined) return '请求体不合法';
-  const path = first.path.map(String).join('.');
-  return path.length === 0 ? `请求体不合法：${first.message}` : `请求体不合法：${path} ${first.message}`;
-}
-
 function currentProjection(session: Session): Projection {
   return projectState(
     projectionContextOf(session.runtime),
@@ -195,7 +186,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.post('/api/sessions', async (request, reply) => {
     const parsed = CreateSessionRequestSchema.safeParse(request.body);
-    if (!parsed.success) return fail(reply, 'invalid_request', issueMessage(parsed.error));
+    if (!parsed.success) {
+      return fail(reply, 'invalid_request', requestIssueMessage(parsed.error, request.body));
+    }
 
     const loaded = challenges.get(parsed.data.challengeId);
     if (loaded === undefined) {
@@ -244,7 +237,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // 调试实例：引擎按提交动作逐个返回结果，遇到第一个拒绝或实例结束即停（04 §5）。
   app.post<{ Params: { id: string } }>('/api/sessions/:id/actions', async (request, reply) => {
     const parsed = ActionsRequestSchema.safeParse(request.body);
-    if (!parsed.success) return fail(reply, 'invalid_request', issueMessage(parsed.error));
+    if (!parsed.success) {
+      return fail(reply, 'invalid_request', requestIssueMessage(parsed.error, request.body));
+    }
 
     const outcome = await sessions.run(request.params.id, (session): ActionsResponse => {
       const ctx = projectionContextOf(session.runtime);
@@ -265,7 +260,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // 提交判题：判题实例重置到初态纯回放，判定只由服务端做（04 §5.1）。
   app.post<{ Params: { id: string } }>('/api/sessions/:id/submit', async (request, reply) => {
     const parsed = SubmitRequestSchema.safeParse(request.body);
-    if (!parsed.success) return fail(reply, 'invalid_request', issueMessage(parsed.error));
+    if (!parsed.success) {
+      return fail(reply, 'invalid_request', requestIssueMessage(parsed.error, request.body));
+    }
 
     const outcome = await sessions.run(request.params.id, (session): SubmitPlan => {
       sessions.recordSubmit(session.id);
@@ -321,7 +318,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // 错误响应不含堆栈、文件路径与私有包字段（04 §6）。
   app.setErrorHandler((error: FastifyError, request, reply) => {
     const status = error.statusCode ?? 500;
-    if (status === 400) return fail(reply, 'invalid_request', '请求体不是合法 JSON');
+    // 解析期的 400 分两种：「body 为空」与「不是合法 JSON」给学习者的动作不同，文案分开说。
+    if (status === 400) {
+      return fail(
+        reply,
+        'invalid_request',
+        error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY' ? '请求体不能为空' : '请求体不是合法 JSON',
+      );
+    }
     if (status === 413) return fail(reply, 'invalid_request', '请求体超过大小上限');
     if (status === 415) return fail(reply, 'invalid_request', '请求体必须是 application/json');
     // 静态层对穿越 / 非规范路径的拒绝是 403（`@fastify/static` 的 forbiddenPathError）。
