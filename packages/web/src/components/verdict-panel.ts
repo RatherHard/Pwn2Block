@@ -21,22 +21,25 @@ export class Pwn2BlockVerdictPanel extends LitElement {
     css`
       :host {
         display: block;
+        padding: 0.85rem 1rem;
+        border-top: 1px solid var(--p2b-line);
         border-bottom: 1px solid var(--p2b-line);
-        background: var(--p2b-bg-alt);
-        padding: 0.35rem 0.6rem;
+        background: linear-gradient(135deg, rgb(17 31 51 / 96%), rgb(13 24 41 / 96%));
+        box-shadow: 0 12px 28px rgb(0 0 0 / 16%);
       }
       .banner {
         display: flex;
         align-items: baseline;
-        gap: 0.5rem;
+        gap: 0.55rem;
         margin: 0;
         flex-wrap: wrap;
       }
       .banner .mark {
-        font-size: 15px;
+        font-size: 1.1rem;
       }
       .banner strong {
-        letter-spacing: 0.05em;
+        font-size: 1rem;
+        letter-spacing: 0.04em;
       }
       .ok .mark,
       .ok strong {
@@ -54,41 +57,48 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         white-space: pre-wrap;
       }
       .emphasize {
-        margin: 0.3rem 0 0;
+        margin: 0.55rem 0 0;
+        padding: 0.55rem 0.7rem;
+        border-left: 3px solid var(--p2b-warn);
+        border-radius: 0.3rem;
         color: var(--p2b-warn);
+        background: rgb(74 53 25 / 24%);
       }
       .flag {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.6rem;
         flex-wrap: wrap;
-        margin-top: 0.35rem;
+        margin-top: 0.65rem;
       }
       .flag code {
-        background: #0f1513;
+        padding: 0.35rem 0.65rem;
         border: 1px solid var(--p2b-accent);
-        border-radius: 2px;
-        padding: 0.1rem 0.4rem;
+        border-radius: 0.45rem;
         color: var(--p2b-accent);
+        background: rgb(8 35 38 / 72%);
         user-select: all;
       }
       .meta {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
+        gap: 0.65rem;
         flex-wrap: wrap;
-        margin-top: 0.35rem;
+        margin-top: 0.65rem;
       }
       .timeline {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.55rem;
         flex-wrap: wrap;
-        margin-top: 0.35rem;
+        margin-top: 0.7rem;
+        padding-top: 0.7rem;
+        border-top: 1px solid var(--p2b-line-soft);
       }
       input[type='range'] {
         flex: 1;
         min-width: 12rem;
+        accent-color: var(--p2b-accent);
       }
       .pos {
         color: var(--p2b-dim);

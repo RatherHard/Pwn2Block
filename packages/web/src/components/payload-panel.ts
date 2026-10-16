@@ -36,41 +36,48 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         flex-direction: column;
         height: 100%;
         min-height: 0;
+        gap: 0.75rem;
         overflow: auto;
-        padding: 0.4rem 0.6rem;
-        gap: 0.3rem;
+        padding: 0.85rem;
+        scrollbar-color: var(--p2b-line) transparent;
       }
       .toolbar {
         display: flex;
-        align-items: baseline;
-        gap: 0.6rem;
+        align-items: center;
+        gap: 0.8rem;
         flex-wrap: wrap;
+        padding: 0.1rem 0.1rem 0.2rem;
       }
       .toolbar h2 {
-        margin: 0;
+        margin-right: auto;
       }
       #blockly-host {
         position: absolute;
         inset: 0;
+        overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius: 3px;
-        background: var(--p2b-panel);
+        border-radius: 0.7rem;
+        background: #0a1727;
       }
       .canvas-wrap {
         position: relative;
-        height: 18rem;
+        height: clamp(18rem, 38vh, 29rem);
         min-height: 16rem;
+        overflow: hidden;
+        border-radius: 0.7rem;
+        box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
       }
       .placeholder {
         position: absolute;
         inset: 0;
         display: grid;
         place-items: center;
+        padding: 1.5rem;
         border: 1px dashed var(--p2b-line);
-        border-radius: 3px;
+        border-radius: 0.7rem;
         color: var(--p2b-dim);
+        background: linear-gradient(135deg, rgb(17 31 51 / 94%), rgb(10 23 39 / 94%));
         text-align: center;
-        padding: 1rem;
         pointer-events: none;
       }
       .placeholder[hidden] {
@@ -78,14 +85,19 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       }
       .program,
       .output {
-        border: 1px solid var(--p2b-line);
-        border-radius: 3px;
-        background: var(--p2b-panel);
-        padding: 0.3rem 0.4rem;
         min-height: 4rem;
+        padding: 0.75rem;
+        border: 1px solid var(--p2b-line);
+        border-radius: 0.7rem;
+        background: rgb(17 31 51 / 88%);
       }
       .mode-hint {
-        color: var(--p2b-dim);
+        margin: 0 0 0.65rem;
+        padding: 0.5rem 0.65rem;
+        border-left: 3px solid var(--p2b-warn);
+        border-radius: 0.3rem;
+        color: var(--p2b-warn);
+        background: rgb(74 53 25 / 24%);
       }
     `,
   ];

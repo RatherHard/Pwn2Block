@@ -27,44 +27,62 @@ export class Pwn2BlockBriefingPanel extends LitElement {
     sharedStyles,
     css`
       details {
-        padding: 0.35rem 0.6rem;
+        padding: 0.75rem 0.9rem 0.85rem;
       }
       summary {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        color: var(--p2b-fg);
         cursor: pointer;
+        font-weight: 700;
+      }
+      summary::before {
         color: var(--p2b-accent);
+        content: '◈';
       }
       .briefing {
-        margin: 0.4rem 0 0;
+        max-width: 75rem;
+        margin: 0.75rem 0 0;
+        padding: 0.75rem 0.85rem;
+        border: 1px solid var(--p2b-line-soft);
+        border-radius: 0.55rem;
+        color: var(--p2b-dim);
+        background: rgb(7 17 31 / 42%);
         white-space: pre-wrap;
       }
       .hints {
-        margin-top: 0.5rem;
-        border-top: 1px dashed var(--p2b-line);
-        padding-top: 0.35rem;
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--p2b-line-soft);
       }
       .hints h3 {
-        margin: 0 0 0.2rem;
+        margin: 0 0 0.4rem;
       }
       .hints ol {
         margin: 0;
-        padding-left: 1.4rem;
+        padding-left: 1.45rem;
       }
       .hints li {
-        margin: 0.15rem 0;
+        margin: 0.35rem 0;
+        padding-left: 0.25rem;
       }
       .tag {
-        margin-right: 0.4rem;
-        padding: 0 0.25rem;
-        border: 1px solid var(--p2b-line);
-        border-radius: 2px;
-        color: var(--p2b-accent);
+        display: inline-block;
+        margin-right: 0.45rem;
+        padding: 0.1rem 0.4rem;
+        border: 1px solid rgb(199 167 255 / 36%);
+        border-radius: 999px;
+        color: var(--p2b-hidden);
+        background: rgb(199 167 255 / 9%);
+        font-size: 0.75rem;
       }
       .hint-actions {
         display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
+        align-items: center;
+        gap: 0.65rem;
         flex-wrap: wrap;
-        margin: 0.4rem 0 0;
+        margin: 0.65rem 0 0;
       }
       .locked {
         color: var(--p2b-warn);

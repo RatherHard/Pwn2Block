@@ -31,47 +31,86 @@ export class Pwn2BlockTopBar extends LitElement {
     css`
       :host {
         display: block;
-        background: var(--p2b-bg-alt);
+        flex: none;
         border-bottom: 1px solid var(--p2b-line);
+        background: rgb(8 17 31 / 86%);
+        box-shadow: 0 10px 30px rgb(0 0 0 / 16%);
       }
       .bar {
         display: flex;
         align-items: center;
         gap: 1rem;
-        padding: 0.3rem 0.6rem;
+        min-height: 4.1rem;
+        padding: 0.7rem 1rem;
       }
       .brand {
-        color: var(--p2b-accent);
-        letter-spacing: 0.1em;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        color: var(--p2b-fg);
+        font-size: 1rem;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      .brand::before {
+        display: grid;
+        width: 1.85rem;
+        height: 1.85rem;
+        place-items: center;
+        border: 1px solid rgb(94 225 194 / 55%);
+        border-radius: 0.55rem;
+        color: #06151a;
+        background: var(--p2b-accent);
+        box-shadow: 0 0 22px rgb(94 225 194 / 22%);
+        content: '>';
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 1.1rem;
+        font-weight: 800;
       }
       nav {
         display: flex;
-        gap: 0.5rem;
+        gap: 0.45rem;
       }
       .menu {
         position: relative;
       }
       .menu > summary {
-        list-style: none;
+        display: inline-flex;
+        align-items: center;
+        min-height: 2rem;
+        padding: 0.3rem 0.75rem;
+        border: 1px solid transparent;
+        border-radius: 0.55rem;
+        color: var(--p2b-dim);
         cursor: pointer;
-        padding: 0.1rem 0.5rem;
-        border: 1px solid var(--p2b-line);
-        border-radius: 2px;
+        list-style: none;
       }
+      .menu > summary::after {
+        margin-left: 0.45rem;
+        color: var(--p2b-dim);
+        content: '⌄';
+      }
+      .menu > summary:hover,
       .menu[open] > summary {
-        border-color: var(--p2b-accent);
-        color: var(--p2b-accent);
+        border-color: var(--p2b-line);
+        color: var(--p2b-fg);
+        background: rgb(26 48 76 / 60%);
+      }
+      .menu[open] > summary::after {
+        content: '⌃';
       }
       .menu-body {
         position: absolute;
         z-index: 10;
-        margin-top: 0.2rem;
-        min-width: 34rem;
-        max-width: 48rem;
-        padding: 0.5rem;
-        background: var(--p2b-panel);
+        left: 0;
+        min-width: 36rem;
+        max-width: min(48rem, calc(100vw - 2rem));
+        margin-top: 0.45rem;
+        padding: 0.8rem;
         border: 1px solid var(--p2b-line);
-        box-shadow: 0 6px 20px #0008;
+        border-radius: 0.75rem;
+        background: rgb(17 31 51 / 98%);
+        box-shadow: 0 22px 50px rgb(0 0 0 / 42%);
       }
       ul {
         list-style: none;
@@ -80,27 +119,78 @@ export class Pwn2BlockTopBar extends LitElement {
       }
       li {
         display: grid;
-        grid-template-columns: 12rem 1fr auto;
+        grid-template-columns: 12rem minmax(12rem, 1fr) auto;
         align-items: center;
-        gap: 0.4rem;
-        padding: 0.1rem 0;
+        gap: 0.65rem;
+        padding: 0.45rem 0.35rem;
+        border-radius: 0.45rem;
+      }
+      li:hover {
+        background: rgb(40 69 100 / 30%);
+      }
+      li + li {
+        margin-top: 0.2rem;
       }
       .desc {
         color: var(--p2b-dim);
+        font-size: 0.82rem;
       }
       .order {
         display: flex;
-        gap: 0.2rem;
+        gap: 0.25rem;
+      }
+      .order button {
+        min-width: 2rem;
+        padding-inline: 0.35rem;
       }
       .modes {
-        margin-left: auto;
         display: flex;
-        gap: 0.4rem;
+        gap: 0.35rem;
+        margin-left: auto;
+        padding: 0.2rem;
+        border: 1px solid var(--p2b-line-soft);
+        border-radius: 0.7rem;
+        background: rgb(17 31 51 / 72%);
+      }
+      .modes button {
+        min-height: 1.9rem;
+        border-color: transparent;
+        background: transparent;
+      }
+      .modes button:hover:not(:disabled) {
+        background: rgb(44 80 94 / 52%);
       }
       kbd {
+        padding: 0.1rem 0.35rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 2px;
-        padding: 0 0.2rem;
+        border-radius: 0.3rem;
+        color: var(--p2b-fg);
+        background: rgb(7 17 31 / 55%);
+        font-size: 0.75rem;
+      }
+      @media (max-width: 620px) {
+        .bar {
+          flex-wrap: wrap;
+          gap: 0.45rem 0.75rem;
+          padding: 0.65rem 0.7rem;
+        }
+        .modes {
+          order: 3;
+          width: 100%;
+          margin-left: 0;
+        }
+        .modes button {
+          flex: 1;
+        }
+        .menu-body {
+          min-width: min(36rem, calc(100vw - 1.4rem));
+        }
+        li {
+          grid-template-columns: 1fr auto;
+        }
+        li .desc {
+          grid-column: 1 / -1;
+        }
       }
     `,
   ];

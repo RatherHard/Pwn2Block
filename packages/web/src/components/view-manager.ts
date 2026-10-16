@@ -32,37 +32,54 @@ export class Pwn2BlockViewManager extends LitElement {
       :host {
         display: flex;
         flex-direction: column;
-        min-height: 0;
         height: 100%;
+        min-height: 0;
       }
       .head {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
-        padding: 0.25rem 0.5rem;
+        gap: 0.65rem;
+        min-height: 3.3rem;
+        padding: 0.75rem 0.9rem;
         border-bottom: 1px solid var(--p2b-line);
+        background: rgb(17 31 51 / 72%);
+      }
+      .head h2 {
+        margin-right: auto;
       }
       .spacer {
-        margin-left: auto;
+        display: none;
       }
       .viewport {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
         scroll-behavior: smooth;
+        scrollbar-color: var(--p2b-line) transparent;
       }
       .slot {
         height: calc(50% - 1px);
+        min-height: 13rem;
         overflow: auto;
         border-bottom: 1px solid var(--p2b-line);
+        background: rgb(8 17 31 / 28%);
+      }
+      .slot + .slot {
+        background: rgb(17 31 51 / 20%);
       }
       .slot-empty {
-        height: 100%;
         display: grid;
+        height: 100%;
         place-items: center;
+        margin: 0;
+        padding: 1.5rem;
         color: var(--p2b-dim);
-        padding: 1rem;
         text-align: center;
+      }
+      @media (max-width: 980px) {
+        .slot {
+          height: 28rem;
+        }
       }
     `,
   ];

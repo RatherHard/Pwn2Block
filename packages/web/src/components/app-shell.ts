@@ -64,50 +64,71 @@ export class Pwn2BlockApp extends LitElement {
       :host {
         display: flex;
         flex-direction: column;
-        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
         overflow: hidden;
-        background: var(--p2b-bg);
+        background:
+          radial-gradient(circle at 12% -10%, rgb(42 93 111 / 22%), transparent 34rem),
+          radial-gradient(circle at 92% 0%, rgb(44 67 126 / 18%), transparent 30rem),
+          var(--p2b-bg);
       }
       .briefing {
-        border-bottom: 1px solid var(--p2b-line);
-        background: var(--p2b-bg-alt);
+        margin: 0 1rem;
+        border: 1px solid var(--p2b-line);
+        border-top: 0;
+        border-radius: 0 0 0.75rem 0.75rem;
+        background: rgb(13 24 41 / 88%);
+        box-shadow: 0 10px 24px rgb(0 0 0 / 14%);
       }
       .notice {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        margin: 0;
-        padding: 0.3rem 0.6rem;
-        border-bottom: 1px solid var(--p2b-line);
+        gap: 0.6rem;
+        margin: 0.7rem 1rem 0;
+        padding: 0.65rem 0.85rem;
+        border: 1px solid var(--p2b-line);
+        border-radius: 0.65rem;
+        background: rgb(17 31 51 / 90%);
       }
       .notice.error {
-        background: #2a1614;
+        border-color: rgb(255 127 149 / 42%);
+        background: rgb(77 29 46 / 38%);
         color: var(--p2b-error);
       }
       .notice.warn {
-        background: #2a2713;
+        border-color: rgb(244 184 96 / 42%);
+        background: rgb(74 53 25 / 38%);
         color: var(--p2b-warn);
       }
       .notice.ok {
-        background: #16261c;
+        border-color: rgb(94 225 194 / 42%);
+        background: rgb(15 70 67 / 30%);
         color: var(--p2b-accent);
       }
       .notice.info {
-        background: #0f1513;
+        color: var(--p2b-dim);
       }
       .status {
-        margin: 0;
-        padding: 0.25rem 0.6rem;
-        border-bottom: 1px solid var(--p2b-line);
-        background: #0f1513;
+        display: flex;
+        align-items: center;
+        min-height: 2.7rem;
+        margin: 0.7rem 1rem 0;
+        padding: 0.65rem 0.85rem;
+        border: 1px solid var(--p2b-line);
+        border-radius: 0.65rem;
+        background: rgb(13 24 41 / 92%);
+        box-shadow: 0 10px 24px rgb(0 0 0 / 12%);
       }
       .status.ok {
+        border-color: rgb(94 225 194 / 35%);
         color: var(--p2b-accent);
       }
       .status.warn {
+        border-color: rgb(244 184 96 / 35%);
         color: var(--p2b-warn);
       }
       .status.error {
+        border-color: rgb(255 127 149 / 35%);
         color: var(--p2b-error);
       }
       .status.info {
@@ -115,47 +136,90 @@ export class Pwn2BlockApp extends LitElement {
       }
       .status .mode {
         color: var(--p2b-accent);
+        font-weight: 700;
       }
       .status .marker {
         margin-right: 0.3rem;
+        font-size: 0.9rem;
       }
       main {
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        /* 05 §1：左右 1:1、无间隙、无边框；右半只用底色区分，不加分隔线 */
-        gap: 0;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 1rem;
+        padding: 1rem;
+        overflow: hidden;
+      }
+      .left,
+      .right {
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid var(--p2b-line);
+        border-radius: 0.85rem;
+        box-shadow: var(--p2b-shadow);
       }
       .left {
         display: flex;
         flex-direction: column;
-        min-height: 0;
-        min-width: 0;
+        background: rgb(13 24 41 / 86%);
       }
       .right {
-        min-height: 0;
-        min-width: 0;
-        overflow: hidden;
-        background: var(--p2b-bg-alt);
+        background: rgb(10 20 35 / 94%);
       }
       .boot {
         flex: 1;
         min-height: 0;
+        margin: 0;
+        padding: 2rem;
         overflow: auto;
-        padding: 1rem 1.2rem;
       }
       .boot ul {
-        list-style: none;
-        margin: 0.6rem 0 0;
+        display: grid;
+        gap: 0.6rem;
+        max-width: 42rem;
+        margin: 1.2rem 0 0;
         padding: 0;
+        list-style: none;
+      }
+      .boot li {
         display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
-        align-items: flex-start;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--p2b-line);
+        border-radius: 0.65rem;
+        background: rgb(22 40 64 / 62%);
       }
       .boot .lead {
         color: var(--p2b-dim);
+      }
+      @media (max-width: 980px) {
+        :host {
+          overflow: auto;
+        }
+        main {
+          grid-template-columns: 1fr;
+          overflow: visible;
+        }
+        .left,
+        .right {
+          min-height: 32rem;
+        }
+      }
+      @media (max-width: 620px) {
+        .briefing,
+        .notice,
+        .status {
+          margin-left: 0.6rem;
+          margin-right: 0.6rem;
+        }
+        main {
+          gap: 0.7rem;
+          padding: 0.7rem;
+        }
       }
     `,
   ];
