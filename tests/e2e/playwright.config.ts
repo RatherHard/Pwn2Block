@@ -11,8 +11,9 @@ import { defineConfig, devices } from '@playwright/test';
  * - Playwright 浏览器二进制本轮**不下载**；D5 首次运行前执行 `pnpm exec playwright install chromium`。
  * - 后端地址：`PWN2BLOCK_BASE_URL`（默认 `http://127.0.0.1:<PWN2BLOCK_PORT 或 8787>`，与 04 §6 的 `DEFAULT_PORT` 一致）。
  *
- * 产物目录用 `.tmp/playwright`：`.tmp/` 已被 `.gitignore` 排除，不会污染 A 的集成提交。
- * （根 `.gitignore` 尚未包含 `test-results/` 与 `playwright-report/`；如后续改用默认目录，需要 A 一并加上。）
+ * 产物目录用 `.tmp/playwright`：根 `.gitignore` 已排除 `test-results/`、`playwright-report/`、
+ * `blob-report/`、`playwright/.cache/`（28–31 行）与 `.tmp/`（20 行），所以不改默认目录也不会进 git；
+ * 本配置仍把产物收进 `.tmp/playwright`，只为避免与 A 的集成提交目录混淆。
  */
 export default defineConfig({
   testDir: fileURLToPath(new URL('.', import.meta.url)),
