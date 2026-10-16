@@ -104,6 +104,11 @@ function withOffset(state: ViewManagerState, offset: number): ViewManagerState {
   return clamped === state.offset ? state : { ...state, offset: clamped };
 }
 
+/** 手动滚动按绝对位置同步，拒绝无效的浏览器事件数据。 */
+export function setViewOffset(state: ViewManagerState, offset: number): ViewManagerState {
+  return Number.isInteger(offset) ? withOffset(state, offset) : state;
+}
+
 /** `Ctrl+↑` 传 -1（往前一个视图），`Ctrl+↓` 传 +1（往后一个视图）。 */
 export function scrollViews(state: ViewManagerState, delta: number): ViewManagerState {
   if (delta === 0) return state;

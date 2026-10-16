@@ -23,12 +23,14 @@ export const terminalTheme = css`
     --p2b-error: #ff7f95;
     --p2b-hidden: #c7a7ff;
     --p2b-focus: #70a7ff;
-    --p2b-shadow: 0 18px 45px rgb(0 0 0 / 24%);
+    --p2b-shadow: 0 18px 45px rgb(0 0 0 / 32%);
+    --p2b-terminal-black: #05090b;
+    --p2b-terminal-grid: rgb(94 225 194 / 5%);
     color-scheme: dark;
-    font-family:
-      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 14px;
-    line-height: 1.55;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
   }
@@ -79,9 +81,10 @@ export const sharedStyles = css`
     min-height: 2rem;
     padding: 0.34rem 0.7rem;
     border: 1px solid var(--p2b-line);
-    border-radius: 0.55rem;
+    border-radius: 3px;
     color: var(--p2b-fg);
-    background: linear-gradient(180deg, rgb(28 48 75 / 92%), rgb(19 35 56 / 92%));
+    background: linear-gradient(180deg, rgb(20 38 42 / 96%), rgb(10 23 27 / 96%));
+    font-family: inherit;
     cursor: pointer;
     transition:
       border-color 140ms ease,
@@ -122,9 +125,9 @@ export const sharedStyles = css`
     min-height: 2rem;
     padding: 0.3rem 0.55rem;
     border: 1px solid var(--p2b-line);
-    border-radius: 0.5rem;
+    border-radius: 2px;
     color: var(--p2b-fg);
-    background: #091525;
+    background: var(--p2b-terminal-black);
     outline: none;
   }
 
@@ -164,8 +167,8 @@ export const sharedStyles = css`
     border-spacing: 0;
     overflow: hidden;
     border: 1px solid var(--p2b-line-soft);
-    border-radius: 0.55rem;
-    background: rgb(7 17 31 / 42%);
+    border-radius: 2px;
+    background: rgb(5 12 15 / 82%);
   }
 
   th,
@@ -212,7 +215,7 @@ export const sharedStyles = css`
 
   .panel {
     border: 1px solid var(--p2b-line);
-    border-radius: 0.75rem;
+    border-radius: 3px;
     background: var(--p2b-panel);
     box-shadow: var(--p2b-shadow);
   }

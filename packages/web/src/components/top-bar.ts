@@ -33,8 +33,8 @@ export class Pwn2BlockTopBar extends LitElement {
         display: block;
         flex: none;
         border-bottom: 1px solid var(--p2b-line);
-        background: rgb(8 17 31 / 86%);
-        box-shadow: 0 10px 30px rgb(0 0 0 / 16%);
+        background: rgb(5 12 15 / 96%);
+        box-shadow: 0 10px 30px rgb(0 0 0 / 24%);
       }
       .bar {
         display: flex;
@@ -80,7 +80,7 @@ export class Pwn2BlockTopBar extends LitElement {
         min-height: 2rem;
         padding: 0.3rem 0.75rem;
         border: 1px solid transparent;
-        border-radius: 0.55rem;
+        border-radius: 2px;
         color: var(--p2b-dim);
         cursor: pointer;
         list-style: none;
@@ -103,13 +103,16 @@ export class Pwn2BlockTopBar extends LitElement {
         position: absolute;
         z-index: 10;
         left: 0;
-        min-width: 36rem;
+        width: 36rem;
+        min-width: 0;
+        max-height: calc(100dvh - 6rem);
+        overflow: auto;
         max-width: min(48rem, calc(100vw - 2rem));
         margin-top: 0.45rem;
         padding: 0.8rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.75rem;
-        background: rgb(17 31 51 / 98%);
+        border-radius: 2px;
+        background: rgb(7 18 21 / 98%);
         box-shadow: 0 22px 50px rgb(0 0 0 / 42%);
       }
       ul {
@@ -157,8 +160,8 @@ export class Pwn2BlockTopBar extends LitElement {
         margin-left: auto;
         padding: 0.2rem;
         border: 1px solid var(--p2b-line-soft);
-        border-radius: 0.7rem;
-        background: rgb(17 31 51 / 72%);
+        border-radius: 2px;
+        background: rgb(7 18 21 / 92%);
       }
       .modes button {
         min-height: 1.9rem;
@@ -215,6 +218,7 @@ export class Pwn2BlockTopBar extends LitElement {
     runModel: { attribute: false },
     busy: { type: Boolean },
     pending: { type: Number },
+    canChoose: { type: Boolean },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）；默认值在构造函数里赋。 */
@@ -224,6 +228,7 @@ export class Pwn2BlockTopBar extends LitElement {
   declare runModel: readonly RunButtonModel[];
   declare busy: boolean;
   declare pending: number;
+  declare canChoose: boolean;
 
   constructor() {
     super();
@@ -233,17 +238,56 @@ export class Pwn2BlockTopBar extends LitElement {
     this.runModel = [];
     this.busy = false;
     this.pending = 0;
+    this.canChoose = false;
   }
 
   private draggedView?: ViewKind;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    document.addEventListener('pointerdown', this.onOutsidePointer);
+    document.addEventListener('keydown', this.onEscape);
+  }
+
+  override disconnectedCallback(): void {
+    document.removeEventListener('pointerdown', this.onOutsidePointer);
+    document.removeEventListener('keydown', this.onEscape);
+    super.disconnectedCallback();
+  }
+
+  private readonly onOutsidePointer = (event: PointerEvent): void => {
+    if (!event.composedPath().includes(this)) this.closeMenus();
+  };
+
+  private readonly onEscape = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+    const open = this.renderRoot.querySelector<HTMLDetailsElement>('details[open]');
+    if (open === null) return;
+    event.preventDefault();
+    this.closeMenus();
+    open.querySelector('summary')?.focus();
+  };
+
+  private closeMenus(except?: HTMLDetailsElement): void {
+    for (const menu of this.renderRoot.querySelectorAll<HTMLDetailsElement>('details.menu[open]')) {
+      if (menu !== except) menu.open = false;
+    }
+  }
+
+  private onMenuClick(event: Event): void {
+    const menu = (event.currentTarget as HTMLElement).parentElement as HTMLDetailsElement;
+    this.closeMenus(menu);
+  }
 
   override render() {
     return html`
       <div class="bar">
         <strong class="brand">Pwn2Block</strong>
+        ${this.canChoose ? html`<button type="button" ?disabled=${this.busy || this.pending > 0}
+          @click=${() => { this.closeMenus(); this.dispatchEvent(new CustomEvent('p2b-choose-challenge', { bubbles: true, composed: true })); }}>返回题目列表</button>` : ''}
         <nav aria-label="主菜单">
           <details class="menu">
-            <summary>视图</summary>
+            <summary @click=${this.onMenuClick}>视图</summary>
             <div class="menu-body">
               <ul>
                 ${this.views.order.map((kind) => this.renderViewItem(kind))}
@@ -254,7 +298,7 @@ export class Pwn2BlockTopBar extends LitElement {
             </div>
           </details>
           <details class="menu">
-            <summary>运行</summary>
+            <summary @click=${this.onMenuClick}>运行</summary>
             <div class="menu-body">
               <pwn2block-run-menu
                 .model=${this.runModel}

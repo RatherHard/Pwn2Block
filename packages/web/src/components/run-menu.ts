@@ -8,7 +8,7 @@
 import { LitElement, css, html } from 'lit';
 import { MAX_STEP_COUNT } from '@pwn2block/shared';
 import { parseStepCount } from '../viewmodel/program';
-import { disabledReasons, type RunButtonModel, type RunCommand } from '../viewmodel/toolbar';
+import type { RunButtonModel, RunCommand } from '../viewmodel/toolbar';
 import { sharedStyles, terminalTheme } from '../theme';
 
 /** 「编译」也是按钮，但它不是 API 命令（本地操作），所以单独一个 id。 */
@@ -39,7 +39,10 @@ export class Pwn2BlockRunMenu extends LitElement {
       .reasons {
         margin: 0.3rem 0 0;
         color: var(--p2b-warn);
+        font-size: 0.8rem;
       }
+      .reasons summary { cursor: pointer; }
+      .reasons ul { margin: 0.4rem 0; padding-left: 1.2rem; }
       .busy {
         margin-left: auto;
         color: var(--p2b-dim);
@@ -54,6 +57,7 @@ export class Pwn2BlockRunMenu extends LitElement {
     model: { attribute: false },
     busy: { type: Boolean },
     pending: { type: Number },
+    countError: { state: true },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）。 */
@@ -62,17 +66,24 @@ export class Pwn2BlockRunMenu extends LitElement {
   declare pending: number;
 
   private countText = '10';
-  private countError = '';
+  private declare countError: string;
 
   constructor() {
     super();
     this.model = [];
     this.busy = false;
     this.pending = 0;
+    this.countError = '';
   }
 
   override render() {
-    const reasons = disabledReasons(this.model);
+    const reasons = new Map<string, string[]>();
+    for (const button of this.model) {
+      if (button.enabled || button.disabledReason === undefined) continue;
+      const labels = reasons.get(button.disabledReason) ?? [];
+      labels.push(button.label);
+      reasons.set(button.disabledReason, labels);
+    }
     return html`
       <div class="buttons" role="group" aria-label="运行">
         ${this.model.map((button) => this.renderButton(button))}
@@ -84,11 +95,13 @@ export class Pwn2BlockRunMenu extends LitElement {
       </div>
       ${this.countError.length === 0
         ? ''
-        : html`<p class="count-error" role="alert">${this.countError}</p>`}
-      ${reasons.length === 0
+        : html`<p id="count-error" class="count-error" role="alert">${this.countError}</p>`}
+      ${reasons.size === 0
         ? ''
-        : html`<p class="reasons" role="note">不可用：${reasons.join('；')}</p>`}
-      <p class="note">前七个按钮只作用于调试实例；只有「提交判题」是那一次正式射击（05 §3）。</p>
+        : html`<details class="reasons">
+            <summary>查看按钮不可用的原因</summary>
+            <ul>${[...reasons].map(([reason, labels]) => html`<li>${labels.join('、')}：${reason}</li>`)}</ul>
+          </details>`}
     `;
   }
 
@@ -117,6 +130,8 @@ export class Pwn2BlockRunMenu extends LitElement {
           max=${MAX_STEP_COUNT}
           step="1"
           aria-label="运行步数"
+          aria-invalid=${this.countError.length > 0 ? 'true' : 'false'}
+          aria-describedby=${this.countError.length > 0 ? 'count-error' : ''}
           title="运行多少条指令（1–${MAX_STEP_COUNT}）"
           .value=${this.countText}
           ?disabled=${!button.enabled}

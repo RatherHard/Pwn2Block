@@ -680,6 +680,44 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
     };
   }
 
+  it('returning to the list preserves the session and resumes the program cursor', async () => {
+    const { api, tracker, controller, store } = await openWith(memoryStore());
+    compileInto(tracker, controller, [{ type: 'step' }, { type: 'step' }]);
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.cursor === 1 && !controller.state.busy, 'step completed');
+    controller.browseChallenges();
+    expect(controller.state.phase).toBe('choosing');
+    expect(controller.state.challenge).toBeUndefined();
+    expect(controller.state.sessionId).toBeUndefined();
+    expect(controller.state.artifact.artifact).toBeUndefined();
+    expect(readSession(store, 'ret2win')?.cursor).toBe(1);
+    expect(methods(api)).not.toContain('endSession');
+    controller.choose('ret2win');
+    await until(() => controller.state.phase === 'ready' && !controller.state.busy, 'resumed');
+    compileInto(tracker, controller, [{ type: 'step' }, { type: 'step' }]);
+    expect(controller.state.cursor).toBe(1);
+    expect(controller.state.results).toHaveLength(1);
+    expect(methods(api).filter(method => method === 'createSession')).toHaveLength(1);
+    expect(methods(api)).toContain('sessionState');
+  });
+
+  it('cannot leave while commands are in flight or queued', async () => {
+    const { api, tracker, controller } = await openWith(memoryStore());
+    compileInto(tracker, controller, [{ type: 'step' }, { type: 'step' }]);
+    let release!: () => void;
+    api.gate(new Promise<void>(resolve => { release = resolve; }));
+    controller.run({ kind: 'step' });
+    controller.run({ kind: 'step' });
+    controller.browseChallenges();
+    expect(controller.state.phase).toBe('ready');
+    expect(controller.state.sessionId).toBe(FAKE_SESSION_ID);
+    release();
+    await until(() => !controller.state.busy && controller.state.queued === 0, 'commands completed');
+    expect(controller.state.cursor).toBe(2);
+    controller.browseChallenges();
+    expect(controller.state.phase).toBe('choosing');
+  });
+
   const RESUMED = { ok: true, action: 'step' } as const;
 
   function storedRecord(cursor: number, actionsLength: number): StoredSession {

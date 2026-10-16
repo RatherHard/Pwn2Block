@@ -42,6 +42,28 @@ export function sessionStorageKey(challengeId: string): string {
   return `pwn2block.session.v${STORAGE_VERSION}.${challengeId}`;
 }
 
+/** 同一次打开始终保留一份缓存；存储禁用/写满时，换题仍不会丢失画布与进度。 */
+export function cachedStore(persistent?: KeyValueStore): KeyValueStore {
+  const cache = new Map<string, string | null>();
+  return {
+    getItem(key) {
+      if (cache.has(key)) return cache.get(key) ?? null;
+      try { return persistent?.getItem(key) ?? null; } catch { return null; }
+    },
+    setItem(key, value) {
+      cache.set(key, value);
+      try { persistent?.setItem(key, value); } catch { /* 本次打开仍可恢复。 */ }
+    },
+    removeItem(key) {
+      cache.set(key, null);
+      try {
+        if (persistent?.removeItem) persistent.removeItem(key);
+        else persistent?.setItem(key, '');
+      } catch { /* 缓存的删除优先于无法更新的旧存档。 */ }
+    },
+  };
+}
+
 /**
  * 默认存储：没有 `localStorage`、或被浏览器策略拦下（隐私模式、iframe 沙箱）时返回 `undefined`。
  * 显式检测而不是 try 一下再说：调用方要能一眼看出「这台环境不保存」。

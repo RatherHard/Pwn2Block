@@ -51,6 +51,7 @@ import {
   moveView as moveViewIn,
   scrollViews as scrollViewsIn,
   setViewShown as setViewShownIn,
+  setViewOffset as setViewOffsetIn,
   type ViewKind,
   type ViewManagerState,
 } from './views';
@@ -151,6 +152,8 @@ export interface SessionController {
   /** 首屏：`GET /api/challenges` → 选题 → 创建会话。 */
   start(): void;
   choose(challengeId: string): void;
+  /** 返回列表保留按题保存的会话，后续选回时接回进度。 */
+  browseChallenges(): void;
   /** 「重新开始」：丢弃失效会话，用同一道题创建新会话。 */
   restart(): void;
   /** 重试上一次失败的操作（列表加载 / 打开题目 / 上一条命令）。 */
@@ -160,6 +163,7 @@ export interface SessionController {
   setViewShown(kind: ViewKind, shown: boolean): void;
   moveView(kind: ViewKind, delta: number): void;
   scrollViews(delta: number): void;
+  setViewOffset(offset: number): void;
   compile(program: NormalizedWorkspace): void;
   /** 积木被改动：产物过期，试运行与提交被禁用（05 §3）。 */
   noteEdit(): void;
@@ -799,6 +803,23 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       open(challengeId);
     },
 
+    browseChallenges(): void {
+      // 不能在请求中卸载画布，否则迟到响应会覆盖选题页或下一题。
+      if (queue.inFlight || queue.queued > 0 || state.challenge === undefined) return;
+      persistResume();
+      // 这里是暂存而非结束会话。每道题复用其保存的会话，失效后仍走既有的新建路径。
+      sessionId = undefined;
+      cursorStack = [];
+      debugSnapshot = undefined;
+      pendingResume = undefined;
+      tracker.clear();
+      lastIntent = { kind: 'list' };
+      publish({
+        phase: 'choosing', challenges: state.challenges, history: EMPTY_HISTORY,
+        artifact: tracker.state, cursor: 0, results: [], busy: false, queued: 0, sessionExpired: false,
+      });
+    },
+
     restart(): void {
       const id = state.challengeId;
       // 重新开始也要把旧会话还回去：它可能还活着（只是被判题结果 / 编辑折腾过），
@@ -863,6 +884,10 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
     scrollViews(delta: number): void {
       patchViews((views) => scrollViewsIn(views, delta));
+    },
+
+    setViewOffset(offset: number): void {
+      patchViews((views) => setViewOffsetIn(views, offset));
     },
 
     compile(program: NormalizedWorkspace): void {

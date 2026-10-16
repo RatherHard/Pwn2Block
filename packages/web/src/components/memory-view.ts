@@ -6,6 +6,7 @@
  * 不提供任意地址读取：只能看投影里已经有的字节。
  */
 import { LitElement, css, html } from 'lit';
+import { live } from 'lit/directives/live.js';
 import {
   DEFAULT_DUMP_ROWS,
   buildHexDump,
@@ -188,7 +189,7 @@ export class Pwn2BlockMemoryView extends LitElement {
             >字节偏移：
             <input
               type="text"
-              .value=${`0x${this.dumpOffset.toString(16)}`}
+              .value=${live(`0x${this.dumpOffset.toString(16)}`)}
               aria-label="hex dump 字节偏移"
               @change=${(event: Event) => this.setOffsetText((event.target as HTMLInputElement).value)}
             />
@@ -218,6 +219,7 @@ export class Pwn2BlockMemoryView extends LitElement {
   }
 
   private page(delta: number): void {
+    this.offsetError = '';
     const row = this.selectedRow();
     if (row === undefined) return;
     const byteLength = dumpByteLength(this.vmaHex(row.id));
@@ -231,6 +233,7 @@ export class Pwn2BlockMemoryView extends LitElement {
   }
 
   private setOffset(offset: number): void {
+    this.offsetError = '';
     const row = this.selectedRow();
     if (row === undefined) return;
     this.dumpOffset = clampDumpOffset(

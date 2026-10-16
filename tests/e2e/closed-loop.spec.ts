@@ -386,13 +386,15 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
       // 禁用原因必须写出来，不能只靠置灰（05 §6）：颜色不是唯一信息载体。
       // 顶部「运行」菜单与 payload 工具栏渲染的是**同一个** `pwn2block-run-menu`（05 §1），
       // 所以 DOM 里有两份原因文本；折叠的那份不在可访问性树里，这里取 payload 窗口里的那份。
-      const reasons = page.locator('pwn2block-payload-panel pwn2block-run-menu p.reasons');
+      const reasons = page.locator('pwn2block-payload-panel pwn2block-run-menu details.reasons');
+      await reasons.locator('summary').click();
       await expect(reasons, '禁用原因必须是可见文字').toBeVisible();
       await expect(reasons).toContainText('单步');
       await expect(reasons).toContainText('编译');
       // 禁用的那一条要能说清缺什么，而不是一句「不可用」。
       await expect(reasons).toContainText('程序区还没有编译产物');
       // 手工写字节在首题上不可达：allowedActions 不含 write_bytes（challenge 设计使然）。
+      await reasons.locator('summary').click();
       const detail = await page.request.get(`/api/challenges/${CHALLENGE_ID}`);
       const challenge = (await detail.json()) as { allowedActions: string[] };
       expect(challenge.allowedActions, '首题允许的动作').toEqual(
@@ -649,7 +651,7 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
       const program = await waitComponentText('pwn2block-program-view');
       expect(program, `改地址后重新编译应当照旧得到 2 个动作，程序区实际显示：${program}`).toContain('2 个动作');
       const gateReason = await page
-        .locator('pwn2block-payload-panel pwn2block-run-menu p.reasons')
+        .locator('pwn2block-payload-panel pwn2block-run-menu details.reasons')
         .first()
         .innerText()
         .catch(() => '（读不到 run-menu 的 reasons）');

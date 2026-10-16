@@ -1,4 +1,35 @@
-# D7 浏览器回归与证据
+# 浏览器回归与证据
+
+## 2026-10-16 前端细节修复验收
+
+本轮在 `F:/Pwn2Block` 验证产品修改，以下 D7 记录保留作为历史基线。
+
+新增 `frontend-details.spec.ts` 的 8 项回归覆盖：展开全部提示后的 1280×720 布局、两处运行步数校验、菜单互斥与关闭/焦点恢复、手动滚动与快捷键同步（含中途反向）、内存偏移重置/分页/越界、Blockly 中文菜单、题面列表与行内代码、返回列表并切回原题恢复画布及调试状态。
+
+原闭环测试改为展开禁用原因后核查完整文字；桌面冒烟的可达性断言保持原样。生产验收发现的小桌面输出区裁切已通过保留程序/输出区内容高度及滚动内边距修复。单元测试补充了题面文本解析、存储禁用/写满/删除失败时的内存缓存、返回选题后的会话恢复与请求中切题门禁；jsdom 滚动测试补齐真实滚动范围所需的高度数据。
+
+最终验证：
+
+| 检查 | 结果 |
+| --- | --- |
+| `pnpm typecheck`、`pnpm lint` | 通过 |
+| `pnpm test` | 113 文件通过，1624 项通过，5 项原有 todo |
+| `pnpm build` | 通过；仍有单 bundle 大于 500 kB 的构建提示 |
+| 真实后端 + 生产构建 `pnpm e2e` | 21 passed，0 skipped，0 flaky，56.5s |
+
+浏览器验收包括新增 8 项、既有闭环 10 项，以及 1280×720、1440×900、1920×1080 三种桌面尺寸。真实后端运行于 8787，六道题使用假测试 flag `flag{frontend-audit-only}`。完成构建并启动后端后，测试端实际命令为：
+
+```powershell
+$env:PWN2BLOCK_E2E='1'
+$env:PWN2BLOCK_BASE_URL='http://127.0.0.1:8787'
+$env:FLAG_RET2WIN='flag{frontend-audit-only}'
+$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/frontend-audit/production-final'
+pnpm e2e
+```
+
+最终 JSON 报告位于 `.tmp/frontend-audit/production-final.json`，三种尺寸的截图位于同名目录；单元测试日志为 `.tmp/frontend-audit/unit-final.log`。这些运行产物由 Git 忽略。
+
+## D7 历史基线
 
 本目录验收只交付回归。2026-10-16 在 `F:/Pwn2Block-wt/d7-browser`、分支 `test/d7-browser`、基线 `8a40600491281454f132d92d96c87e3caca9f233` 上执行。未修改产品包、依赖、锁文件或 `docs/08`。
 

@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  cachedStore,
   canvasStorageKey,
   clearCanvas,
   clearSession,
@@ -174,5 +175,49 @@ describe('本地保存：会话记录（04 §1.1、05 §3.1）', () => {
     expect(writeCanvas(store, 'probe', { blocks: [] })).toBe(true);
     expect(readCanvas(store, 'probe')).toEqual({ blocks: [] });
     clearCanvas(store, 'probe');
+  });
+});
+
+
+describe('cached storage during challenge switching', () => {
+  it('reads existing saves and persists new writes and removals', () => {
+    const persistent = memoryStore();
+    persistent.setItem('saved', 'old');
+    const store = cachedStore(persistent);
+    expect(store.getItem('saved')).toBe('old');
+    store.setItem('saved', 'new');
+    expect(store.getItem('saved')).toBe('new');
+    expect(persistent.getItem('saved')).toBe('new');
+    store.removeItem?.('saved');
+    expect(store.getItem('saved')).toBeNull();
+    expect(persistent.getItem('saved')).toBeNull();
+  });
+
+  it('keeps progress and tombstones when persistent writes fail', () => {
+    const persistent: KeyValueStore = {
+      getItem: () => 'stale',
+      setItem: () => { throw new Error('quota'); },
+      removeItem: () => { throw new Error('blocked'); },
+    };
+    const store = cachedStore(persistent);
+    store.setItem('saved', 'current');
+    expect(store.getItem('saved')).toBe('current');
+    store.removeItem?.('saved');
+    expect(store.getItem('saved')).toBeNull();
+    expect(persistent.getItem('saved')).toBe('stale');
+  });
+
+  it('works without browser storage, including blocked reads', () => {
+    for (const persistent of [undefined, {
+      getItem: () => { throw new Error('blocked'); },
+      setItem: () => { throw new Error('blocked'); },
+    }]) {
+      const store = cachedStore(persistent);
+      expect(store.getItem('saved')).toBeNull();
+      store.setItem('saved', 'current');
+      expect(store.getItem('saved')).toBe('current');
+      store.removeItem?.('saved');
+      expect(store.getItem('saved')).toBeNull();
+    }
   });
 });

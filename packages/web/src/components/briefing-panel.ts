@@ -9,6 +9,7 @@
  * 或数据损坏都退化成当前页面内存（05 §5、handoff §4）。
  */
 import { LitElement, css, html } from 'lit';
+import { briefingBlocks, inlineCode } from '../viewmodel/briefing';
 import type { Hint } from '@pwn2block/shared';
 import {
   defaultStore,
@@ -41,6 +42,24 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         color: var(--p2b-accent);
         content: '◈';
       }
+      .content {
+        max-height: min(28vh, 16rem);
+        overflow: auto;
+        scrollbar-gutter: stable;
+        scrollbar-color: var(--p2b-line) transparent;
+      }
+      .briefing p { margin: 0 0 0.65rem; white-space: pre-line; }
+      .briefing p:last-child { margin-bottom: 0; }
+      .briefing ul, .briefing ol { margin: 0.65rem 0; padding-left: 1.5rem; }
+      .briefing li + li { margin-top: 0.3rem; }
+      .briefing code {
+        font-family: Consolas, monospace;
+        color: var(--p2b-accent);
+        background: rgb(94 225 194 / 8%);
+        padding: 0.05rem 0.2rem;
+        border-radius: 0.2rem;
+        overflow-wrap: anywhere;
+      }
       .briefing {
         max-width: 75rem;
         margin: 0.75rem 0 0;
@@ -49,7 +68,7 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         border-radius: 0.55rem;
         color: var(--p2b-dim);
         background: rgb(7 17 31 / 42%);
-        white-space: pre-wrap;
+        overflow-wrap: anywhere;
       }
       .hints {
         margin-top: 0.75rem;
@@ -143,10 +162,18 @@ export class Pwn2BlockBriefingPanel extends LitElement {
     return html`
       <details open>
         <summary>题面：${this.challengeTitle}</summary>
-        <p class="briefing">${this.briefing}</p>
+        <div class="content" role="region" aria-label="题面与提示" tabindex="0">
+        <div class="briefing">${briefingBlocks(this.briefing).map(block => {
+          const renderInline = (text: string) => inlineCode(text).map(part =>
+            part.code ? html`<code>${part.text}</code>` : part.text);
+          if (block.kind === 'paragraph') return html`<p>${renderInline(block.text)}</p>`;
+          const items = block.items.map(item => html`<li>${renderInline(item)}</li>`);
+          return block.kind === 'ordered' ? html`<ol>${items}</ol>` : html`<ul>${items}</ul>`;
+        })}</div>
         ${model.total === 0 ? html`<p class="note">${model.message}</p>` : this.renderHints(model)}
         <p class="note" role="status" aria-live="polite">${this.autoNote(model)}</p>
         <p class="note">调试模式满足成功条件只提示“已满足”，不发 flag。</p>
+        </div>
       </details>
     `;
   }

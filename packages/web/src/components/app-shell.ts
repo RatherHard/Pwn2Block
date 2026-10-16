@@ -27,7 +27,7 @@ import { highlightBlockId } from '../viewmodel/highlight';
 import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
 import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
-import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
+import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import { runMenuModel, type RunCommand } from '../viewmodel/toolbar';
 import {
   VIEW_KINDS,
@@ -68,16 +68,20 @@ export class Pwn2BlockApp extends LitElement {
         min-height: 0;
         overflow: hidden;
         background:
+          linear-gradient(var(--p2b-terminal-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--p2b-terminal-grid) 1px, transparent 1px),
           radial-gradient(circle at 12% -10%, rgb(42 93 111 / 22%), transparent 34rem),
           radial-gradient(circle at 92% 0%, rgb(44 67 126 / 18%), transparent 30rem),
           var(--p2b-bg);
+        background-size: 32px 32px, 32px 32px, auto, auto, auto;
       }
       .briefing {
+        flex: none;
         margin: 0 1rem;
         border: 1px solid var(--p2b-line);
         border-top: 0;
-        border-radius: 0 0 0.75rem 0.75rem;
-        background: rgb(13 24 41 / 88%);
+        border-radius: 0 0 3px 3px;
+        background: rgb(5 12 15 / 92%);
         box-shadow: 0 10px 24px rgb(0 0 0 / 14%);
       }
       .notice {
@@ -87,8 +91,8 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.65rem;
-        background: rgb(17 31 51 / 90%);
+        border-radius: 2px;
+        background: rgb(7 17 21 / 94%);
       }
       .notice.error {
         border-color: rgb(255 127 149 / 42%);
@@ -115,9 +119,9 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.65rem;
-        background: rgb(13 24 41 / 92%);
-        box-shadow: 0 10px 24px rgb(0 0 0 / 12%);
+        border-radius: 2px;
+        background: rgb(5 12 15 / 94%);
+        box-shadow: 0 10px 24px rgb(0 0 0 / 20%);
       }
       .status.ok {
         border-color: rgb(94 225 194 / 35%);
@@ -147,8 +151,8 @@ export class Pwn2BlockApp extends LitElement {
         min-height: 0;
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        padding: 1rem;
+        gap: 0.8rem;
+        padding: 0.8rem;
         overflow: hidden;
       }
       .left,
@@ -157,16 +161,16 @@ export class Pwn2BlockApp extends LitElement {
         min-height: 0;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.85rem;
+        border-radius: 3px;
         box-shadow: var(--p2b-shadow);
       }
       .left {
         display: flex;
         flex-direction: column;
-        background: rgb(13 24 41 / 86%);
+        background: rgb(5 12 15 / 90%);
       }
       .right {
-        background: rgb(10 20 35 / 94%);
+        background: rgb(5 12 15 / 96%);
       }
       .boot {
         flex: 1;
@@ -243,6 +247,7 @@ export class Pwn2BlockApp extends LitElement {
   declare store?: KeyValueStore;
 
   private controller?: SessionController;
+  private activeStore?: KeyValueStore;
   /** 会话建立前的视图状态兜底：`undefined` 会覆盖子组件的默认值，所以显式给一份。 */
   private readonly fallbackViews = createViewManagerState();
   private offState?: () => void;
@@ -266,11 +271,12 @@ export class Pwn2BlockApp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('keydown', this.onKeyDown);
+    this.activeStore ??= cachedStore(this.store ?? defaultStore());
     const controller =
       this.controller ??
       createSessionController({
         api: this.api ?? createApiClient(),
-        store: this.store ?? defaultStore(),
+        store: this.activeStore,
         canvas: { restore: () => this.restoreCanvas() },
       });
     this.controller = controller;
@@ -301,6 +307,8 @@ export class Pwn2BlockApp extends LitElement {
     return html`
       <pwn2block-top-bar
         .mode=${mode}
+        .canChoose=${challenge !== undefined}
+        @p2b-choose-challenge=${this.onChooseChallenge}
         .views=${state.page?.views ?? this.fallbackViews}
         .available=${this.viewsFor(state)}
         .runModel=${this.runModel(state)}
@@ -319,6 +327,7 @@ export class Pwn2BlockApp extends LitElement {
               .challengeTitle=${challenge.title}
               .briefing=${challenge.briefing}
               .hints=${challenge.hints ?? EMPTY_HINTS}
+              .storage=${this.activeStore}
               .failures=${state.page?.projection.failures ?? 0}
             ></pwn2block-briefing-panel>
           </div>`}
@@ -368,6 +377,7 @@ export class Pwn2BlockApp extends LitElement {
         .context=${this.viewContext(view, challenge)}
         .views=${state.page?.views ?? this.fallbackViews}
         .available=${availableViewsOf(view.projection, challenge)}
+        @p2b-view-scroll=${(event: CustomEvent<{ offset: number }>) => this.controller?.setViewOffset(event.detail.offset)}
       ></pwn2block-view-manager>`,
     );
   }
@@ -396,7 +406,7 @@ export class Pwn2BlockApp extends LitElement {
       .state=${state}
       .runModel=${this.runModel(state)}
       .highlightBlockId=${this.autoHighlight(state)}
-      .store=${this.store ?? defaultStore()}
+      .store=${this.activeStore}
       @p2b-run=${this.onRun}
       @p2b-compile=${this.onCompile}
       @p2b-edit=${this.onEdit}
@@ -573,6 +583,13 @@ export class Pwn2BlockApp extends LitElement {
       cursor: state.cursor,
     });
   }
+
+  private readonly onChooseChallenge = (): void => {
+    if (this.state?.busy || (this.state?.queued ?? 0) > 0) return;
+    this.panel()?.saveArchive();
+    this.controller?.browseChallenges();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLButtonElement>('.boot button')?.focus());
+  };
 
   private panel(): Pwn2BlockPayloadPanel | undefined {
     return this.renderRoot.querySelector<Pwn2BlockPayloadPanel>('pwn2block-payload-panel') ?? undefined;

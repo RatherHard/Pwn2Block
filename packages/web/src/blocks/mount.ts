@@ -1,4 +1,5 @@
 import * as Blockly from 'blockly';
+import * as zhHans from 'blockly/msg/zh-hans';
 import type { PublicChallenge } from '@pwn2block/shared';
 import type { NormalizedWorkspace } from '../compiler/types';
 import { BLOCK_MAX_INSTANCES, defineAuthorBlockDefinitions, definePwn2BlockBlocks } from './definitions';
@@ -102,6 +103,33 @@ export interface BlocklyBridge {
 }
 
 const DEFAULT_RENDERER = 'thrasos';
+
+/** Terminal styled Blockly theme built on the Classic theme. */
+const TERMINAL_THEME = Blockly.Theme.defineTheme('pwn2block-terminal', {
+  name: 'pwn2block-terminal',
+  base: Blockly.Themes.Classic,
+  componentStyles: {
+    workspaceBackgroundColour: '#061014',
+    toolboxBackgroundColour: '#08171a',
+    toolboxForegroundColour: '#d7f7ed',
+    flyoutBackgroundColour: '#0b2023',
+    flyoutForegroundColour: '#d7f7ed',
+    flyoutOpacity: 0.98,
+    scrollbarColour: '#2a5c5a',
+    scrollbarOpacity: 0.8,
+    insertionMarkerColour: '#5ee1c2',
+    insertionMarkerOpacity: 0.45,
+    markerColour: '#ffd166',
+    cursorColour: '#5ee1c2',
+    selectedGlowColour: '#5ee1c2',
+    selectedGlowOpacity: 0.3,
+  },
+  fontStyle: {
+    family: '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+    weight: '500',
+    size: 12,
+  },
+});
 
 /**
  * 工具箱数据的类型转换。
@@ -209,6 +237,11 @@ export function mountBlockly(
   challenge: PublicChallenge,
   options: BlocklyBridgeOptions = {},
 ): BlocklyBridge {
+  const locale: Record<string, string> = {};
+  for (const [key, value] of Object.entries(zhHans)) {
+    if (typeof value === 'string') locale[key] = value;
+  }
+  Blockly.setLocale(locale);
   definePwn2BlockBlocks();
   defineAuthorBlockDefinitions(challenge);
 
@@ -216,6 +249,7 @@ export function mountBlockly(
     toolbox: toBlocklyToolbox(challenge),
     maxInstances: BLOCK_MAX_INSTANCES,
     renderer: options.renderer ?? DEFAULT_RENDERER,
+    theme: TERMINAL_THEME,
     ...(options.readOnly === true ? { readOnly: true } : {}),
   });
 

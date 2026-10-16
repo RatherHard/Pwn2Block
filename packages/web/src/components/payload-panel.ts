@@ -39,7 +39,46 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         gap: 0.75rem;
         overflow: auto;
         padding: 0.85rem;
+        scroll-padding-block: 0.85rem;
         scrollbar-color: var(--p2b-line) transparent;
+      }
+      .window-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        flex: none;
+        min-height: 2rem;
+        padding: 0.35rem 0.65rem;
+        border: 1px solid var(--p2b-line-soft);
+        color: var(--p2b-dim);
+        background: rgb(7 18 21 / 96%);
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .window-lights {
+        display: inline-flex;
+        gap: 0.25rem;
+      }
+      .window-lights i {
+        display: block;
+        width: 0.45rem;
+        height: 0.45rem;
+        border: 1px solid rgb(255 255 255 / 18%);
+        border-radius: 50%;
+        background: var(--p2b-line);
+      }
+      .window-lights i:first-child { background: var(--p2b-error); }
+      .window-lights i:nth-child(2) { background: var(--p2b-warn); }
+      .window-lights i:nth-child(3) { background: var(--p2b-accent); }
+      .window-title,
+      .prompt {
+        color: var(--p2b-accent);
+      }
+      .window-state {
+        margin-left: auto;
+        color: var(--p2b-accent);
+        font-size: 0.65rem;
       }
       .toolbar {
         display: flex;
@@ -51,21 +90,49 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       .toolbar h2 {
         margin-right: auto;
       }
+      .command-line {
+        margin-right: auto;
+        color: var(--p2b-fg);
+      }
+      .command-line .prompt {
+        margin-right: 0.45rem;
+      }
       #blockly-host {
         position: absolute;
         inset: 0;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius: 0.7rem;
-        background: #0a1727;
+        border-radius: 2px;
+        background: #061014;
+      }
+      #blockly-host .blocklySvg {
+        background: #061014;
+      }
+      #blockly-host .blocklyToolboxDiv,
+      #blockly-host .blocklyFlyout {
+        border-right: 1px solid var(--p2b-line);
+        background: #08171a;
+      }
+      #blockly-host .blocklyTreeRow {
+        margin: 0.2rem 0.35rem;
+        border-left: 2px solid transparent;
+        border-radius: 2px;
+      }
+      #blockly-host .blocklyTreeRow:hover,
+      #blockly-host .blocklyTreeSelected {
+        border-left-color: var(--p2b-accent);
+        background: rgb(94 225 194 / 12%);
+      }
+      #blockly-host .blocklyScrollbarHandle {
+        fill: #2a5c5a;
       }
       .canvas-wrap {
         position: relative;
         height: clamp(18rem, 38vh, 29rem);
         min-height: 16rem;
         overflow: hidden;
-        border-radius: 0.7rem;
-        box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+        border-radius: 2px;
+        box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
       }
       .placeholder {
         position: absolute;
@@ -85,6 +152,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       }
       .program,
       .output {
+        flex-shrink: 0;
         min-height: 4rem;
         padding: 0.75rem;
         border: 1px solid var(--p2b-line);
@@ -149,8 +217,13 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     const errorBlockId = artifact === undefined && errors.length > 0 ? this.highlightBlockId : undefined;
     const rejectedRow = this.rejectedRowOf(state);
     return html`
+      <div class="window-bar" aria-label="Payload \u7ec8\u7aef\u7a97\u53e3">
+        <span class="window-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="window-title">/proc/pwn2block/payload</span>
+        <span class="window-state">${state?.busy ? 'RUNNING' : 'READY'}</span>
+      </div>
       <div class="toolbar">
-        <h2>Payload</h2>
+        <div class="command-line"><span class="prompt">root@pwn2block:~$</span> payload</div>
         <pwn2block-run-menu
           .model=${this.runModel}
           .busy=${state?.busy ?? false}

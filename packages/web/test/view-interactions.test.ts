@@ -79,6 +79,7 @@ describe('视图实际组件的 P0 交互', () => {
     const second = view.renderRoot.querySelector<HTMLElement>('[data-index="1"]');
     if (!viewport || !second) throw new Error('视图未恢复');
     Object.defineProperty(viewport, 'clientHeight', { value: 600 });
+    Object.defineProperty(viewport, 'scrollHeight', { value: 1600 });
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ top: 50 } as DOMRect);
     vi.spyOn(second, 'getBoundingClientRect').mockReturnValue({ top: 450 } as DOMRect);
     viewport.scrollTo = vi.fn();
