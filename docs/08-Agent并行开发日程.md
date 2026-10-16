@@ -407,6 +407,32 @@
 
 - **是否仍能在 D5–D7 达到候选门槛**：**比 D3 的估算乐观，但仍然紧**。D4 拿下了 D3 点名的两件必做（静态托管 + S01/S03/S04 逐条复核），而且 **S01–S06 六组条件现在全部通过**（`it.fails` 归零、`todo` 只剩 5 条口径/运维项），D7 清单里「S01–S06 全通过」这一条已提前达成；**G2 也已在当日通过**（Phase 1 + Phase 2 独立复核），所以「真实 API 可判题、双实例隔离」不再有悬念。剩下的硬骨头是**浏览器闭环**（F03 的真实 Playwright 八步 + 人工视觉审查）与**另外四道题**（E05–E07，D5–D6）。D5 若拿下浏览器闭环与题 3/4，候选版门槛就只差最后一题、G4 交付记录与 T01–T06 的延期说明。**D4 的净增风险是 D5 的三条待办**（工具栏门禁求值时机、`loadProgram` 失败语义、`locate.ts` 的浏览器消费），它们都在 D5 的原计划范围内，没有把 D5 的容量吃掉多少。
 
+### D5 / 日终（进行中：题 3/4、引擎复核、服务端文案已落地，等 F03 与 D 批次 2 收口）
+
+- 基线提交：`6f4b977`；本日新增 `6e742c4`（题 3 call/ret）、`120064e`（挂载桥 `save()`）、`705ab62`（题 4 栈帧）、`4f942d1` / `a9652fc`（服务端错误文案 + 限制复核）、`c4f9b0d` / `c8f2346` / `b8e7a37`（文档口径）。
+- 已验收任务与证据：
+  - **E05 题 3 `call`/`ret`**：`challenge:check callret` 与 `challenge:solve callret` 均 exit 0；四个文件 UTF-8 往返一致、LF、无 U+FFFD。参考解法 `[step 1, push 0x40000b, run]`。
+  - **E06 题 4 栈帧**：`check`/`solve` 均 exit 0。**注意 `check` 全程报 ok 却掩盖了三个真缺陷**，由 A 的独立矩阵探针抓出：① 自造指令 `mov rsi,[rbp+disp]` 是**取内容**而不是算地址（封闭指令集里没有 `lea`），导致 `RSI=0` → `read(0,NULL,0x20)` → `memory_fault`；② 简报与 `solution.md` 写的停止位置（`RIP`）与 `initRegisters` 自相矛盾；③ 返回地址初值指向 `ret` 自身而不是 `lose`，于是「不写 payload 直接 run」以 `invalid_ip` 崩掉，而不是干净地返回 `lose`。三条修完后矩阵为 `[1] won`、`[2] clean failed（errorCodes=[]）`、`[3] 负向对照 win→lose = failed`。
+  - **B/G 引擎复核**：根 `typecheck` / `lint` 均 exit 0；`vitest run packages/engine` → **23 文件 / 438 用例全绿**，覆盖率 **95.03 / 89.62 / 98.96 / 97.59**（≥80%）；整仓 `pnpm test:coverage` → **105 文件 / 1479 通过 / 5 todo / 0 失败**，引擎文件 **95.75 / 90.59 / 99.48 / 98.22**。D4 基线（95.39 / 90.31 / 98.44 / 97.9）被逐位复现，**无回归**。
+    - 抓到并修掉 1 个真缺陷：测试替身 `packages/engine/test/helpers/fake-memory.ts` 与真实 `src/memory/vma.ts` 的 `planAccess` 语义不一致——`len === 0` 时替身把区写成 `regions[0]`，写路径按错误偏移落笔，**`RangeError` 会抛穿整个引擎**（不是 `MemResult`）；且替身要求整段落在同一个 VMA 内，而默认布局五个区全部相邻，于是跨相邻 VMA 的访问（`0x3ffc` 写 8 字节、`0x1ffa` 读 8 字节）在真实实现里成功、替身报 `unmapped` —— 正是题 3/题 4 会踩的路径。修后补 **18 条「真实内存 vs 替身」差分用例**（逐字段断言 `ok/reason/addr/len/bytes`，且同时等于写死的期望值），替身再漂移会立刻变红。
+  - **C 服务端**：`invalid_request` 的 message 改为服务端固定中文模板（`packages/server/src/validation.ts`，按校验器的 `issue.code` 分类），不回显校验器原文、也不回显任何提交值（客户端自定义键名折成 `?`）；空 body 单列 `请求体不能为空`。`code` 与 HTTP 状态码一条未变（`text/plain` 仍是 400）。`vitest run packages/server` → 14 文件 / 162 通过。
+  - **D 批次 1**：`viewmodel/highlight.ts` 成为「该高亮哪块积木」的唯一派生点，删掉 `output.ts` 里的重复规则；`debugOffset()` 把「分片起点 = `cursor - results.length`」写成具名函数并注明这是界面自己的状态（与 A 的契约口径一致：**不加** `blockIdForBatchAction`）；终止态门禁复查配负向对照。`tsc` 0 / `eslint` 0 / `vitest run packages/web` → 45 文件 / 559 通过。
+  - **A 的独立八步验收（真 socket、真进程，不经过浏览器）**：按 01 §3 的八步定义另写一份驱动，对 ret2win **37 条断言全通过 / exit 0**：`won` 才下发 flag 且与注入哨兵**逐字相等**、`failed` 响应里**连 `"flag"` 键都没有**、调试实例 `satisfied` 时不含 flag、提交判题**不修改**调试实例（S02）、判胜后**尾随动作不执行**、`replay.initial` 是 ready/0 步、录像不含哨兵、公开包不含私有谓词（`"win":{` / `"fail":[` / `reg_eq` / `env:FLAG`）。
+    - 这条驱动第一版有 7 条失败，**逐条查证后全部是探针自己的错误假设**（列表接口本来就只有 `id`/`title`、手工后退的动作名是 `undo` 而不是 `step_back`、`[block, step]` 本来就该得到 2 条结果、异常挂在 `results[1]` 而不是 `results[0]`、初态在 `replay.initial` 而不是帧序列里、以及用裸词 `"win"` 扫泄露被公开的 `labels` 误报）——**没有一条被记成产品缺陷**。
+- 进行中 / owner：F03（真实 Playwright 八步 + S06 复核）、D 批次 2（画布本地保存 + 刷新恢复）、B/G（动作层零长度语义）。
+- 待集成 / 未提交：`packages/engine/**`（B/G，3 个文件）、`packages/web/**`（D，批次 1+2）。**提交前必须重建 `packages/web/dist` 并重启服务**：当前被服务的 bundle 构建于 09:27:54，早于最后一次 web 提交（09:38:05）与工作区改动（09:48:44），因此浏览器侧任何结论都必须以重建后的那一次为准。
+- 当前关卡 / 是否放行：**G3 尚未判定**（等浏览器八步闭环在重建后的 bundle 上通过）。
+- 下一批可并行任务：D6 的六题回归（F02）与 T01–T06 延期说明。
+
+- **D5 期间发现、留给 D6 的待办（每条都不是 D5 阻塞项）**：
+  - **测试替身必须配差分测试（机制性建议）**：`fake-memory.ts` 那类「替身与真实实现漂移」的假绿，普通用例发现不了——D5 抓到的那条会**抛穿引擎**、还会把真实实现里成功的访问判成失败。建议把「替身 ↔ 真实实现的差分用例」写成引擎测试的通用要求。owner：B/G。
+  - **`readRegisters` 是死代码**（`packages/engine/src/state.ts:42-44`）：全仓零调用点，也不是 `src/index.ts` 的再导出。要么删，要么给一个真实使用点（与 `writeRegisters` 对称）。**它现在的 100% 覆盖率是契约覆盖，不代表闭环路径走到了它**。owner：B/G。
+  - **`withoutError` 的防御分支不可达**（`packages/engine/src/state.ts:98-102`）：唯一调用点是 `execute.ts` 的 `judge`，而 `judge` 只会看到 `status !== 'failed'` 的状态，唯一写 `state.error` 的 `failedState` 又同时把 `status` 置为 `failed`。这条覆盖率上升同样是**契约覆盖**，不能用来证明「防御分支已被端到端验证」。owner：B/G。
+  - **投影 `lastStop` 的枚举收窄**：投影只会产出 `exit` 与 `exception`（口径已写进 04 §4），但 `shared` 的 `LastStopViewSchema` 复用四值的 `StopReasonSchema`，web 的 fixture 与测试还在编造 `step`/`limit`。收窄投影侧枚举并清掉 fixture，让 `=== 'limit'` 变成类型错误。owner：A（`shared`）+ D（`web`）。
+  - **服务端题目加载失败不告警**：缺 `log.warn`（S05 的唯一运维项）。owner：C。
+  - **`challenge:check` / `solve` 不校验 `solution.md` 正文编码**：D5 **真的发生过一次**——用 PowerShell 文本 cmdlet 重写 `solution.md` 写出 UTF-8 乱码（1892 → 1856 字节、LF 30 → 18），而 `challenge:check` 仍然报 ok。建议加静态检查（UTF-8 可往返、无 U+FFFD、LF）。owner：E（`packages/authoring`）。
+  - **覆盖率口径**：`vitest.config.ts` 的 `coverage.include` 只含引擎源码，但 `replay.ts` 等分支只在 server/acceptance 用例里被走到，所以**引擎单跑天然低于整仓跑**（`replay.ts` 89.36 vs 100）。对标 D4 记录时要看整仓那一组。owner：A。
+
 ## 9. 设计交付后的下一批并行安排（2026-10-15）
 
 本节在原七天日程上细化下一批任务，不重置 D1、不增加第九个长期角色，也不把设计完成计作 D02/H01/H02 或 G3 通过。D1–D7 仍是开发工作日；当前没有足够的新联调证据重新承诺 D7 必然完成。
