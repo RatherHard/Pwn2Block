@@ -155,7 +155,6 @@ export const SAMPLE_PROJECTION_AFTER: Projection = ProjectionSchema.parse({
     KEY_VMA,
   ],
   disasm: DISASM,
-  lastStop: { reason: 'step', addr: '0x400002' },
 });
 
 /** 「应用一次变化」样例：初始态 → 执行两步后（差分高亮因此有东西可显示）。 */

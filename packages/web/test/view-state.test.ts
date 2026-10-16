@@ -172,9 +172,9 @@ describe('页面状态与状态栏文案（05 §1、§6）', () => {
     expect(satisfiedExit.text).toContain('程序已经退出');
     expect(satisfiedExit.text).toContain('执行类动作会被拒绝');
 
-    // 停因不是 exit 就不加这句话：satisfied 本身不限制任何动作。
+    // 未退出的投影不带 lastStop，也不加这句话：satisfied 本身不限制任何动作。
     const satisfiedAlive = statusTextOf(
-      makeProjection({ status: 'satisfied', lastStop: { reason: 'step' } }),
+      makeProjection({ status: 'satisfied' }),
       'debug',
     );
     expect(satisfiedAlive.text).not.toContain('程序已经退出');

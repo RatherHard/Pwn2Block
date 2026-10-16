@@ -54,10 +54,14 @@ describe('投影差分（04 §4、05 §2.1）', () => {
     expect(rangeChanged(diff, 'unknown', 0, 8)).toBe(false);
   });
 
-  it('步数与停因变化单独标记', () => {
+  it('普通单步只改变步数，终止时才有 lastStop 差分', () => {
     expect(diff.stepsChanged).toBe(true);
     expect(diff.statusChanged).toBe(false);
-    expect(diff.lastStopChanged).toBe(true);
+    expect(diff.lastStopChanged).toBe(false);
+    const exited = makeProjection({ status: 'exited', lastStop: { reason: 'exit', addr: '0x400003' } });
+    expect(diffProjections(next, exited).lastStopChanged).toBe(true);
+    // 撤销退出后 lastStop 消失，也需要标记。
+    expect(diffProjections(exited, next).lastStopChanged).toBe(true);
   });
 
   it('stdin 读位置与 stdout 各自单独比较', () => {

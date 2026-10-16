@@ -74,6 +74,6 @@ describe('D1 样例投影（05 §2.2–2.5）', () => {
     expect(SAMPLE_PROJECTION_AFTER.steps).toBe(2);
     expect(SAMPLE_PROJECTION_AFTER.registers.find((item) => item.name === 'RIP')?.value).toBe('0x400002');
     expect(SAMPLE_PROJECTION_AFTER.registers.find((item) => item.name === 'RSP')?.value).toBe('0x7fffff20');
-    expect(SAMPLE_PROJECTION_AFTER.lastStop).toEqual({ reason: 'step', addr: '0x400002' });
+    expect(SAMPLE_PROJECTION_AFTER.lastStop).toBeUndefined();
   });
 });

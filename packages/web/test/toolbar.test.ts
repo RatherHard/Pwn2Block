@@ -158,7 +158,6 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
   const SATISFIED_STEP = makeProjection({
     status: 'satisfied',
     steps: 9,
-    lastStop: { reason: 'step', addr: '0x400002' },
   });
   /** 判负：运行时异常 / 命中失败条件（03 §2.1），同样是终止态。 */
   const FAILED = makeProjection({
@@ -232,7 +231,7 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
     }
   });
 
-  it('satisfied + lastStop.reason=step：八个按钮全部可用（satisfied 本身不限制动作）', () => {
+  it('satisfied 且没有 lastStop：八个按钮全部可用（satisfied 本身不限制动作）', () => {
     const model = runMenuModel(
       input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(SATISFIED_STEP) }),
     );

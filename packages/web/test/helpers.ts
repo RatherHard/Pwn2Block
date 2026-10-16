@@ -74,7 +74,7 @@ export interface MakeProjectionOptions {
   readonly status?: string;
   readonly steps?: number;
   readonly failures?: number;
-  readonly lastStop?: Record<string, unknown>;
+  readonly lastStop?: Projection['lastStop'];
   readonly error?: Record<string, unknown>;
 }
 

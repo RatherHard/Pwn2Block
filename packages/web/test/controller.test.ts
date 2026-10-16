@@ -392,9 +392,9 @@ describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、0
     expect(controller.state.cursor).toBe(512);
   });
 
-  it('satisfied 但停因是 step（未退出）时继续发后续分片', async () => {
+  it('satisfied 且没有 lastStop（未退出）时继续发后续分片', async () => {
     const { controller } = await exitAtChunkBoundary(
-      makeProjection({ status: 'satisfied', steps: 512, lastStop: { reason: 'step', addr: '0x400002' } }),
+      makeProjection({ status: 'satisfied', steps: 512 }),
     );
     // satisfied 本身不限制动作（04 §1.1）：第二片照发，游标走完 600。
     await until(() => controller.state.cursor === 600, '两片跑完');

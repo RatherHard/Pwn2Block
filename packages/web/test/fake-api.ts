@@ -250,7 +250,7 @@ export interface FrameSpec {
   readonly changedVmas?: readonly Record<string, unknown>[];
   readonly registers?: readonly { readonly name: string; readonly value: string }[];
   readonly flags?: { readonly ZF: boolean; readonly CF: boolean; readonly SF: boolean };
-  readonly lastStop?: Record<string, unknown>;
+  readonly lastStop?: ReplayFrameView['lastStop'];
   readonly error?: Record<string, unknown>;
   readonly stdin?: { readonly hex: string; readonly pos: number };
   readonly stdout?: { readonly hex: string };
