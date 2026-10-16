@@ -482,7 +482,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
     );
   }
 
-  it('刷新：先装回画布，再 GET /api/sessions/:id；程序区立刻有产物', async () => {
+  it('刷新：先装回画布，再 GET /api/sessions/:id；编译产物立刻就位', async () => {
     localStorage.setItem(canvasStorageKey('ret2win'), JSON.stringify(archiveWithStep()));
     storeSession(1, 1);
 
