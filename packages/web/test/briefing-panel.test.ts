@@ -138,4 +138,20 @@ describe('题面与提示面板（05 §5）', () => {
     expect(panel.renderRoot.textContent).toContain('这道题没有提示。');
     expect(panel.renderRoot.textContent).toContain('题面正文');
   });
+
+  it('题面与提示走同一渲染器，HTML 不被解析', async () => {
+    const panel = await mount({
+      hints: [{ text: '用 `ret`' }],
+    });
+    panel.briefing = '## 目标\n\n<img src=x onerror=alert(1)> **win**';
+    await panel.updateComplete;
+    revealButton(panel).click();
+    await panel.updateComplete;
+    const root = panel.renderRoot;
+    expect(root.querySelector('h2, h3, h4')?.textContent).toBe('目标');
+    expect(root.querySelector('img')).toBeNull();
+    expect(root.querySelector('strong')?.textContent).toBe('win');
+    const hintItem = root.querySelector('.hints li');
+    expect(hintItem?.querySelector('code')?.textContent).toBe('ret');
+  });
 });
