@@ -8,7 +8,9 @@
  * 数据全部来自 `viewmodel/stack.ts`；组件只管排版、地址跳转与自动跟随 `sp`。
  */
 import { LitElement, css, html } from 'lit';
+import { live } from 'lit/directives/live.js';
 import { alignDown, formatAddrShort, parseAddrInput } from '../viewmodel/format';
+import { searchVisibleBytes, type ByteSearchMode } from '../viewmodel/search';
 import { roleValue } from '../viewmodel/roles';
 import { buildStackRows, refollowBase, type StackRowModel } from '../viewmodel/stack';
 import { sharedStyles, terminalTheme } from '../theme';
@@ -102,6 +104,10 @@ export class Pwn2BlockStackView extends LitElement {
   private alignOffset = 0;
   private inputText = '';
   private inputError = '';
+  private searchText = '';
+  private searchMode: ByteSearchMode = 'hex';
+  private searchMessage = '';
+  private searchInvalid = false;
 
   override render() {
     const rows = this.rows();
@@ -134,13 +140,27 @@ export class Pwn2BlockStackView extends LitElement {
             type="number"
             min="0"
             max=${this.wordBytes() - 1}
-            .value=${String(this.alignOffset)}
+            .value=${live(String(this.alignOffset))}
             aria-label="行首对齐偏移"
             @change=${(event: Event) => this.setAlign((event.target as HTMLInputElement).value)}
           />
         </label>
         ${this.inputError.length > 0 ? html`<span class="error" role="alert">${this.inputError}</span>` : ''}
       </header>
+      <div class="search">
+        <label>字节搜索：<input
+          aria-label="搜索字节序列" placeholder="41 42"
+          @input=${(event: Event) => { this.searchText = (event.target as HTMLInputElement).value; }}
+          @keydown=${(event: KeyboardEvent) => { if (event.key === 'Enter') this.search(); }}
+        /></label>
+        <select aria-label="搜索编码" @change=${(event: Event) => {
+          this.searchMode = (event.target as HTMLSelectElement).value === 'ascii' ? 'ascii' : 'hex';
+        }}>
+          <option value="hex">hex</option><option value="ascii">ASCII</option>
+        </select>
+        <button type="button" @click=${() => this.search()}>搜索</button>
+        <span class=${this.searchInvalid ? 'error' : 'note'} role=${this.searchInvalid ? 'alert' : 'status'}>${this.searchMessage}</span>
+      </div>
       <table>
         <thead>
           <tr>
@@ -255,6 +275,22 @@ export class Pwn2BlockStackView extends LitElement {
     this.inputError = '';
     this.jumpBase = undefined;
     this.inputText = '';
+    this.requestUpdate();
+  }
+
+  private search(): void {
+    if (this.context === undefined) return;
+    const result = searchVisibleBytes(this.context.projection, this.searchText, this.searchMode);
+    this.searchInvalid = result.kind === 'invalid';
+    if (result.kind === 'found') {
+      // 搜索目标可能落在字内；恢复对齐以确保命中字节在窗口中。
+      this.alignOffset = 0;
+      this.jumpTo(result.addr);
+      this.searchMessage = `已跳到 ${formatAddrShort(result.addr)}（首个匹配）。`;
+    } else {
+      this.searchMessage = result.kind === 'invalid'
+        ? result.message : '当前可见 VMA 内未找到匹配（不搜索隐藏区域，不跨 VMA）。';
+    }
     this.requestUpdate();
   }
 
