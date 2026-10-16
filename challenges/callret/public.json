@@ -1,0 +1,131 @@
+{
+  "id": "callret",
+  "title": "call 与 ret 的栈",
+  "briefing": "这一关考的是 **`call` 与 `ret` 怎样使用栈**：`call 目标` 先把**返回地址**（`call` 后面那条指令的地址）压进栈顶、`rsp` 因此下降一个字宽（8 字节），再跳到目标；`ret` 则把**当前栈顶**那个字弹出，当地的地址跳过去。这道题的胜负就取决于这两件事的先后。\n\n程序停在 `vuln`（0x400000），一共四条指令：\n\n1. `vuln`：`call helper`\n2. 紧跟在 `call` 后面的 `syscall 60`：它同时就是 `call` 会压进栈的那个返回地址（0x400009）；\n3. `helper`：`ret`\n4. `win`：`syscall 99` —— 它把 `FLAG` 置为 1 并结束程序，这就是判胜。\n\n**目标**：让程序执行到 `win`（0x40000b），把 `FLAG` 变成 1。\n\n**前置条件（先看清楚再动手）**：开局 `rsp` 是 0x7fffff00，栈上还没有返回地址 —— `call` 还没执行过。所以此刻直接 `run` 只会「`call` 进 `helper` → `ret` 弹回 `call` 后面 → `syscall 60` 退出」，`FLAG` 一直是 0，判负。\n\n**试什么**：先 `step 1` 让 `call` 真的执行，再看寄存器视图里的 `rsp` 和栈视图：哪个槽从 `00` 变成了一个代码地址？那个值是什么？然后想清楚 `ret` 会弹出哪一格，以及工具箱里的 `push`（先把 `rsp` 减 8、再往新的栈顶写一个字）应该落在哪一格、写下什么值。想好了再 `run`。\n\n本题的程序没有栈帧：`RBP` 只是三个角色寄存器（`sp` / `bp` / `ip`）里声明出来的那一个，不参与本题的跳转，栈帧是下一关的内容。",
+  "archBits": 64,
+  "encoding": {
+    "preset": "x86ish",
+    "add": [
+      { "opcode": "0x11", "op": "syscall", "operands": ["const:99"], "mnemonic": "syscall win" }
+    ],
+    "remove": [
+      "0xb8",
+      "0xb9",
+      "0xba",
+      "0xbb",
+      "0xbc",
+      "0xbd",
+      "0xbe",
+      "0xbf",
+      "0x88",
+      "0x89",
+      "0x8a",
+      "0x8b",
+      "0x8d",
+      "0x8e",
+      "0x8f",
+      "0x86",
+      "0x87",
+      "0x50",
+      "0x51",
+      "0x52",
+      "0x53",
+      "0x54",
+      "0x55",
+      "0x56",
+      "0x57",
+      "0x68",
+      "0x58",
+      "0x59",
+      "0x5a",
+      "0x5b",
+      "0x5c",
+      "0x5d",
+      "0x5e",
+      "0x5f",
+      "0x00",
+      "0x01",
+      "0x02",
+      "0x04",
+      "0x03",
+      "0x28",
+      "0x29",
+      "0x2a",
+      "0x2b",
+      "0x38",
+      "0x39",
+      "0x3a",
+      "0x3b",
+      "0x20",
+      "0x21",
+      "0x24",
+      "0x08",
+      "0x09",
+      "0x0c",
+      "0x30",
+      "0x31",
+      "0x34",
+      "0xc0",
+      "0xc1",
+      "0xd2",
+      "0xd3",
+      "0xc4",
+      "0xc5",
+      "0xd6",
+      "0xd7",
+      "0xe9",
+      "0xff",
+      "0x26",
+      "0x74",
+      "0x75",
+      "0x72",
+      "0x73",
+      "0x9a",
+      "0xc9",
+      "0x10",
+      "0x0f",
+      "0x90"
+    ]
+  },
+  "syscallAbi": { "nr": "RAX", "args": [], "ret": "RAX" },
+  "syscalls": [
+    { "nr": 60, "name": "exit", "kind": "exit", "doc": "exit()：结束程序，不给分" },
+    {
+      "nr": 99,
+      "name": "win",
+      "kind": "custom",
+      "doc": "置 FLAG=1 并退出，判胜",
+      "effects": [
+        { "type": "set_reg", "reg": "FLAG", "value": "0x1" },
+        { "type": "exit" }
+      ]
+    }
+  ],
+  "labels": [
+    { "name": "vuln", "addr": "0x400000", "size": 9, "kind": "func" },
+    { "name": "helper", "addr": "0x40000a", "size": 1, "kind": "func" },
+    { "name": "win", "addr": "0x40000b", "size": 1, "kind": "func" },
+    { "name": "初始 rsp", "addr": "0x7fffff00", "size": 8, "kind": "custom" },
+    { "name": "call 压入的返回地址槽", "addr": "0x7ffffef8", "size": 8, "kind": "ret_addr" }
+  ],
+  "allowedActions": ["push", "step", "run", "undo", "reset"],
+  "hints": [
+    {
+      "text": "先 `step 1` 让 `vuln` 的第一条指令真的执行，然后同时看寄存器视图里的 `RSP` 和栈视图：`RSP` 从 0x7fffff00 变成了多少？哪个栈槽的内容从 00 变成了一个代码地址？那个值指向代码里的哪一条指令？"
+    },
+    {
+      "text": "`helper` 里只有一条 `ret`：它把**当前栈顶**（`RSP` 指向的那一格）当作地址弹出去跳过去。要让它跳到 `win`，`ret` 执行的那一刻栈顶就必须是 `win` 的地址。工具箱里的 `push` 是「先把 `RSP` 减 8，再往新的栈顶写一个字」，所以它写的正好是 `ret` 会弹的那一格。"
+    },
+    {
+      "text": "关键在顺序。`call` 永远把返回地址压在**当时**的栈顶：如果先 `push` 再让 `call` 执行，返回地址会压在你要用的那个字上面，`ret` 弹到的还是 `call` 后面那条 `syscall 60`，程序直接退出、判负。所以要先让 `call` 执行完（把返回地址压进去、`RSP` 落到那一格），再 `push` `win` 的地址盖在它上面，最后 `run`。",
+      "unlockAfterFailures": 3
+    }
+  ],
+  "errorNotes": {
+    "invalid_ip": "`ret` 会跳到栈顶那个字指向的地址。如果 `push` 的值不是一条指令的地址（比如把某个栈地址、或者随手编的一个数压了上去），`ret` 就会把 `ip` 送到不可执行或未映射的地方，实例立刻进入 `failed`。先 `step_back` 或 `undo` 回去，看栈顶那一格里到底是什么字节。",
+    "invalid_instruction": "跳转目标必须正好落在一条指令的开头。`vuln` 里那句 `call helper` 一共占 9 个字节，其中 8 个字节是立即数（helper 的地址）；把目标写进这 8 个字节中间，取到的就不是合法 opcode，于是报这条。回退一步，对着指令视图确认目标地址是不是某条指令的第一字节。",
+    "not_executable": "程序已经结束（`syscall 60` 退出，或 `syscall 99` 判胜退出），执行类动作会被拒绝。用 `step_back` / `undo` / `reset` 退回去。如果是在 `call` 正常返回之后撞上它，说明这次没有换掉栈顶 —— 回去确认 `call` 压进去的那个返回地址是不是还压在栈顶。",
+    "inaccessible_address": "`push` 的落点必须落在已映射、可读写的栈区（0x7fffe000–0x7fffffff）里：每 `push` 一次 `rsp` 往低地址走 8 字节，一直压下去走出栈区就会被拒绝，此时栈和 `rsp` 都不会变。本题只需要压一个字。",
+    "memory_fault": "程序自己访存出错才会报这条。本题的程序只碰栈：`call` 往栈顶压一个返回地址，`ret` 从栈顶弹一个地址，栈区 8KB（约一千个槽）足够用，`rsp` 也始终留在栈区里，正常做不出它；真看到就先 `step_back` 回上一条，看看 `rsp` 是不是已经被推出了栈区。"
+  }
+}

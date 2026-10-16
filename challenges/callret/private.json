@@ -1,0 +1,67 @@
+{
+  "registers": [
+    "RAX",
+    "RSP",
+    "RBP",
+    "RIP",
+    "FLAG"
+  ],
+  "roles": {
+    "sp": "RSP",
+    "bp": "RBP",
+    "ip": "RIP"
+  },
+  "initRegisters": {
+    "RSP": "0x7fffff00",
+    "RBP": "0x7fffff20",
+    "RIP": "0x400000"
+  },
+  "vmas": [
+    {
+      "id": "text",
+      "kind": "code",
+      "start": "0x400000",
+      "size": "0x1000",
+      "perm": "rx",
+      "hidden": false,
+      "init": [
+        {
+          "at": "0x400000",
+          "hex": "e80a004000000000000ec311"
+        }
+      ]
+    },
+    {
+      "id": "stack",
+      "kind": "stack",
+      "start": "0x7fffe000",
+      "size": "0x2000",
+      "perm": "rw",
+      "hidden": false
+    }
+  ],
+  "win": {
+    "reg_eq": {
+      "reg": "FLAG",
+      "value": "0x1"
+    }
+  },
+  "fail": [
+    {
+      "all": [
+        {
+          "exited": {}
+        },
+        {
+          "not": {
+            "reg_eq": {
+              "reg": "FLAG",
+              "value": "0x1"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "flag": "env:FLAG_CALLRET"
+}
