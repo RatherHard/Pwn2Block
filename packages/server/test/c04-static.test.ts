@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/app';
@@ -385,6 +386,33 @@ describe('静态根不可用与开关（C04）', () => {
       expectBlocked(await app.inject({ method: 'GET', url: '/' }));
       expectBlocked(await app.inject({ method: 'GET', url: '/assets/app.js' }));
 
+      const health = await app.inject({ method: 'GET', url: '/api/health' });
+      expect(health.statusCode).toBe(200);
+    });
+  });
+
+  it('默认静态根就是仓库的 `packages/web/dist`，不是仓库根（不传 `staticRoot` 时）', async () => {
+    // 静态根的默认值是「发布边界」的一半：默认值一旦变成仓库根，整条 S06 立刻失效。
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    expect(defaultStaticRoot().replace(/\\/gu, '/').endsWith('/packages/web/dist')).toBe(true);
+
+    // 行为证据：下面这些文件确实在仓库根，但不在静态根里，所以取不到。
+    // 若默认根被改成仓库根（最危险的回归），前两条会立刻变成 200。
+    for (const relative of ['CLAUDE.md', 'package.json', 'docs/README.md']) {
+      expect(existsSync(join(repoRoot, relative))).toBe(true);
+    }
+
+    await withApp(optionsWith({ staticRoot: undefined }), async (app) => {
+      for (const url of [
+        '/CLAUDE.md',
+        '/package.json',
+        '/docs/README.md',
+        `/challenges/${CHALLENGE_ID}/private.json`,
+      ]) {
+        expectBlocked(await app.inject({ method: 'GET', url }));
+      }
+
+      // 静态面被挡住不影响 API 面。
       const health = await app.inject({ method: 'GET', url: '/api/health' });
       expect(health.statusCode).toBe(200);
     });
