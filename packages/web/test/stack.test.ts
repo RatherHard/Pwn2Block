@@ -190,3 +190,12 @@ describe('栈视图行投影（05 §2.2）', () => {
     expect(refollowBase(rows, 0x80000020n, 8)).toBe(0x80000000n);
   });
 });
+
+it.each([32, 64])('sp 在 VMA 起点时，%i 位对齐偏移仍保留 sp 锚点', (archBits) => {
+  const projection = makeProjection({ registers: { RSP: '0x1000' }, vmas: [
+    makeVma({ id: 'stack', start: '0x1000', size: '0x8', hex: '0000000000000000' }),
+  ] });
+  const rows = buildStackRows({ projection, archBits, roles: projection.roles, alignOffset: 3 });
+  expect(rows.some((row) => row.anchors.some((anchor) => anchor.role === 'sp'))).toBe(true);
+  expect(rows[0]?.addr).toBe(0x1000n - BigInt(archBits / 8) + 3n);
+});

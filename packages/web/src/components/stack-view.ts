@@ -254,7 +254,7 @@ export class Pwn2BlockStackView extends LitElement {
   private jumpTo(addr: bigint): void {
     this.scrollAddr = addr;
     this.inputError = '';
-    this.jumpBase = alignDown(addr, this.wordBytes());
+    this.jumpBase = alignDown(addr - BigInt(this.alignOffset), this.wordBytes());
     this.inputText = formatAddrShort(addr);
     this.requestUpdate();
   }

@@ -127,7 +127,9 @@ export function buildStackRows(input: StackViewInput): readonly StackRowModel[] 
   const diff = input.diff ?? EMPTY_DIFF;
   const spValue = registers.get(input.roles.sp) ?? 0n;
   // `startAddr` 原样使用（调用方负责对齐，便于实现“对齐偏移”，05 §2.2）；省略时自动锚定 sp。
-  const base = (input.startAddr ?? defaultBase(reader, spValue, rowBytes)) + BigInt(input.alignOffset ?? 0);
+  let base = (input.startAddr ?? defaultBase(reader, spValue, rowBytes)) + BigInt(input.alignOffset ?? 0);
+  // VMA 起点附近的默认窗口被下界夹住后，偏移可能越过 sp；向前补一行保留锚点。
+  if (input.startAddr === undefined && base > spValue) base -= BigInt(rowBytes);
   const vmaStarts = new Map(reader.vmas.map((item) => [item.vma.id, item.start]));
 
   const rows: StackRowModel[] = [];
