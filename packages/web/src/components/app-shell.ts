@@ -549,8 +549,8 @@ export class Pwn2BlockApp extends LitElement {
   /**
    * 自动高亮（05 §4、§6）：判题里的被拒绝动作、调试里被拒绝的动作，或第一条编译错误。
    * 判定收口在 `viewmodel/highlight.ts`（内部走 H 的 `compiler/locate.ts`），
-   * 程序区的「定位出错积木」按钮与输出区的定位按钮读的是同一个 id，不各算一套。
-   * 点程序区 / 输出区行时由 payload 面板自己高亮，不走这里。
+   * 输出区的「定位积木」按钮读的也是同一个 id，不各算一套。
+   * 点输出区条目时由 payload 面板自己高亮，不走这里。
    */
   private autoHighlight(state: ControllerState): string | undefined {
     const verdict = state.verdict;

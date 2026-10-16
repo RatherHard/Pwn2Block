@@ -720,7 +720,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     if (actions.length !== pending.actionsLength) {
       notify(
         'warn',
-        '本地保存的程序与上次的调试进度对不上（积木被改过，或画布存档没恢复成功），程序区从第一条动作重新开始。',
+        '本地保存的程序与上次的调试进度对不上（积木被改过，或画布存档没恢复成功），将从第一条动作重新开始。',
       );
       return;
     }

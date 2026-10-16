@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { outputEntries, TEXT_SATISFIED } from '../src/viewmodel/output';
-import { MESSAGE_STALE } from '../src/viewmodel/program';
 import { makeArtifact } from './fake-api';
 import { makeProjection } from './helpers';
 
@@ -17,7 +16,7 @@ describe('输出区（05 §3、§5、§6）', () => {
       stale: false,
       results: [],
     });
-    expect(entries[0]?.text).toContain('共 2 条错误');
+    expect(entries[0]?.text).toBe('编译失败：共 2 条错误。');
     expect(entries[1]).toMatchObject({ label: '第 1 条', text: '缺少输入 data', blockId: 'b1' });
     expect(entries[2]?.blockId).toBe('b2');
   });
@@ -152,7 +151,7 @@ describe('输出区（05 §3、§5、§6）', () => {
       projection: makeProjection(),
     });
     expect(entries[0]?.label).toBe('已过期');
-    expect(entries[0]?.text).toContain(MESSAGE_STALE);
+    expect(entries[0]?.text).toBe('积木已改动，下面仍是上一次的结果；编译完成前不能运行或提交。');
   });
 
   it('什么都没有时给一条引导，而不是空白', () => {
@@ -167,6 +166,6 @@ describe('输出区（05 §3、§5、§6）', () => {
         results: [],
         projection: makeProjection(),
       })[0]?.text,
-    ).toContain('试运行');
+    ).toBe('还没有结果：拼好积木后点「运行」，或在顶栏「运行」菜单里单步。');
   });
 });

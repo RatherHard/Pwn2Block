@@ -204,7 +204,7 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     expect(textOf(runMenuOf(app))).toContain('编译失败');
   });
 
-  it('拼出「开始 → step(1)」后点「编译」：程序区出现一行（走画布桥）', async () => {
+  it('拼出「开始 → step(1)」后编译成功：输出区没有错误（走画布桥）', async () => {
     const { app } = await mountApp(createFakeApi());
     const workspace = panelOf(app).workspace;
     if (workspace === undefined) throw new Error('画布没挂上');
@@ -215,11 +215,10 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
     next.connect(previous);
 
-    // 程序化装载不会派发 Blockly 事件，所以必须走「编译」按钮自己调 recompile()（05 §3.1）。
-    clickRun(app, '编译');
+    // 程序化装载不会派发 Blockly 事件，所以必须自己调 recompile()（05 §3.1）。
+    panelOf(app).recompile();
     await settle(app);
 
-    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
     expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
   });
 
@@ -408,14 +407,14 @@ describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
 });
 
 describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §4）', () => {
-  it('画布高亮、输出区条目与程序区出口指向同一块积木', async () => {
+  it('画布高亮与输出区条目指向同一块积木，点定位按钮能重新高亮', async () => {
     const { app } = await mountApp(createFakeApi());
     const workspace = panelOf(app).workspace;
     if (workspace === undefined) throw new Error('画布没挂上');
     // ret2win 的 allowedActions 里没有 push：这块积木一定编译失败，且错误带得到它的 id。
     const [push] = chainAfterStart(workspace, [BLOCK_TYPES.actionPush]);
 
-    clickRun(app, '编译');
+    panelOf(app).recompile();
     await settle(app);
 
     // ① 输出区：错误逐条列出，条目带定位出口。
@@ -423,19 +422,14 @@ describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §
     expect(textOf(output)).toContain(MESSAGE_ACTION_NOT_ALLOWED('push'));
     expect(buttonLabels(output)).toEqual(['定位积木']);
 
-    // ② 程序区：编译失败没有行，只留一个定位出口。
-    const program = inPanel(app, 'pwn2block-program-view');
-    expect(textOf(program)).toContain('编译失败');
-    expect(buttonLabels(program)).toEqual(['定位出错积木']);
-
-    // ③ 画布：出错积木被自动高亮（第一条可定位的错误）。
+    // ② 画布：出错积木被自动高亮（第一条可定位的错误）。
     expect(highlightedIds(workspace)).toEqual([push?.id]);
 
-    // 手动清掉高亮后点程序区的出口：同一块积木又被点亮——三处读的是同一个 id。
+    // 手动清掉高亮后点输出区的定位按钮：同一块积木又被点亮——两处读的是同一个 id。
     workspace.highlightBlock(null);
     expect(highlightedIds(workspace)).toEqual([]);
-    buttonsOf(program)
-      .find((button) => button.textContent?.trim() === '定位出错积木')
+    buttonsOf(output)
+      .find((button) => button.textContent?.trim() === '定位积木')
       ?.click();
     await settle(app);
     expect(highlightedIds(workspace)).toEqual([push?.id]);
@@ -448,7 +442,6 @@ describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §
 
     expect(textOf(inPanel(app, 'pwn2block-output-view'))).toContain(MESSAGE_NO_START_BLOCK);
     expect(buttonLabels(inPanel(app, 'pwn2block-output-view'))).toEqual([]);
-    expect(buttonLabels(inPanel(app, 'pwn2block-program-view'))).toEqual([]);
   });
 });
 
@@ -517,9 +510,8 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
     // 没有新建会话：列表 → 题目 → 接回旧会话。
     expect(api.calls.map((call) => call.method)).toEqual(['listChallenges', 'getChallenge', 'sessionState']);
     expect(typesAtSessionFetch).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
-    // 画布与程序区都是恢复出来的内容（程序区的产物是画布编出来的，不是别人塞的）。
+    // 画布是恢复出来的内容，产物也编出来了（输出区没有编译错误，不是半恢复）。
     expect(blockTypesOf(app)).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
-    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
     expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
     // 接回成功不说废话（没有 notice）。
     expect(app.renderRoot.querySelector('.notice')).toBeNull();
@@ -554,7 +546,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
 
     expect(api.calls.map((call) => call.method)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
     expect(typesAtCreate).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
-    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
+    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
   });
 
   it('旧会话已被回收（404）：提示一句并新建，程序还在画布上', async () => {
@@ -585,7 +577,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
     ]);
     const notice = app.renderRoot.querySelector('.notice');
     expect(notice?.textContent).toContain('本地保存的程序还在');
-    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
+    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
   });
 });
 
@@ -613,12 +605,12 @@ describe('单页骨架：判题被拒与回放时间线的可访问性（D5 ③�
     const workspace = panelOf(mounted.app).workspace;
     if (workspace === undefined) throw new Error('画布没挂上');
     chainAfterStart(workspace, [BLOCK_TYPES.actionStep, BLOCK_TYPES.actionStep]);
-    clickRun(mounted.app, '编译');
+    panelOf(mounted.app).recompile();
     await settle(mounted.app);
     return mounted;
   }
 
-  it('程序区标出被拒绝的那一行，并高亮产生它的那块积木', async () => {
+  it('输出区标出被拒绝的那个动作，并高亮产生它的那块积木', async () => {
     const { app } = await rejected();
     const workspace = panelOf(app).workspace;
     const blocks = [...(workspace?.getAllBlocks(false) ?? [])].filter(
@@ -637,12 +629,8 @@ describe('单页骨架：判题被拒与回放时间线的可访问性（D5 ③�
     // 被拒绝的动作对应录像里那一帧：默认选中它。
     expect(shadowOf(verdict)?.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('2');
 
-    // 程序区：只有第二行带「× 被拒绝」（颜色不是唯一信息载体，05 §7）。
-    const rows = [...(shadowOf(inPanel(app, 'pwn2block-program-view'))?.querySelectorAll('li') ?? [])];
-    expect(rows).toHaveLength(2);
-    expect(rows[0]?.textContent).not.toContain('被拒绝');
-    expect(rows[1]?.textContent).toContain('被拒绝');
-    // 画布高亮的是产生被拒动作的那块积木（来源表 index 1）。
+    // 画布高亮的是产生被拒动作的那块积木（来源表 index 1）：没有程序区之后，
+    // 画布高亮是唯一的定位线索，颜色之外判题面板的文字已经说明是哪一步被拒绝（05 §7）。
     expect(highlightedIds(workspace)).toEqual([second.id]);
   });
 

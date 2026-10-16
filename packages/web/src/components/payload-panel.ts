@@ -1,11 +1,13 @@
 /**
- * Payload 窗口（05 §3）：积木画布 + 工具栏 + 程序区 + 输出区。
+ * Payload 窗口（05 §3）：积木画布 + 工具栏 + 输出区。
  *
  * 职责边界：
  * - **Blockly 挂载桥**是页面与 Blockly 之间唯一的接口（09 §3.2），所以画布只在这里挂载，
  *   高亮也只在这里做；组件把「编译请求」「积木被改动」派发出去，由页面壳转给控制器。
- * - **程序区 / 输出区**是纯展示：行与条目由 `viewmodel/program.ts`、`viewmodel/output.ts`
- *   算好，数据源一律是控制器的 `ArtifactTracker` 快照（09 §3.2），这里不维护第二份状态。
+ * - **输出区**是纯展示：条目由 `viewmodel/output.ts` 算好，数据源一律是控制器的
+ *   `ArtifactTracker` 快照（09 §3.2），这里不维护第二份状态。画布高亮是唯一的定位线索
+ *   （05 §4，程序区已删除）：出错 / 被拒绝的动作通过 `highlightBlockId` 高亮对应积木，
+ *   出口是输出区条目上的「定位积木」按钮。
  * - 用户手势改动积木 → `p2b-edit`（产物过期）+ 立即重编译；**程序化装载/生成程序不会派发事件**，
  *   所以那样做之后必须自己调 `recompile()`（05 §3.1 实现备忘、本批任务第 6 条）。
  */
@@ -15,16 +17,12 @@ import type * as Blockly from 'blockly';
 import { mountBlockly, type BlocklyBridge } from '../blocks/mount';
 import type { NormalizedWorkspace } from '../compiler/types';
 import type { ControllerState } from '../viewmodel/controller';
-import { debugOffset, rejectedRowFor } from '../viewmodel/highlight';
 import { outputEntries } from '../viewmodel/output';
-import { programRows } from '../viewmodel/program';
 import { defaultStore, readCanvas, writeCanvas, type KeyValueStore } from '../viewmodel/storage';
 import type { RunButtonModel } from '../viewmodel/toolbar';
 import { sharedStyles, terminalTheme } from '../theme';
 import './output-view';
-import './program-view';
 import './run-menu';
-import type { ProgramSelectDetail } from './program-view';
 
 export class Pwn2BlockPayloadPanel extends LitElement {
   static override styles = [
@@ -109,7 +107,6 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       .placeholder[hidden] {
         display: none;
       }
-      .program,
       .output {
         flex-shrink: 0;
         min-height: 4rem;
@@ -171,10 +168,6 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     const stale = state?.artifact.stale ?? false;
     const cursor = state?.cursor ?? 0;
     const mode = state?.page?.mode ?? 'debug';
-    // 编译失败时程序区没有行可显示，只留一个「定位出错积木」出口：目标就是画布上正亮着的那块
-    // （`highlightBlockId` 由页面壳用 `compiler/locate.ts` 算好，两处不会指到不同积木）。
-    const errorBlockId = artifact === undefined && errors.length > 0 ? this.highlightBlockId : undefined;
-    const rejectedRow = this.rejectedRowOf(state);
     return html`
       <div class="toolbar">
         <h2>Payload</h2>
@@ -189,17 +182,6 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         <p class="placeholder" id="blockly-placeholder">
           积木画布正在准备：会话建立后会挂载 Blockly。未连到「开始」积木的积木不参与编译（05 §3.1）。
         </p>
-      </div>
-      <div class="program">
-        <pwn2block-program-view
-          .rows=${programRows(artifact, cursor, rejectedRow)}
-          .stale=${stale}
-          .cursor=${cursor}
-          .errorBlockId=${errorBlockId}
-          .emptyMessage=${this.emptyProgramMessage(state, errors.length)}
-          @p2b-program-select=${this.onProgramSelect}
-          @p2b-block-select=${this.onBlockSelect}
-        ></pwn2block-program-view>
       </div>
       <div class="output">
         ${mode === 'verdict'
@@ -251,41 +233,6 @@ export class Pwn2BlockPayloadPanel extends LitElement {
   /** 当前挂载的画布工作区（未挂载时 `undefined`）。只读出口，方便外部做错误定位与测试。 */
   get workspace(): Blockly.WorkspaceSvg | undefined {
     return this.bridge?.workspace;
-  }
-
-  private onProgramSelect(event: Event): void {
-    const detail = (event as CustomEvent<ProgramSelectDetail>).detail;
-    if (detail.blockId === undefined) return;
-    // 点同一行两次：第二次清掉高亮，避免“看起来还亮着但其实已经切走了”。
-    this.highlight(this.lastHighlight === detail.blockId ? undefined : detail.blockId);
-  }
-
-  /**
-   * 被拒绝的那个动作在程序区的行号（05 §6 的 `rejected` 结论：高亮对应积木）。
-   *
-   * 判题结果模式优先用**提交那份结果**（横幅讲的就是它）：判题动作序列与程序区行一一对应，
-   * 偏移是 0；提交没被拒时退回调试结果。映射对不上产物时 `undefined`（不猜，09 §3.4）。
-   */
-  private rejectedRowOf(state: ControllerState | undefined): number | undefined {
-    if (state === undefined) return undefined;
-    const artifact = state.artifact.artifact;
-    const verdict = state.verdict;
-    if ((state.page?.mode ?? 'debug') === 'verdict' && verdict !== undefined) {
-      const fromSubmission = rejectedRowFor(artifact, verdict.response.results, 0);
-      if (fromSubmission !== undefined) return fromSubmission;
-    }
-    // 服务端 `results` 的下标基准是**分片起点**（`debugOffset` 里有推导）。
-    const batchStart = debugOffset(state.results, state.cursor);
-    return rejectedRowFor(artifact, state.results, batchStart);
-  }
-
-  /** 程序区空态的说明：编译失败时要说清「没有可用产物」，而不是让用户以为忘了点编译。 */
-  private emptyProgramMessage(state: ControllerState | undefined, errorCount: number): string {
-    if (state?.challenge === undefined) return '会话还没开始。';
-    if (errorCount > 0) {
-      return `编译失败：共 ${errorCount} 条错误，程序区没有可用动作序列（错误逐条列在输出区）。`;
-    }
-    return '点「编译」把画布上的积木编译成动作序列。';
   }
 
   private onBlockSelect(event: Event): void {

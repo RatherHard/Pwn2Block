@@ -12,7 +12,6 @@ import type { PayloadArtifact } from '../compiler/artifact';
 import { blockIdForAction, isLocatableError } from '../compiler/locate';
 import type { CompileError } from '../compiler/types';
 import { actionRowFor, debugOffset } from './highlight';
-import { MESSAGE_STALE } from './program';
 import { isExitedProjection, SATISFIED_EXIT_GUIDANCE, type StatusTone } from './session';
 
 export interface OutputEntry {
@@ -50,7 +49,7 @@ function compileEntries(errors: readonly CompileError[]): readonly OutputEntry[]
     key: 'compile-head',
     tone: 'error',
     label: '编译错误',
-    text: `编译失败：共 ${errors.length} 条错误。程序区没有可用产物，点下面任意一条可高亮对应积木。`,
+    text: `编译失败：共 ${errors.length} 条错误。`,
   };
   return [
     head,
@@ -150,7 +149,7 @@ export function outputEntries(input: OutputInput): readonly OutputEntry[] {
       key: 'stale',
       tone: 'warn',
       label: '已过期',
-      text: `${MESSAGE_STALE}：程序区显示的还是上一次的产物，重新编译前不能试运行或提交。`,
+      text: '积木已改动，下面仍是上一次的结果；编译完成前不能运行或提交。',
     });
   }
 
@@ -167,7 +166,7 @@ export function outputEntries(input: OutputInput): readonly OutputEntry[] {
       text:
         projection === undefined
           ? '会话还没开始：选一道题后这里显示动作结果与错误解释。'
-          : '还没有结果：点「编译」，再用「试运行」或「单步」把动作提交到调试实例。',
+          : '还没有结果：拼好积木后点「运行」，或在顶栏「运行」菜单里单步。',
     });
   }
   return entries;

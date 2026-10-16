@@ -73,7 +73,7 @@ describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () =
 
   it('从未编译 vs 编译失败给出不同原因', () => {
     const never = runMenuModel(input({ artifact: undefined, compileErrorCount: 0 }));
-    expect(buttonModel(never, 'step')?.disabledReason).toContain('还没有编译产物');
+    expect(buttonModel(never, 'step')?.disabledReason).toContain('还没有可运行的程序');
     const failed = runMenuModel(input({ artifact: undefined, compileErrorCount: 2 }));
     expect(buttonModel(failed, 'step')?.disabledReason).toContain('编译失败');
   });

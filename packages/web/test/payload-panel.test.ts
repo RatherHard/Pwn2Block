@@ -8,10 +8,10 @@ import type { Pwn2BlockPayloadPanel } from '../src/components/payload-panel';
 import { BLOCK_TYPES } from '../src/compiler/types';
 import { mountBlockly } from '../src/blocks/mount';
 import { readCanvas, readSession, writeCanvas, type KeyValueStore } from '../src/viewmodel/storage';
-import { FAKE_SESSION_ID, makeArtifact, makeControllerState } from './fake-api';
+import { FAKE_SESSION_ID, makeControllerState } from './fake-api';
 
 /**
- * Payload 窗口（D02，05 §3）：真实 Blockly 挂载、程序区点行高亮、积木改动的“过期 + 重编译”。
+ * Payload 窗口（D02，05 §3）：真实 Blockly 挂载、画布高亮、积木改动的“过期 + 重编译”。
  *
  * 为什么用真实 Blockly：挂载与卸载的痕迹只能由真实注入证明（`host.childElementCount`、
  * `workspace` 是否为 `undefined`），这也正是 09 §3.2 桥契约里最容易写错的两处。
@@ -86,28 +86,10 @@ describe('payload 窗口：画布挂载与卸载（09 §3.2）', () => {
   });
 });
 
-describe('payload 窗口：程序区与高亮（05 §3、§4）', () => {
-  it('程序区逐行显示动作，点行高亮对应积木', async () => {
+describe('payload 窗口：画布高亮（05 §4）', () => {
+  it('不再渲染程序区（已删除，改用输出区条目与画布高亮作为定位出口）', async () => {
     const panel = await mountPanel();
-    const workspace = panel.workspace;
-    if (workspace === undefined) throw new Error('画布没挂上');
-    const block = workspace.newBlock(BLOCK_TYPES.actionRet);
-    block.initSvg();
-
-    panel.state = makeControllerState({
-      artifact: { artifact: makeArtifact([{ type: 'ret' }], [block.id]), errors: [], stale: false, revision: 1 },
-    });
-    await panel.updateComplete;
-
-    const row = panel.renderRoot.querySelector('pwn2block-program-view')?.renderRoot.querySelector('button');
-    expect(row).not.toBeNull();
-    expect(row?.textContent).toContain('ret');
-    row?.click();
-    expect(highlightedIds(workspace)).toEqual([block.id]);
-
-    // 再点同一行：高亮清掉，避免“看起来还亮着但其实已经切走了”。
-    row?.click();
-    expect(highlightedIds(workspace)).toEqual([]);
+    expect(panel.renderRoot.querySelector('pwn2block-program-view')).toBeNull();
   });
 
   it('外部传入高亮目标（编译错误 / 被拒绝的动作）时会高亮，撤回后清除', async () => {

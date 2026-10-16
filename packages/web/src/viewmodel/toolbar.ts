@@ -135,7 +135,7 @@ function remainingActions(input: RunMenuInput): number {
 function fallbackBlocked(input: RunMenuInput, name: 'run' | 'step'): string | undefined {
   if (remainingActions(input) > 0) return undefined;
   if (input.allowedActions.includes(name)) return undefined;
-  return `程序区动作已用完，会退化成 ${name}，但本题不允许 ${name} 动作`;
+  return `没有剩余动作，会退化成 ${name}，但本题不允许 ${name} 动作`;
 }
 
 function backDepth(input: RunMenuInput): { readonly stepBack: string | undefined; readonly undo: string | undefined } {
@@ -163,13 +163,13 @@ const SPECS: readonly Spec[] = [
   {
     id: 'compile',
     label: '编译',
-    hint: '把积木编译成原子动作序列，显示在程序区，不提交',
+    hint: '把积木编译成原子动作序列，不提交',
     blocked: (input) => firstReason(sessionBlocked(input)),
   },
   {
     id: 'trial-run',
     label: '试运行',
-    hint: '把程序区剩余动作提交到调试实例；序列用完时提交 run',
+    hint: '把剩余动作提交到调试实例；序列用完时提交 run',
     blocked: (input) =>
       firstReason(
         sessionBlocked(input),
@@ -182,7 +182,7 @@ const SPECS: readonly Spec[] = [
   {
     id: 'step',
     label: '单步',
-    hint: '提交程序区的下一个动作；序列用完时提交 step',
+    hint: '提交下一个动作；序列用完时提交 step',
     blocked: (input) =>
       firstReason(
         sessionBlocked(input),
@@ -219,7 +219,7 @@ const SPECS: readonly Spec[] = [
   {
     id: 'reset',
     label: '重置',
-    hint: '提交 reset，回到题目初始状态，程序区高亮回到开头',
+    hint: '提交 reset，回到题目初始状态',
     blocked: (input) => firstReason(sessionBlocked(input), debugBlocked(input)),
   },
   {
