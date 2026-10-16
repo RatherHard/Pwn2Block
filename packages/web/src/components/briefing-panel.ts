@@ -51,7 +51,7 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         margin: 0.75rem 0 0;
         padding: 0.75rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-dim);
         background: var(--p2b-bg);
         overflow-wrap: anywhere;
@@ -77,10 +77,10 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         margin-right: 0.45rem;
         padding: 0.1rem 0.4rem;
         border: 1px solid var(--p2b-hidden);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-hidden);
         background: var(--p2b-bg);
-        font-size:inherit;
+        font-size: inherit;
       }
       .hint-actions {
         display: flex;

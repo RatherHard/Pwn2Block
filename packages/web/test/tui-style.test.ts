@@ -24,10 +24,10 @@ async function componentSources(): Promise<readonly (readonly [string, string])[
   return files.map((name) => [name, readSource(fileURLToPath(new URL(`../src/components/${name}`, import.meta.url)))] as const);
 }
 
-const BANNED_PATTERNS: readonly RegExp[] = [
+export const BANNED_PATTERNS: readonly RegExp[] = [
   /gradient\(/,
-  /box-shadow:\s*(?!none)/,
-  /border-radius:\s*(?!0[;\s])/,
+  /box-shadow:(?!\s*none)/,
+  /border-radius:(?!\s*0[;\s])/,
   /rgba?\([^)]*\/\s*\d/,
   /rgba\(/,
   /backdrop-filter/,
@@ -38,10 +38,27 @@ const BANNED_PATTERNS: readonly RegExp[] = [
   /◈/,
   /innerHTML/,
   /unsafeHTML/,
-  /font-size:\s*(?!inherit|var\(--p2b-size\))/,
+  /font-size:(?!\s*(?:inherit|var\(--p2b-size\)))/,
+];
+
+const [BOX_SHADOW, BORDER_RADIUS, FONT_SIZE] = [
+  BANNED_PATTERNS[1]!,
+  BANNED_PATTERNS[2]!,
+  BANNED_PATTERNS[BANNED_PATTERNS.length - 1]!,
 ];
 
 describe('TUI 样式清扫（设计 §1）', () => {
+  it('禁用正则不会因 \\s* 回溯而误判合法写法（冒号后带空格）', () => {
+    expect('border-radius: 0;').not.toMatch(BORDER_RADIUS);
+    expect('box-shadow: none;').not.toMatch(BOX_SHADOW);
+    expect('font-size: inherit;').not.toMatch(FONT_SIZE);
+    expect('font-size: var(--p2b-size);').not.toMatch(FONT_SIZE);
+    expect('border-radius: 4px;').toMatch(BORDER_RADIUS);
+    expect('box-shadow: 0 1px red;').toMatch(BOX_SHADOW);
+    expect('font-size: 12px;').toMatch(FONT_SIZE);
+  });
+
+
   it('theme.ts 不含装饰性 CSS、旧 token 或禁用标记，并声明 color-scheme: dark', async () => {
     const source = readSource(THEME_PATH);
     for (const pattern of BANNED_PATTERNS) {

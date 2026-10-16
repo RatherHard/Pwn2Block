@@ -34,10 +34,10 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         flex-wrap: wrap;
       }
       .banner .mark {
-        font-size:inherit;
+        font-size: inherit;
       }
       .banner strong {
-        font-size:inherit;
+        font-size: inherit;
         letter-spacing: 0.04em;
       }
       .ok .mark,
@@ -59,7 +59,7 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         margin: 0.55rem 0 0;
         padding: 0.55rem 0.7rem;
         border-left: 3px solid var(--p2b-changed);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-changed);
         background: var(--p2b-bg);
       }
@@ -73,7 +73,7 @@ export class Pwn2BlockVerdictPanel extends LitElement {
       .flag code {
         padding: 0.35rem 0.65rem;
         border: 1px solid var(--p2b-ip);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-ip);
         background: var(--p2b-bg);
         user-select: all;

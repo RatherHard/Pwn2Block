@@ -26,7 +26,7 @@ export const terminalTheme = css`
     --p2b-topbar-h: 2.5rem;
     color-scheme: dark;
     font-family: var(--p2b-font);
-    font-size:var(--p2b-size);
+    font-size: var(--p2b-size);
     line-height: 1.5;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
@@ -42,7 +42,7 @@ export const sharedStyles = css`
   h3 {
     margin: 0;
     color: var(--p2b-fg);
-    font-size:inherit;
+    font-size: inherit;
     font-weight: 700;
     letter-spacing: 0.04em;
   }
@@ -61,7 +61,7 @@ export const sharedStyles = css`
     min-height: 2rem;
     padding: 0.34rem 0.4rem;
     border: 1px solid var(--p2b-line);
-    border-radius:0;
+    border-radius: 0;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
     font-family: inherit;
@@ -97,7 +97,7 @@ export const sharedStyles = css`
     min-height: 2rem;
     padding: 0.3rem 0.55rem;
     border: 1px solid var(--p2b-line);
-    border-radius:0;
+    border-radius: 0;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
     outline: none;
@@ -180,7 +180,7 @@ export const sharedStyles = css`
 
   .panel {
     border: 1px solid var(--p2b-line);
-    border-radius:0;
+    border-radius: 0;
     background: var(--p2b-bg);
   }
 
@@ -192,7 +192,7 @@ export const sharedStyles = css`
   .box {
     position: relative;
     border: 1px solid var(--p2b-line);
-    border-radius:0;
+    border-radius: 0;
     background: var(--p2b-bg);
   }
 

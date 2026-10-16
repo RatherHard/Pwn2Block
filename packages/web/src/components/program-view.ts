@@ -43,7 +43,7 @@ export class Pwn2BlockProgramView extends LitElement {
         text-align: left;
         background: none;
         border: 1px solid transparent;
-        border-radius:0;
+        border-radius: 0;
         padding: 0.05rem 0.3rem;
       }
       button.row:hover:not(:disabled) {

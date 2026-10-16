@@ -64,7 +64,7 @@ export class Pwn2BlockTopBar extends LitElement {
         min-height: 2rem;
         padding: 0.3rem 0.75rem;
         border: 1px solid transparent;
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-dim);
         cursor: pointer;
         list-style: none;
@@ -95,7 +95,7 @@ export class Pwn2BlockTopBar extends LitElement {
         margin-top: 0.45rem;
         padding: 0.8rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       ul {
@@ -109,7 +109,7 @@ export class Pwn2BlockTopBar extends LitElement {
         align-items: center;
         gap: 0.65rem;
         padding: 0.45rem 0.35rem;
-        border-radius:0;
+        border-radius: 0;
       }
       li:hover {
         color: var(--p2b-bg);
@@ -128,7 +128,7 @@ export class Pwn2BlockTopBar extends LitElement {
       }
       .desc {
         color: var(--p2b-dim);
-        font-size:inherit;
+        font-size: inherit;
       }
       .order {
         display: flex;
@@ -144,7 +144,7 @@ export class Pwn2BlockTopBar extends LitElement {
         margin-left: auto;
         padding: 0.2rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       .modes button {
@@ -159,10 +159,10 @@ export class Pwn2BlockTopBar extends LitElement {
       kbd {
         padding: 0.1rem 0.35rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-fg);
         background: var(--p2b-bg);
-        font-size:inherit;
+        font-size: inherit;
       }
       @media (max-width: 620px) {
         .bar {

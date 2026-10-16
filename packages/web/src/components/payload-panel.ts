@@ -57,7 +57,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         inset: 0;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       #blockly-host .blocklySvg {
@@ -71,7 +71,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       #blockly-host .blocklyTreeRow {
         margin: 0.2rem 0.35rem;
         border-left: 2px solid transparent;
-        border-radius:0;
+        border-radius: 0;
       }
       #blockly-host .blocklyTreeRow:hover,
       #blockly-host .blocklyTreeSelected {
@@ -91,7 +91,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         min-height: 16rem;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
       }
       .placeholder {
         position: absolute;
@@ -100,7 +100,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         place-items: center;
         padding: 1.5rem;
         border: 1px dashed var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-dim);
         background: var(--p2b-bg);
         text-align: center;
@@ -115,14 +115,14 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         min-height: 4rem;
         padding: 0.75rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       .mode-hint {
         margin: 0 0 0.65rem;
         padding: 0.5rem 0.65rem;
         border-left: 3px solid var(--p2b-changed);
-        border-radius:0;
+        border-radius: 0;
         color: var(--p2b-changed);
         background: var(--p2b-bg);
       }

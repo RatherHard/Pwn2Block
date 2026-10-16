@@ -39,7 +39,7 @@ export class Pwn2BlockRunMenu extends LitElement {
       .reasons {
         margin: 0.3rem 0 0;
         color: var(--p2b-changed);
-        font-size:inherit;
+        font-size: inherit;
       }
       .reasons summary { cursor: pointer; }
       .reasons ul { margin: 0.4rem 0; padding-left: 1.2rem; }

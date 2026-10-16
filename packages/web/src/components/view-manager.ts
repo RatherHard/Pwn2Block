@@ -100,7 +100,7 @@ export class Pwn2BlockViewManager extends LitElement {
         border-bottom: 1px solid var(--p2b-line);
         color: var(--p2b-dim);
         background: var(--p2b-bg);
-        font-size:inherit;
+        font-size: inherit;
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }

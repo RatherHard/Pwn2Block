@@ -74,7 +74,7 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0 1rem;
         border: 1px solid var(--p2b-line);
         border-top: 0;
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       .notice {
@@ -84,7 +84,7 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       .notice.error {
@@ -109,7 +109,7 @@ export class Pwn2BlockApp extends LitElement {
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       .status.ok {
@@ -133,7 +133,7 @@ export class Pwn2BlockApp extends LitElement {
       }
       .status .marker {
         margin-right: 0.3rem;
-        font-size:inherit;
+        font-size: inherit;
       }
       main {
         flex: 1;
@@ -150,7 +150,7 @@ export class Pwn2BlockApp extends LitElement {
         min-height: 0;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
       }
       .left {
         display: flex;
@@ -182,7 +182,7 @@ export class Pwn2BlockApp extends LitElement {
         gap: 1rem;
         padding: 0.9rem 1rem;
         border: 1px solid var(--p2b-line);
-        border-radius:0;
+        border-radius: 0;
         background: var(--p2b-bg);
       }
       .boot .lead {
