@@ -12,6 +12,7 @@ import { formatAddrShort } from '../viewmodel/format';
 import { funcLabels } from '../viewmodel/labels';
 import { roleValue } from '../viewmodel/roles';
 import { sharedStyles, terminalTheme } from '../theme';
+import { scrollRowInSlot } from './view-scroll';
 import type { ViewContext } from './view-context';
 
 export class Pwn2BlockDisasmView extends LitElement {
@@ -190,18 +191,21 @@ export class Pwn2BlockDisasmView extends LitElement {
     this.requestUpdate();
   }
 
-  /**
-   * `ip` 行与刚点过的目标行自动滚入视野（05 §2.3）。
-   *
-   * 先做能力检测：`scrollIntoView` 不是所有环境都有（jsdom 就没有），
-   * 缺了它只是不滚动，不该把一次渲染变成未捕获异常。
-   */
-  override updated(): void {
+  /** 新投影恢复 ip 跟随，普通界面重绘保留用户手动选择的目标。 */
+  override willUpdate(changed: Map<PropertyKey, unknown>): void {
+    if (!changed.has('context') || this.context === undefined) return;
+    const previous = changed.get('context') as ViewContext | undefined;
+    if (previous?.projection === this.context.projection) return;
+    this.focusedAddr = undefined;
+    this.focusMiss = '';
+  }
+
+  /** 在所属槽位内显示 ip 或刚点过的目标行（05 §2.3）。 */
+  override updated(changed: Map<PropertyKey, unknown>): void {
+    const previous = changed.get('context') as ViewContext | undefined;
+    if (changed.has('context') && previous?.projection === this.context?.projection) return;
     const selector = this.focusedAddr === undefined ? 'tr.ip' : 'tr.focused';
-    const element = this.renderRoot.querySelector(selector);
-    if (!(element instanceof HTMLElement)) return;
-    if (typeof element.scrollIntoView !== 'function') return;
-    element.scrollIntoView({ block: 'nearest' });
+    scrollRowInSlot(this, this.renderRoot.querySelector(selector));
   }
 }
 

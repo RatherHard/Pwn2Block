@@ -12,8 +12,9 @@ import { live } from 'lit/directives/live.js';
 import { alignDown, formatAddrShort, parseAddrInput } from '../viewmodel/format';
 import { searchVisibleBytes, type ByteSearchMode } from '../viewmodel/search';
 import { roleValue } from '../viewmodel/roles';
-import { buildStackRows, refollowBase, type StackRowModel } from '../viewmodel/stack';
+import { buildStackRows, findRowIndex, refollowBase, type StackRowModel } from '../viewmodel/stack';
 import { sharedStyles, terminalTheme } from '../theme';
+import { scrollRowInSlot } from './view-scroll';
 import type { ViewContext } from './view-context';
 
 export class Pwn2BlockStackView extends LitElement {
@@ -108,6 +109,7 @@ export class Pwn2BlockStackView extends LitElement {
   private searchMode: ByteSearchMode = 'hex';
   private searchMessage = '';
   private searchInvalid = false;
+  private scrollAddr?: bigint;
 
   override render() {
     const rows = this.rows();
@@ -187,7 +189,7 @@ export class Pwn2BlockStackView extends LitElement {
   private renderRow(row: StackRowModel) {
     const chain = row.chain;
     return html`
-      <tr class=${row.changed ? 'changed' : ''}>
+      <tr data-row=${row.index} class=${`${row.changed ? 'changed' : ''} ${row.anchors.some((anchor) => anchor.role === 'sp') ? 'sp' : ''}`}>
         <th class="addr" scope="row">${row.address}</th>
         <td class="anchor">
           ${row.anchors.map((anchor) => (anchor.role ? `${anchor.role} (${anchor.name})` : anchor.name)).join(' ')}
@@ -248,9 +250,24 @@ export class Pwn2BlockStackView extends LitElement {
 
   /** 表格没有虚拟滚动，一次 40 行；`sp` 移出窗口时自动回到跟随状态（05 §2.2）。 */
   override willUpdate(changed: Map<PropertyKey, unknown>): void {
-    if (!changed.has('context') || this.jumpBase === undefined || this.context === undefined) return;
+    if (!changed.has('context') || this.context === undefined) return;
+    const previous = changed.get('context') as ViewContext | undefined;
+    if (previous?.projection === this.context.projection) return;
+    this.searchMessage = '';
+    this.searchInvalid = false;
+    if (this.jumpBase === undefined) return;
     const rows = this.rows();
     if (refollowBase(rows, this.spValue(), this.wordBytes()) !== undefined) this.jumpBase = undefined;
+  }
+
+  override updated(changed: Map<PropertyKey, unknown>): void {
+    const previous = changed.get('context') as ViewContext | undefined;
+    const newProjection = changed.has('context') && previous?.projection !== this.context?.projection;
+    const addr = this.scrollAddr ?? (newProjection ? this.spValue() : undefined);
+    this.scrollAddr = undefined;
+    if (addr === undefined) return;
+    const index = findRowIndex(this.rows(), addr);
+    if (index !== undefined) scrollRowInSlot(this, this.renderRoot.querySelector(`[data-row="${index}"]`));
   }
 
   // 内部状态（跳转起点、对齐偏移、错误文案）不是响应式属性，改完要显式请求重绘。
@@ -265,6 +282,7 @@ export class Pwn2BlockStackView extends LitElement {
   }
 
   private jumpTo(addr: bigint): void {
+    this.scrollAddr = addr;
     this.inputError = '';
     this.jumpBase = alignDown(addr, this.wordBytes());
     this.inputText = formatAddrShort(addr);
@@ -272,6 +290,7 @@ export class Pwn2BlockStackView extends LitElement {
   }
 
   private followSp(): void {
+    this.scrollAddr = this.spValue();
     this.inputError = '';
     this.jumpBase = undefined;
     this.inputText = '';
