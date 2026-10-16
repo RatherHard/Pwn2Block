@@ -1,0 +1,137 @@
+{
+  "id": "stackframe",
+  "title": "栈帧",
+  "briefing": "这一关考的是**栈帧**：函数怎么建立自己的帧、又怎么用帧把返回地址找回来。\n\n`vuln`（0x400000）是一条完整的栈帧链：\n\n1. `push rbp` —— 把调用者的帧指针压到栈上（这就是 saved rbp）；\n2. `mov rbp, rsp` —— 帧指针指向刚压进来的那个字，帧从这一刻建立；\n3. `mov rsi, buf`、`mov rdx, 0x20`、`read(0, buf, 0x20)` —— 往帧内的 `buf` 读入最多 0x20 字节；\n4. `leave` —— 收栈：`rsp = rbp`，然后把 `[rbp]` 弹回 `rbp`；\n5. `ret` —— 从栈顶取出返回地址，跳过去。\n\n程序**停在 `mov rbp, rsp` 执行完之后**（也就是 `read` 之前），所以前两条建帧指令已经生效：`RSP = RBP = 0x7ffffef8`，`RBP` 正指向帧底那个 saved rbp 字。栈上的返回地址现在指向 `lose`（`syscall 60`，直接退出）。\n\n**目标**：让程序返回到 `win`（它的地址在指令视图里能看到），由 `win` 把 `FLAG` 置 1 并结束。\n\n**试什么**：用工具箱里的 `capture(buf)` 喂一段字节，再单步或运行。写入从 `buf`（= `0x7ffffee8`）开始连续覆盖，写多了就会越过 `buf`、越过 saved rbp，一直碰到返回地址。**关键问题是：返回地址相对于 `RBP` 在哪个位置？** 寄存器视图里能看到 `RBP` 的当前值，栈视图里能看到 saved rbp 与 ret addr 两段的位置——把这两者对上，答案就出来了。\n\n只想让程序走完、不打算改返回地址也可以直接 `run`：它会一路 `leave; ret` 回到 `lose` 然后干净退出（判负）。",
+  "archBits": 64,
+  "encoding": {
+    "preset": "x86ish",
+    "remove": [
+      "0xb8",
+      "0xb9",
+      "0xbb",
+      "0xbc",
+      "0xbd",
+      "0x88",
+      "0x89",
+      "0x8a",
+      "0x8b",
+      "0x8e",
+      "0x8f",
+      "0x86",
+      "0x87",
+      "0x51",
+      "0x52",
+      "0x53",
+      "0x54",
+      "0x56",
+      "0x57",
+      "0x68",
+      "0x58",
+      "0x59",
+      "0x5a",
+      "0x5b",
+      "0x5c",
+      "0x5d",
+      "0x5e",
+      "0x5f",
+      "0x00",
+      "0x01",
+      "0x02",
+      "0x04",
+      "0x03",
+      "0x28",
+      "0x29",
+      "0x2a",
+      "0x2b",
+      "0x38",
+      "0x39",
+      "0x3a",
+      "0x3b",
+      "0x20",
+      "0x21",
+      "0x24",
+      "0x08",
+      "0x09",
+      "0x0c",
+      "0x30",
+      "0x31",
+      "0x34",
+      "0xc0",
+      "0xc1",
+      "0xd2",
+      "0xd3",
+      "0xc4",
+      "0xc5",
+      "0xd6",
+      "0xd7",
+      "0xe9",
+      "0xff",
+      "0x26",
+      "0x74",
+      "0x75",
+      "0x72",
+      "0x73",
+      "0xe8",
+      "0x9a",
+      "0x10",
+      "0x90"
+    ],
+    "add": [
+      { "opcode": "0x05", "op": "mov", "operands": ["reg:RBP", "reg:RSP"], "mnemonic": "mov rbp, rsp" },
+      { "opcode": "0x11", "op": "syscall", "operands": ["const:0"], "mnemonic": "syscall read" },
+      { "opcode": "0xb7", "op": "mov", "operands": ["reg:RAX", "imm"], "mnemonic": "mov rax, imm" }
+    ]
+  },
+  "syscallAbi": { "nr": "RAX", "args": ["RDI", "RSI", "RDX"], "ret": "RAX" },
+  "syscalls": [
+    { "nr": 0, "name": "read", "kind": "read", "doc": "read(fd, buf, count)，payload 由 capture(buf) 喂进 stdin" },
+    { "nr": 60, "name": "exit", "kind": "exit", "doc": "exit(code)，退出码取自 RDI" },
+    {
+      "nr": 99,
+      "name": "win",
+      "kind": "custom",
+      "doc": "置 FLAG=1 并退出",
+      "effects": [
+        { "type": "set_reg", "reg": "FLAG", "value": "0x1" },
+        { "type": "exit" }
+      ]
+    }
+  ],
+  "fds": [{ "fd": 0, "name": "stdin", "kind": "stdin" }],
+  "labels": [
+    { "name": "vuln", "addr": "0x400000", "size": 32, "kind": "func" },
+    { "name": "win", "addr": "0x400020", "size": 10, "kind": "func" },
+    { "name": "lose", "addr": "0x40002a", "size": 1, "kind": "func" },
+    { "name": "buf", "addr": "0x7ffffee8", "size": 16, "kind": "buffer" },
+    { "name": "saved rbp", "addr": "0x7ffffef8", "size": 8, "kind": "saved_bp" },
+    { "name": "ret addr", "addr": "0x7fffff00", "size": 8, "kind": "ret_addr" }
+  ],
+  "allowedActions": ["step", "run", "undo", "reset"],
+  "authorBlocks": [
+    {
+      "id": "capture",
+      "label": "capture(buf)",
+      "tooltip": "把字节喂给 read(0, buf, 0x20)：不检查 buf 的边界，写多少就覆盖多少",
+      "params": [{ "name": "data", "type": "bytes" }],
+      "expand": [{ "type": "feed", "hex": "$data" }]
+    }
+  ],
+  "hints": [
+    {
+      "text": "先看栈视图：`buf`、`saved rbp`、`ret addr` 三段是连在一起的；再看寄存器视图里 `RBP` 的值，它正好落在其中一段上。程序执行 `leave` 时要用 `RBP` 找回返回地址，你也可以用同一个 `RBP` 算出返回地址在哪。"
+    },
+    {
+      "text": "`leave` 做两件事：`rsp = rbp`，然后从 `[rbp]` 弹出一个字到 `rbp`。接着 `ret` 从 `rsp` 取出跳转目标——那个位置相对 `RBP` 是往上（地址更大）还是往下？差几个字（一个字 8 字节）？"
+    },
+    {
+      "text": "把 `capture` 喂的字节按顺序摆一遍：从 `buf` 起先写满 `buf`，再写满 saved rbp 那 8 字节，之后 8 个字节就是返回地址。地址这类多字节数值按小端序存放（最低位字节放在最低地址），所以要把 `win` 的地址按字节倒着写。",
+      "unlockAfterFailures": 3
+    }
+  ],
+  "errorNotes": {
+    "memory_fault": "程序访问了没映射或权限不足的地址。本题只有一处程序访存：`syscall read` 往 buf（= `0x7ffffee8`，在可读写的栈段里）写字节，正常不会出错。真正会撞上它的是「返回地址改成了没映射的地址」——`ret` 取出的 8 个字节不是你想要的地址时，先检查这 8 个字节的个数和顺序：少写一个字节，后面就全错位了。",
+    "invalid_ip": "`ret` 跳到了一个不可执行或未映射的地址。检查你覆盖 ret addr 的 8 个字节：`win` 的地址在指令视图里能看到，按小端序（低位字节在低地址）写在紧接 saved rbp 的那 8 个字节里。",
+    "invalid_instruction": "`ret` 跳过去的地址确实可执行，但那里的字节不在本题的编码表里——通常意味着返回地址只改对了一半（比如高低字节写反，跳进了另一条指令的中间）。对着指令视图逐字节核对你写的 8 个字节。",
+    "inaccessible_address": "`feed` 只往 stdin 缓冲追加字节，永远写不到内存；本题也没有开放裸 `write_bytes`，所以这条只在你自己往 stdin 里塞超过 4KB 时出现。正常做题撞不上它。"
+  }
+}
