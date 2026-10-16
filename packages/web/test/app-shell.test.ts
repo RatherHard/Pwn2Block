@@ -260,11 +260,11 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
     next.connect(previous);
     // 先编译出产物，排除「没有产物」这个同样会禁用执行按钮的原因。
-    clickRun(app, '编译');
+    // 程序化装载不会派发 Blockly 事件，所以自己调 recompile()（编译不再是按钮）。
+    panelOf(app).recompile();
     await settle(app);
 
     const buttonOf = (label: string) => runButtons(app).find((each) => each.textContent?.trim() === label);
-    expect(buttonOf('试运行')?.disabled).toBe(true);
     expect(buttonOf('单步')?.disabled).toBe(true);
     expect(buttonOf('运行 N 步')?.disabled).toBe(true);
     expect(buttonOf('重置')?.disabled).toBe(false);
@@ -301,11 +301,10 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     const previous = step.previousConnection;
     if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
     next.connect(previous);
-    clickRun(app, '编译');
+    panelOf(app).recompile();
     await settle(app);
 
     const buttonOf = (label: string) => runButtons(app).find((each) => each.textContent?.trim() === label);
-    expect(buttonOf('试运行')?.disabled).toBe(true);
     expect(buttonOf('单步')?.disabled).toBe(true);
     expect(buttonOf('运行 N 步')?.disabled).toBe(true);
     // 回退类与提交不受影响（04 §1.1）：回退类的深度判定见 controller 的用例，
@@ -316,7 +315,8 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     expect(textOf(runMenuOf(app))).toContain('已被判负');
     expect(textOf(runMenuOf(app))).not.toContain('程序已退出');
 
-    clickRun(app, '试运行');
+    // 执行类按钮点了也不发请求（「运行」先 reset，不受终止态限制，见 controller-run.test.ts）。
+    clickRun(app, '单步');
     await settle(app);
     expect(api.calls.some((call) => call.method === 'actions')).toBe(false);
   });
@@ -337,7 +337,7 @@ describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
     const previous = step.previousConnection;
     if (next === null || previous === null) throw new Error('语句连接不存在：定义有误');
     next.connect(previous);
-    clickRun(mounted.app, '编译');
+    panelOf(mounted.app).recompile();
     await settle(mounted.app);
     return mounted;
   }
@@ -698,7 +698,8 @@ describe('启动失败的两种布局与重试（D5 观察）', () => {
     expect(app.renderRoot.querySelector('.left')?.textContent).toContain('暂时开不了新会话');
     expect(app.renderRoot.querySelector('.notice')?.textContent).toContain('请求过于频繁');
     const buttons = runButtons(app);
-    expect(buttons).toHaveLength(8);
+    // 顶栏菜单六个按钮：编译与试运行已删除，「运行 / 终止」由 payloadControls 单独给出。
+    expect(buttons).toHaveLength(6);
     expect(buttons.every((button) => button.disabled)).toBe(true);
     expect(workspace?.getAllBlocks(false).map((block) => block.type)).toContain(BLOCK_TYPES.actionStep);
     const ids = workspace?.getAllBlocks(false).map((block) => block.id);

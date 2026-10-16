@@ -237,6 +237,7 @@ export function makeControllerState(overrides: Partial<ControllerState> = {}): C
     busy: false,
     queued: 0,
     sessionExpired: false,
+    running: false,
     ...overrides,
   };
 }

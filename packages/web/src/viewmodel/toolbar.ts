@@ -1,12 +1,12 @@
 /**
- * 运行菜单 / payload 工具栏的按钮模型（05 §1、§3、§6）。纯函数，两处菜单共用同一份判定。
+ * 运行菜单与 payload「运行 / 终止」的按钮模型（05 §1、§3、§6）。纯函数，界面与控制器共用同一份判定。
  *
- * 顶部「运行」菜单与 payload 工具栏等价（05 §1），所以按钮的可用性与禁用原因只能有**一处**
- * 事实来源，否则两处的禁用状态会漂移。组件只负责把这里的模型渲染成按钮并把
- * `RunCommand` 派发出去。
+ * 按钮的可用性与禁用原因只能有**一处**事实来源，否则界面与控制器的门禁会漂移。
+ * 组件只负责把这里的模型渲染成按钮并把 `RunCommand` 派发出去。
  *
- * 终止态口径（04 §1.1）：**`failed`（判负）** 与 **已退出** 都是终止态，两者都禁用执行类动作
- * （试运行 / 单步 / 运行 N 步），**回退类（后退一步 / 撤销 / 重置）与「提交判题」不受影响**。
+ * 终止态口径（04 §1.1）：**`failed`（判负）** 与 **已退出** 都是终止态，两者都禁用单步类动作
+ * （单步 / 运行 N 步），**回退类（后退一步 / 撤销 / 重置）、「运行」与「提交判题」不受影响**——
+ * 「运行」总是先 reset 再从头执行，终止态拦不住它。
  * 判定只看 `RunMenuInput.terminal` 这一个字段，由调用方用 `viewmodel/session.ts` 的
  * `terminalReasonOf()` 从**调试实例投影**派生，不允许各处自己拼 `status`。
  */
@@ -20,9 +20,13 @@ import {
 } from './program';
 import type { PageMode, TerminalReason } from './session';
 
-/** 工具栏能做的事。「编译」是本地操作，不是 API 请求，所以单独一类。 */
+/**
+ * 工具栏能做的事。编译随积木改动自动进行，不再是按钮。
+ * `abort` 不是 API 请求：它只让控制器停止发送「运行」的后续分片。
+ */
 export type RunCommand =
-  | { readonly kind: 'trial-run' }
+  | { readonly kind: 'run-all' }
+  | { readonly kind: 'abort' }
   | { readonly kind: 'step' }
   | { readonly kind: 'run-n'; readonly count: number }
   | { readonly kind: 'step-back' }
@@ -30,7 +34,7 @@ export type RunCommand =
   | { readonly kind: 'reset' }
   | { readonly kind: 'submit' };
 
-export type RunButtonId = RunCommand['kind'] | 'compile';
+export type RunButtonId = RunCommand['kind'];
 
 export interface RunButtonModel {
   readonly id: RunButtonId;
@@ -128,12 +132,9 @@ function remainingActions(input: RunMenuInput): number {
   return total - cursor;
 }
 
-/**
- * 「试运行 / 单步」在程序区动作用完时退化成 `run` / `step`（05 §3），
- * 所以退化路径要检查 `allowedActions`。
- */
-function fallbackBlocked(input: RunMenuInput, name: 'run' | 'step'): string | undefined {
-  if (remainingActions(input) > 0) return undefined;
+/** 剩余（或全部）动作为 0 时会退化成 `name`，退化路径要检查 `allowedActions`（05 §3）。 */
+function fallbackBlocked(remaining: number, input: RunMenuInput, name: 'run' | 'step'): string | undefined {
+  if (remaining > 0) return undefined;
   if (input.allowedActions.includes(name)) return undefined;
   return `没有剩余动作，会退化成 ${name}，但本题不允许 ${name} 动作`;
 }
@@ -161,25 +162,6 @@ interface Spec {
 
 const SPECS: readonly Spec[] = [
   {
-    id: 'compile',
-    label: '编译',
-    hint: '把积木编译成原子动作序列，不提交',
-    blocked: (input) => firstReason(sessionBlocked(input)),
-  },
-  {
-    id: 'trial-run',
-    label: '试运行',
-    hint: '把剩余动作提交到调试实例；序列用完时提交 run',
-    blocked: (input) =>
-      firstReason(
-        sessionBlocked(input),
-        debugBlocked(input),
-        terminalBlocked(input),
-        artifactBlocked(input),
-        fallbackBlocked(input, 'run'),
-      ),
-  },
-  {
     id: 'step',
     label: '单步',
     hint: '提交下一个动作；序列用完时提交 step',
@@ -189,7 +171,7 @@ const SPECS: readonly Spec[] = [
         debugBlocked(input),
         terminalBlocked(input),
         artifactBlocked(input),
-        fallbackBlocked(input, 'step'),
+        fallbackBlocked(remainingActions(input), input, 'step'),
       ),
   },
   {
@@ -235,17 +217,67 @@ const SPECS: readonly Spec[] = [
   },
 ];
 
+function toButton(spec: Spec, input: RunMenuInput): RunButtonModel {
+  const verdict = gate(spec.blocked(input));
+  return {
+    id: spec.id,
+    label: spec.label,
+    hint: spec.hint,
+    enabled: verdict.enabled,
+    ...(verdict.reason === undefined ? {} : { disabledReason: verdict.reason }),
+  };
+}
+
+/** 顶栏「运行」菜单：单步、运行 N 步、回退类与提交。 */
 export function runMenuModel(input: RunMenuInput): readonly RunButtonModel[] {
-  return SPECS.map((spec) => {
-    const verdict = gate(spec.blocked(input));
-    return {
-      id: spec.id,
-      label: spec.label,
-      hint: spec.hint,
-      enabled: verdict.enabled,
-      ...(verdict.reason === undefined ? {} : { disabledReason: verdict.reason }),
-    };
-  });
+  return SPECS.map((spec) => toButton(spec, input));
+}
+
+/** 「终止」不可用时的原因。 */
+export const MESSAGE_NOT_RUNNING = '没有正在进行的运行';
+/** 一轮「运行」还在发分片时，再点「运行」的禁用原因。 */
+export const MESSAGE_RUNNING = '正在运行：可以点「终止」';
+
+export interface PayloadControlsInput extends RunMenuInput {
+  /** 控制器里是否有一轮「运行」尚未结束（从点击到最后一片响应 / 失败 / 终止）。 */
+  readonly running: boolean;
+}
+
+export interface PayloadControlsModel {
+  readonly run: RunButtonModel;
+  readonly abort: RunButtonModel;
+}
+
+/**
+ * 「运行」的禁用原因，顺序即优先级：会话 → 判题模式 → 产物 → 空程序且不允许 run → 正在运行。
+ * 不看终止态：运行先 reset，终止态拦不住它。空程序判定看**全部**动作条数而不是游标剩余，
+ * 因为运行总是从头执行（游标在末尾的非空程序照样能跑）。reset 是回退类，不受 `allowedActions` 约束。
+ */
+const RUN_SPEC: Spec = {
+  id: 'run-all',
+  label: '运行',
+  hint: '重置调试实例后从头执行整个程序',
+  blocked: (input) =>
+    firstReason(
+      sessionBlocked(input),
+      debugBlocked(input),
+      artifactBlocked(input),
+      fallbackBlocked(input.artifact?.actions.length ?? 0, input, 'run'),
+    ),
+};
+
+export function payloadControls(input: PayloadControlsInput): PayloadControlsModel {
+  const runSpec: Spec = {
+    ...RUN_SPEC,
+    blocked: (each) => firstReason(RUN_SPEC.blocked(each), input.running ? MESSAGE_RUNNING : undefined),
+  };
+  const abortSpec: Spec = {
+    id: 'abort',
+    label: '终止',
+    hint: '停止发送后续分片',
+    blocked: () => (input.running ? undefined : MESSAGE_NOT_RUNNING),
+  };
+  return { run: toButton(runSpec, input), abort: toButton(abortSpec, input) };
 }
 
 /** 禁用原因的纯文本清单：颜色不是唯一信息载体（05 §7）。 */

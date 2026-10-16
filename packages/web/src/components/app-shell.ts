@@ -28,7 +28,7 @@ import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
 import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
-import { runMenuModel, type RunCommand } from '../viewmodel/toolbar';
+import { runMenuModel } from '../viewmodel/toolbar';
 import {
   VIEW_KINDS,
   availableViews as availableViewsOf,
@@ -583,14 +583,9 @@ export class Pwn2BlockApp extends LitElement {
     return this.renderRoot.querySelector<Pwn2BlockPayloadPanel>('pwn2block-payload-panel') ?? undefined;
   }
 
-  /** 两处「运行」菜单共用：编译走面板的画布桥，其余命令交给控制器（05 §1 两处等价）。 */
+  /** 两处「运行」菜单共用：命令原样交给控制器，门禁由控制器复查（05 §1 两处等价）。 */
   private onRun = (event: Event): void => {
-    const command = (event as CustomEvent<RunMenuCommand>).detail;
-    if (command.kind === 'compile') {
-      this.panel()?.recompile();
-      return;
-    }
-    this.controller?.run(command as RunCommand);
+    this.controller?.run((event as CustomEvent<RunMenuCommand>).detail);
   };
 
   private onCompile = (event: Event): void => {

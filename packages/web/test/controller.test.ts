@@ -1,64 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { ApiClientError } from '../src/api';
-import { createSessionController, type CanvasPort, type SessionController } from '../src/viewmodel/controller';
+import { createSessionController, type CanvasPort } from '../src/viewmodel/controller';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
 import { readSession, writeSession, type KeyValueStore, type StoredSession } from '../src/viewmodel/storage';
 import { MESSAGE_EXITED, MESSAGE_FAILED } from '../src/viewmodel/toolbar';
 import {
+  actionsCalls,
+  compileInto,
+  flush,
+  methods,
+  open,
+  respondToChunks,
+  until,
+  type Harness,
+} from './controller-harness';
+import {
   FAKE_SESSION_ID,
   createFakeApi,
   createFakeTracker,
-  makeArtifact,
   makeReplay,
   makeSubmitResponse,
   repeatedActions,
-  type FakeApi,
-  type FakeApiOptions,
-  type FakeTracker,
 } from './fake-api';
-import type { CompiledAction } from '../src/compiler/types';
 import { makeProjection } from './helpers';
-
-async function until(predicate: () => boolean, label: string): Promise<void> {
-  for (let index = 0; index < 200; index += 1) {
-    if (predicate()) return;
-    await Promise.resolve();
-  }
-  throw new Error(`等待超时：${label}`);
-}
-
-async function flush(times = 10): Promise<void> {
-  for (let index = 0; index < times; index += 1) await Promise.resolve();
-}
-
-interface Harness {
-  readonly api: FakeApi;
-  readonly tracker: FakeTracker;
-  readonly controller: SessionController;
-}
-
-function actionsCalls(api: FakeApi): readonly { readonly actions?: readonly unknown[] }[] {
-  return api.calls.filter((call) => call.method === 'actions');
-}
-
-function methods(api: FakeApi): readonly string[] {
-  return api.calls.map((call) => call.method);
-}
-
-async function open(options: FakeApiOptions = {}): Promise<Harness> {
-  const api = createFakeApi(options);
-  const tracker = createFakeTracker();
-  const controller = createSessionController({ api: api.client, tracker: tracker.tracker });
-  controller.start();
-  await until(() => controller.state.phase === 'ready', '会话就绪');
-  return { api, tracker, controller };
-}
-
-/** 让假追踪器产出指定动作，并让控制器发布这份快照（真实路径是 compile 一次）。 */
-function compileInto(tracker: FakeTracker, controller: SessionController, actions: readonly CompiledAction[]): void {
-  tracker.setArtifact(makeArtifact(actions));
-  controller.compile({ blocks: [] });
-}
 
 describe('会话控制器：首屏与选题（04 §1、§5）', () => {
   it('只有一道题时直接开局：列表 → 题目 → 会话，投影进页面状态', async () => {
@@ -142,13 +106,14 @@ describe('会话控制器：串行请求（04 §1）', () => {
 });
 
 describe('会话控制器：门禁与产物过期（05 §3）', () => {
-  it('积木改动后试运行与提交都被拒，重新编译后恢复', async () => {
+  it('积木改动后运行与提交都被拒，重新编译后恢复', async () => {
     const { api, tracker, controller } = await open();
     compileInto(tracker, controller, [{ type: 'ret' }]);
     controller.noteEdit();
     expect(controller.state.artifact.stale).toBe(true);
 
-    controller.run({ kind: 'trial-run' });
+    controller.run({ kind: 'run-all' });
+    expect(controller.state.running).toBe(false);
     controller.run({ kind: 'submit' });
     expect(controller.state.notice?.text).toBe(MESSAGE_STALE);
     await flush();
@@ -267,86 +232,6 @@ describe('会话控制器：回退（04 §3、05 §6）', () => {
   });
 });
 
-describe('会话控制器：试运行与分块（04 §5、05 §3）', () => {
-  it('试运行按 512 分块提交剩余动作，序列用完退化成 run', async () => {
-    const { api, tracker, controller } = await open();
-    compileInto(tracker, controller, repeatedActions(600));
-
-    controller.run({ kind: 'trial-run' });
-    await until(() => controller.state.cursor === 600, '两块跑完');
-    const calls = actionsCalls(api);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.actions).toHaveLength(512);
-    expect(calls[1]?.actions).toHaveLength(88);
-
-    controller.run({ kind: 'trial-run' });
-    await until(() => actionsCalls(api).length === 3, '退化成 run');
-    expect(actionsCalls(api)[2]?.actions).toEqual([{ type: 'run' }]);
-    expect(controller.state.cursor).toBe(600);
-  });
-
-  it('513 个动作跨两片（512 + 1）：单批上限就是 MAX_ACTIONS_PER_REQUEST', async () => {
-    const { api, tracker, controller } = await open();
-    compileInto(tracker, controller, repeatedActions(513));
-
-    controller.run({ kind: 'trial-run' });
-    await until(() => controller.state.cursor === 513, '两片跑完');
-    const calls = actionsCalls(api);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.actions).toHaveLength(512);
-    expect(calls[1]?.actions).toHaveLength(1);
-    // 全程串行：第二片在第一片之后才发出（数组顺序就是发出顺序）。
-    expect(calls[0]?.actions?.[0]).toEqual({ type: 'ret' });
-  });
-
-  it('某片被拒绝时不再发后续片（服务端的停止语义跨片保持）', async () => {
-    const { api, tracker, controller } = await open();
-    compileInto(tracker, controller, repeatedActions(600));
-    api.setActionsResponse((actions) => ({
-      results: actions.map((action, index) =>
-        index === 0 ? { ok: false, action: action.type, error: { code: 'invalid_ip', message: '第一条就越界了' } } : { ok: true, action: action.type },
-      ),
-      executed: 0,
-      projection: makeProjection({ status: 'failed' }),
-      history: { undo: 0, stepBack: 0 },
-    }));
-
-    controller.run({ kind: 'trial-run' });
-    await until(() => actionsCalls(api).length === 1, '第一片发出');
-    await until(() => !controller.state.busy, '第一片结束');
-    expect(actionsCalls(api)).toHaveLength(1);
-    expect(controller.state.results[0]?.ok).toBe(false);
-  });
-
-  it('某片实际生效数少于提交数时也停止（executed 口径）', async () => {
-    const { api, tracker, controller } = await open();
-    compileInto(tracker, controller, repeatedActions(600));
-    api.setActionsResponse((actions) => ({
-      results: actions.map((action) => ({ ok: true, action: action.type })),
-      executed: actions.length - 1,
-      projection: makeProjection(),
-      history: { undo: 0, stepBack: 0 },
-    }));
-
-    controller.run({ kind: 'trial-run' });
-    await until(() => actionsCalls(api).length === 1, '第一片发出');
-    await until(() => !controller.state.busy, '第一片结束');
-    expect(actionsCalls(api)).toHaveLength(1);
-    expect(controller.state.cursor).toBe(512);
-  });
-
-  it('序列没用完时只提交剩下的动作（不会重复执行已跑过的部分）', async () => {
-    const { api, tracker, controller } = await open();
-    compileInto(tracker, controller, [{ type: 'ret' }, { type: 'ret' }, { type: 'ret' }]);
-
-    controller.run({ kind: 'step' });
-    await until(() => controller.state.cursor === 1, '先单步一次');
-    controller.run({ kind: 'trial-run' });
-    await until(() => controller.state.cursor === 3, '试运行剩余两个');
-    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'ret' }, { type: 'ret' }]);
-  });
-});
-
 describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、09 §8 第 10 条）', () => {
   /** 600 个动作 = 512 + 88：退出落在第一片末尾时，就是「退出恰好落在分片边界」。 */
   async function exitAtChunkBoundary(
@@ -354,18 +239,20 @@ describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、0
   ): Promise<Harness & { readonly firstChunkCalls: () => number }> {
     const harness = await open();
     compileInto(harness.tracker, harness.controller, repeatedActions(600));
-    harness.api.setActionsResponse((actions) => ({
+    // 运行先发 [reset]（照常成功），再发分片：这里只自定义分片的响应。
+    respondToChunks(harness.api, (actions) => ({
       // 该片每个动作都成功、executed 等于提交数：只看得见 status 的判据会认为还可以继续。
       results: actions.map((action) => ({ ok: true, action: action.type })),
       executed: actions.length,
       projection,
       history: { undo: 1, stepBack: 64 },
     }));
-    harness.controller.run({ kind: 'trial-run' });
-    await until(() => actionsCalls(harness.api).length === 1, '第一片发出');
+    harness.controller.run({ kind: 'run-all' });
+    await until(() => actionsCalls(harness.api).length === 2, '第一片发出');
     await until(() => !harness.controller.state.busy, '第一片结束');
     await flush();
-    return { ...harness, firstChunkCalls: () => actionsCalls(harness.api).length };
+    // 去掉打头的 [reset]，只数分片。
+    return { ...harness, firstChunkCalls: () => actionsCalls(harness.api).length - 1 };
   }
 
   it('退出落在 512 分片边界：不再发第二片，也不产生任何拒绝', async () => {
@@ -375,7 +262,7 @@ describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、0
     );
 
     expect(firstChunkCalls()).toBe(1);
-    expect(actionsCalls(api)[0]?.actions).toHaveLength(512);
+    expect(actionsCalls(api)[1]?.actions).toHaveLength(512);
     expect(controller.state.cursor).toBe(512);
     // 没有多发片 ⇒ 没有 not_executable 的拒绝、failures 也没有被白记一次。
     expect(controller.state.results).toHaveLength(512);
@@ -388,7 +275,7 @@ describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、0
       makeProjection({ status: 'exited', steps: 512 }),
     );
     expect(firstChunkCalls()).toBe(1);
-    expect(actionsCalls(api)).toHaveLength(1);
+    expect(actionsCalls(api)).toHaveLength(2);
     expect(controller.state.cursor).toBe(512);
   });
 
@@ -410,12 +297,12 @@ describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、0
     controller.run({ kind: 'run-n', count: 3 });
     await flush();
     expect(controller.state.notice?.text).toBe(MESSAGE_EXITED);
-    expect(actionsCalls(api)).toHaveLength(1);
+    expect(actionsCalls(api)).toHaveLength(2);
 
     // 回退类不受影响：reset 照发。
     controller.run({ kind: 'reset' });
-    await until(() => actionsCalls(api).length === 2, '重置发出');
-    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'reset' }]);
+    await until(() => actionsCalls(api).length === 3, '重置发出');
+    expect(actionsCalls(api)[2]?.actions).toEqual([{ type: 'reset' }]);
 
     // 「提交判题」不受影响：提交走判题实例，与调试实例是否退出无关。
     controller.run({ kind: 'submit' });
@@ -433,20 +320,25 @@ describe('会话控制器：终止态（failed / 已退出）（04 §1.1/§5、0
       }),
     );
     // 判负也是终止态：跨分片停止条件同样生效（这条来路以前完全没有门禁）。
-    expect(actionsCalls(api)).toHaveLength(1);
+    expect(actionsCalls(api)).toHaveLength(2);
     expect(controller.state.cursor).toBe(512);
 
     controller.run({ kind: 'step' });
-    controller.run({ kind: 'trial-run' });
     controller.run({ kind: 'run-n', count: 5 });
     await flush();
     // 文案与「已退出」分开：判负未必是 exit 造成的（04 §1.1）。
     expect(controller.state.notice?.text).toBe(MESSAGE_FAILED);
-    expect(actionsCalls(api)).toHaveLength(1);
+    expect(actionsCalls(api)).toHaveLength(2);
 
     controller.run({ kind: 'undo' });
-    await until(() => actionsCalls(api).length === 2, '撤销发出');
-    expect(actionsCalls(api)[1]?.actions).toEqual([{ type: 'undo' }]);
+    await until(() => actionsCalls(api).length === 3, '撤销发出');
+    expect(actionsCalls(api)[2]?.actions).toEqual([{ type: 'undo' }]);
+
+    // 「运行」不受终止态限制：它先 reset 再从头执行（假后端的分片仍判负，所以只发一片就停）。
+    controller.run({ kind: 'run-all' });
+    await until(() => actionsCalls(api).length === 5 && !controller.state.running, '运行发出');
+    expect(actionsCalls(api)[3]?.actions).toEqual([{ type: 'reset' }]);
+    expect(actionsCalls(api)[4]?.actions).toHaveLength(512);
 
     controller.run({ kind: 'submit' });
     await until(() => controller.state.verdict !== undefined, '提交完成');

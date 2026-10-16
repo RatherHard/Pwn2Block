@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { MESSAGE_STALE } from '../src/viewmodel/program';
+import { MESSAGE_NEED_COMPILE, MESSAGE_STALE } from '../src/viewmodel/program';
 import { terminalReasonOf } from '../src/viewmodel/session';
 import {
   MESSAGE_EXITED,
   MESSAGE_FAILED,
+  MESSAGE_NOT_RUNNING,
+  MESSAGE_RUNNING,
   buttonModel,
   disabledReasons,
+  payloadControls,
   runMenuModel,
   type RunButtonModel,
   type RunMenuInput,
@@ -32,12 +35,17 @@ function input(overrides: Partial<RunMenuInput> = {}): RunMenuInput {
   };
 }
 
+/** 就绪输入：会话可用、产物新鲜、调试模式。 */
+function readyInput(): RunMenuInput {
+  return input();
+}
+
+const emptyArtifact = makeArtifact([]);
+
 describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () => {
-  it('会话就绪且产物新鲜时，八个按钮都可用', () => {
+  it('会话就绪且产物新鲜时，六个按钮都可用', () => {
     const model = runMenuModel(input({ history: { undo: 1, stepBack: 3 } }));
     expect(model.map((button) => button.id)).toEqual([
-      'compile',
-      'trial-run',
       'step',
       'run-n',
       'step-back',
@@ -60,14 +68,14 @@ describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () =
     expect(buttonModel(model, 'submit')?.disabledReason).toContain('重新开始');
   });
 
-  it('产物过期（stale）时禁止试运行与提交，并提示重新编译', () => {
+  it('产物过期（stale）时禁止运行、单步与提交，并提示正在重新编译', () => {
     const model = runMenuModel(input({ stale: true }));
-    for (const id of ['trial-run', 'step', 'submit'] as const) {
+    for (const id of ['step', 'submit'] as const) {
       expect(buttonModel(model, id)?.enabled).toBe(false);
       expect(buttonModel(model, id)?.disabledReason).toBe(MESSAGE_STALE);
     }
-    // 编译与回退类不受影响。
-    expect(buttonModel(model, 'compile')?.enabled).toBe(true);
+    expect(payloadControls({ ...input({ stale: true }), running: false }).run.disabledReason).toBe(MESSAGE_STALE);
+    // 回退类不受影响。
     expect(buttonModel(model, 'reset')?.enabled).toBe(true);
   });
 
@@ -88,17 +96,22 @@ describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () =
     expect(buttonModel(outsideWindow, 'undo')?.enabled).toBe(true);
   });
 
-  it('程序区动作已用完时，退化提交 run / step 也要看 allowedActions（05 §3）', () => {
+  it('动作已用完时，单步退化提交 step 也要看 allowedActions（05 §3）', () => {
     const exhausted = { artifact: makeArtifact(ACTIONS), cursor: 2 };
     const allowed = runMenuModel(input(exhausted));
-    expect(buttonModel(allowed, 'trial-run')?.enabled).toBe(true);
     expect(buttonModel(allowed, 'step')?.enabled).toBe(true);
 
     const notAllowed = runMenuModel(
       input({ ...exhausted, allowedActions: ['write_bytes', 'push', 'ret'] }),
     );
-    expect(buttonModel(notAllowed, 'trial-run')?.disabledReason).toContain('不允许 run');
     expect(buttonModel(notAllowed, 'step')?.disabledReason).toContain('不允许 step');
+  });
+
+  it('非空程序、游标已在末尾：运行仍可用（运行总是先 reset 再从头执行）', () => {
+    const atEnd = { artifact: makeArtifact(ACTIONS), cursor: 2, allowedActions: ['write_bytes', 'push', 'ret'] };
+    const controls = payloadControls({ ...input(atEnd), running: false });
+    expect(controls.run.enabled).toBe(true);
+    expect(controls.run.disabledReason).toBeUndefined();
   });
 
   it('本题不允许 step 时「运行 N 步」禁用', () => {
@@ -110,17 +123,17 @@ describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () =
   it('空程序不允许提交（服务端请求体至少一个动作）', () => {
     const model = runMenuModel(input({ artifact: makeArtifact([]) }));
     expect(buttonModel(model, 'submit')?.disabledReason).toContain('没有动作');
-    // 试运行仍然可用：序列用完会退化成 run（05 §3）。
-    expect(buttonModel(model, 'trial-run')?.enabled).toBe(true);
+    // 运行仍然可用：空程序会在 reset 之后提交 run（本题允许 run）。
+    expect(payloadControls({ ...input({ artifact: makeArtifact([]) }), running: false }).run.enabled).toBe(true);
   });
 
-  it('判题结果模式下前七个按钮禁用但「提交判题」保持可用（提交不限次数）', () => {
+  it('判题结果模式下调试按钮禁用但「提交判题」保持可用（提交不限次数）', () => {
     const model = runMenuModel(input({ mode: 'verdict' }));
-    for (const id of ['trial-run', 'step', 'run-n', 'step-back', 'undo', 'reset'] as const) {
+    for (const id of ['step', 'run-n', 'step-back', 'undo', 'reset'] as const) {
       expect(buttonModel(model, id)?.enabled).toBe(false);
       expect(buttonModel(model, id)?.disabledReason).toContain('回到调试');
     }
-    expect(buttonModel(model, 'compile')?.enabled).toBe(true);
+    expect(payloadControls({ ...input({ mode: 'verdict' }), running: false }).run.disabledReason).toContain('回到调试');
     expect(buttonModel(model, 'submit')?.enabled).toBe(true);
   });
 
@@ -135,16 +148,42 @@ describe('运行菜单的可用性与禁用原因（05 §1、§3、§6）', () =
       input({ artifact: makeArtifact(repeatedActions(600)), cursor: 599 }),
     );
     expect(buttonModel(model, 'submit')?.enabled).toBe(true);
-    expect(buttonModel(model, 'trial-run')?.enabled).toBe(true);
+    expect(payloadControls({ ...input({ artifact: makeArtifact(repeatedActions(600)), cursor: 599 }), running: false }).run.enabled).toBe(true);
   });
 });
 
-/** 八按钮可用性矩阵：id → 是否可用。 */
+describe('payload 运行 / 终止按钮（payloadControls）', () => {
+  it('payloadControls：运行的禁用原因按顺序取第一条', () => {
+    const base = { ...readyInput(), running: false };
+    expect(payloadControls({ ...base, hasSession: false }).run.disabledReason).toBe('会话还没准备好：先在上面选一道题');
+    expect(payloadControls({ ...base, mode: 'verdict', artifact: undefined }).run.disabledReason).toMatch(/判题结果模式/);
+    expect(payloadControls({ ...base, artifact: undefined, running: true }).run.disabledReason).toBe(MESSAGE_NEED_COMPILE);
+    expect(payloadControls({ ...base, artifact: emptyArtifact, allowedActions: ['step'], running: true }).run.disabledReason).toMatch(/本题不允许 run/);
+    expect(payloadControls({ ...base, running: true }).run.disabledReason).toBe(MESSAGE_RUNNING);
+  });
+
+  it('终止态不禁用运行', () => expect(payloadControls({ ...readyInput(), terminal: 'failed', running: false }).run.enabled).toBe(true));
+
+  it('终止只在运行中可用', () => {
+    expect(payloadControls({ ...readyInput(), running: false }).abort).toMatchObject({ enabled: false, disabledReason: MESSAGE_NOT_RUNNING });
+    expect(payloadControls({ ...readyInput(), running: true }).abort.enabled).toBe(true);
+  });
+
+  it('按钮文案与说明', () => {
+    const controls = payloadControls({ ...readyInput(), running: false });
+    expect(controls.run).toMatchObject({ id: 'run-all', label: '运行', hint: '重置调试实例后从头执行整个程序' });
+    expect(controls.abort).toMatchObject({ id: 'abort', label: '终止', hint: '停止发送后续分片' });
+  });
+
+  it('顶栏菜单不再有编译与试运行', () => expect(runMenuModel(readyInput()).map((b) => b.id)).toEqual(['step', 'run-n', 'step-back', 'undo', 'reset', 'submit']));
+});
+
+/** 顶栏菜单按钮可用性矩阵：id → 是否可用。 */
 function enabledMatrix(model: readonly RunButtonModel[]): Readonly<Record<string, boolean>> {
   return Object.fromEntries(model.map((button) => [button.id, button.enabled]));
 }
 
-describe('终止态（failed / 已退出）禁执行类、放行回退类与提交（04 §1.1、05 §6、09 §8 第 10 条）', () => {
+describe('终止态（failed / 已退出）禁单步类、放行回退类、运行与提交（04 §1.1、05 §6、09 §8 第 10 条）', () => {
   /**
    * 判胜那一刻程序已经结束：`status` 是 `satisfied`，只有 `lastStop.reason === 'exit'`
    * 记得它退出了。这就是工具栏原来的盲区。
@@ -179,13 +218,11 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
     expect(terminalReasonOf(SATISFIED_STEP)).toBeUndefined();
   });
 
-  it('satisfied + lastStop.reason=exit：执行类三个按钮禁用，其余五个可用', () => {
+  it('satisfied + lastStop.reason=exit：单步类两个按钮禁用，其余四个可用；运行不受终止态影响', () => {
     const model = runMenuModel(
       input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(SATISFIED_EXIT) }),
     );
     expect(enabledMatrix(model)).toEqual({
-      compile: true,
-      'trial-run': false,
       step: false,
       'run-n': false,
       'step-back': true,
@@ -193,22 +230,21 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
       reset: true,
       submit: true,
     });
-    for (const id of ['trial-run', 'step', 'run-n'] as const) {
+    for (const id of ['step', 'run-n'] as const) {
       expect(buttonModel(model, id)?.disabledReason).toBe(MESSAGE_EXITED);
     }
     // 禁用原因写出来而不只是置灰（05 §6）。
     expect(disabledReasons(model)).toEqual([
-      `试运行：${MESSAGE_EXITED}`,
       `单步：${MESSAGE_EXITED}`,
       `运行 N 步：${MESSAGE_EXITED}`,
     ]);
+    // 运行先 reset 再从头执行：终止态不挡它。
+    expect(payloadControls({ ...input({ terminal: terminalReasonOf(SATISFIED_EXIT) }), running: false }).run.enabled).toBe(true);
   });
 
-  it('status=failed：执行类三个按钮禁用且原因写「判负」，回退类与提交放行', () => {
+  it('status=failed：单步类两个按钮禁用且原因写「判负」，回退类、运行与提交放行', () => {
     const model = runMenuModel(input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(FAILED) }));
     expect(enabledMatrix(model)).toEqual({
-      compile: true,
-      'trial-run': false,
       step: false,
       'run-n': false,
       'step-back': true,
@@ -218,7 +254,6 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
     });
     // 文案必须与「已退出」分开：判负未必是 exit 造成的（04 §1.1）。
     expect(disabledReasons(model)).toEqual([
-      `试运行：${MESSAGE_FAILED}`,
       `单步：${MESSAGE_FAILED}`,
       `运行 N 步：${MESSAGE_FAILED}`,
     ]);
@@ -231,13 +266,11 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
     }
   });
 
-  it('satisfied 且没有 lastStop：八个按钮全部可用（satisfied 本身不限制动作）', () => {
+  it('satisfied 且没有 lastStop：六个按钮全部可用（satisfied 本身不限制动作）', () => {
     const model = runMenuModel(
       input({ history: { undo: 2, stepBack: 5 }, terminal: terminalReasonOf(SATISFIED_STEP) }),
     );
     expect(enabledMatrix(model)).toEqual({
-      compile: true,
-      'trial-run': true,
       step: true,
       'run-n': true,
       'step-back': true,
@@ -250,16 +283,17 @@ describe('终止态（failed / 已退出）禁执行类、放行回退类与提�
 
   it('终止态优先于产物类原因：重编译也换不回执行权，但提交仍按产物口径说明', () => {
     const model = runMenuModel(input({ stale: true, terminal: 'exited' }));
-    expect(buttonModel(model, 'trial-run')?.disabledReason).toBe(MESSAGE_EXITED);
     expect(buttonModel(model, 'step')?.disabledReason).toBe(MESSAGE_EXITED);
     expect(buttonModel(model, 'run-n')?.disabledReason).toBe(MESSAGE_EXITED);
     expect(buttonModel(model, 'submit')?.disabledReason).toBe(MESSAGE_STALE);
     expect(buttonModel(model, 'reset')?.enabled).toBe(true);
 
-    // 没有产物时同理：先说清「程序已经退出」，而不是误导成「点编译就好」。
+    // 运行不看终止态，所以它报的是产物口径。
+    expect(payloadControls({ ...input({ stale: true, terminal: 'exited' }), running: false }).run.disabledReason).toBe(MESSAGE_STALE);
+
+    // 没有产物时同理：先说清「程序已经退出」，而不是误导成「重新拼积木就好」。
     const noArtifact = runMenuModel(input({ artifact: undefined, compileErrorCount: 0, terminal: 'exited' }));
     expect(buttonModel(noArtifact, 'step')?.disabledReason).toBe(MESSAGE_EXITED);
-    expect(buttonModel(noArtifact, 'compile')?.enabled).toBe(true);
 
     // 判负也一样：编译失败 / 没产物都不是首要原因（05 §6 的优先级）。
     const failedNoArtifact = runMenuModel(input({ artifact: undefined, terminal: 'failed' }));

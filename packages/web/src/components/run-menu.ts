@@ -11,8 +11,8 @@ import { parseStepCount } from '../viewmodel/program';
 import type { RunButtonModel, RunCommand } from '../viewmodel/toolbar';
 import { sharedStyles, terminalTheme } from '../theme';
 
-/** 「编译」也是按钮，但它不是 API 命令（本地操作），所以单独一个 id。 */
-export type RunMenuCommand = RunCommand | { readonly kind: 'compile' };
+/** 菜单派发的命令就是控制器的 `RunCommand`：编译随积木改动自动进行，不再是按钮。 */
+export type RunMenuCommand = RunCommand;
 
 export class Pwn2BlockRunMenu extends LitElement {
   static override styles = [
