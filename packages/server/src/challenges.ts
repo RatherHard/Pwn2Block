@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  ChallengeIdSchema,
   ChallengeSummarySchema,
   PrivateChallengeSchema,
   PublicChallengeSchema,
@@ -37,11 +38,23 @@ export interface ChallengeStore {
   get(id: string): LoadedChallenge | undefined;
   /** 磁盘上有这个 id，但没通过校验 / 缺 flag 环境变量。 */
   isUnavailable(id: string): boolean;
-  /** 加载失败原因：只给日志与出题人，**绝不下发**。 */
+  /** 加载失败原始原因：仅供出题校验工具，禁止直接写入日志或下发。 */
   issuesFor(id: string): readonly ChallengeIssue[];
 }
 
+/** 告警只携带固定原因码和合法目录 id，不输出校验器原文。 */
+export interface ChallengeLoadFailure {
+  readonly challengeId: string | null;
+  readonly reason:
+    | 'public_read_failed' | 'public_json_invalid'
+    | 'private_read_failed' | 'private_json_invalid'
+    | 'id_mismatch' | 'public_schema_invalid' | 'private_schema_invalid'
+    | 'flag_missing' | 'preset_unavailable' | 'package_validation_failed';
+}
+
 export interface ChallengeLoadOptions {
+  /** 每个失败目录只通知一次，不包含私有数据、路径或异常。 */
+  readonly onLoadFailure?: (failure: ChallengeLoadFailure) => void;
   /** 环境变量表（flag 真值从 `env:FLAG_X` 指定的变量读）。 */
   readonly env: Readonly<Record<string, string | undefined>>;
   /** `presets/` 目录，默认取题目目录的兄弟目录。 */
@@ -82,6 +95,11 @@ export function loadChallengeDir(dir: string, options: ChallengeLoadOptions): Ch
       loaded.set(dirName, result.loaded);
       continue;
     }
+    const safeId = ChallengeIdSchema.safeParse(dirName);
+    options.onLoadFailure?.({
+      challengeId: safeId.success ? safeId.data : null,
+      reason: result.reason,
+    });
     issues.set(dirName, result.issues);
     // 目录名与公开包 id 不一致时，两个 id 都要报「不可用」，否则会退化成 not_found。
     if (result.id !== dirName) issues.set(result.id, result.issues);
@@ -97,7 +115,7 @@ export function loadChallengeDir(dir: string, options: ChallengeLoadOptions): Ch
 
 type LoadResult =
   | { readonly ok: true; readonly loaded: LoadedChallenge }
-  | { readonly ok: false; readonly id: string; readonly issues: readonly ChallengeIssue[] };
+  | { readonly ok: false; readonly id: string; readonly issues: readonly ChallengeIssue[]; readonly reason: ChallengeLoadFailure['reason'] };
 
 function issue(path: string, message: string): ChallengeIssue {
   return { path, message };
@@ -121,44 +139,71 @@ function isMissingPath(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
-function readJson(file: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
+function readJson(file: string):
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly reason: 'read_failed' | 'json_invalid' } {
+  let text: string;
   try {
-    return { ok: true, value: JSON.parse(readFileSync(file, 'utf8')) as unknown };
+    text = readFileSync(file, 'utf8');
   } catch {
-    // 读不到或不是合法 JSON：对加载来说都是「这个题目不可用」，原因在调用方按目录汇报。
-    return { ok: false };
+    return { ok: false, reason: 'read_failed' };
+  }
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    return { ok: false, reason: 'json_invalid' };
   }
 }
 
 function loadOne(dir: string, dirName: string, options: ChallengeLoadOptions): LoadResult {
   const pubRaw = readJson(join(dir, dirName, 'public.json'));
   if (!pubRaw.ok) {
-    return { ok: false, id: dirName, issues: [issue('public.json', `题目 ${dirName} 缺少 public.json 或不是合法 JSON`)] };
+    return {
+      ok: false, id: dirName, reason: `public_${pubRaw.reason}`,
+      issues: [issue('public.json', `题目 ${dirName} 缺少 public.json 或不是合法 JSON`)],
+    };
   }
   const privRaw = readJson(join(dir, dirName, 'private.json'));
   if (!privRaw.ok) {
     return {
       ok: false,
       id: dirName,
+      reason: `private_${privRaw.reason}`,
       issues: [issue('private.json', `题目 ${dirName} 缺少 private.json 或不是合法 JSON`)],
     };
   }
 
-  const pubLight = PublicChallengeSchema.safeParse(pubRaw.value);
+  return validateLoadedPair(dirName, pubRaw.value, privRaw.value, options);
+}
+
+function validateLoadedPair(
+  dirName: string, publicRaw: unknown, privateRaw: unknown, options: ChallengeLoadOptions,
+): LoadResult {
+  const pubLight = PublicChallengeSchema.safeParse(publicRaw);
   const declaredId: string = pubLight.success ? pubLight.data.id : dirName;
   if (pubLight.success && pubLight.data.id !== dirName) {
     return {
       ok: false,
       id: declaredId,
+      reason: 'id_mismatch',
       issues: [issue('id', `公开包 id「${declaredId}」与目录名「${dirName}」不一致`)],
     };
   }
 
-  const checked = checkChallengePair(pubRaw.value, privRaw.value, {
-    presetItems: pubLight.success ? readPresetItems(options, presetNameOf(pubLight.data)) : undefined,
-    flagValue: flagValueOf(privRaw.value, options.env),
-  });
-  if (!checked.ok) return { ok: false, id: declaredId, issues: checked.issues };
+  const presetName = pubLight.success ? presetNameOf(pubLight.data) : undefined;
+  const presetItems = readPresetItems(options, presetName);
+  const privLight = PrivateChallengeSchema.safeParse(privateRaw);
+  const flagValue = privLight.success ? resolveFlag(privLight.data, options.env) : undefined;
+  const checked = checkChallengePair(publicRaw, privateRaw, { presetItems, flagValue });
+  if (!checked.ok) {
+    // 按加载阶段分类，绝不输出可能夹带私有值的 issue.path/message。
+    const reason = !pubLight.success ? 'public_schema_invalid'
+      : !privLight.success ? 'private_schema_invalid'
+      : flagEnvNameOf(privLight.data) !== undefined && !flagValue ? 'flag_missing'
+      : presetName !== undefined && presetItems === undefined ? 'preset_unavailable'
+      : 'package_validation_failed';
+    return { ok: false, id: declaredId, issues: checked.issues, reason };
+  }
 
   return {
     ok: true,
@@ -170,14 +215,6 @@ function loadOne(dir: string, dirName: string, options: ChallengeLoadOptions): L
       }),
     },
   };
-}
-
-function flagValueOf(
-  raw: unknown,
-  env: Readonly<Record<string, string | undefined>>,
-): string | undefined {
-  const parsed = PrivateChallengeSchema.safeParse(raw);
-  return parsed.success ? resolveFlag(parsed.data, env) : undefined;
 }
 
 function readPresetItems(

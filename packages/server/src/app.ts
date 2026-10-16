@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import Fastify from 'fastify';
-import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
 import {
   API_ERROR_STATUS,
   ActionsRequestSchema,
@@ -47,7 +47,8 @@ export interface BuildAppOptions {
   readonly presetDir?: string;
   /** 环境变量表，默认 `process.env`；flag 真值由部署时注入（06 §6）。 */
   readonly env?: Readonly<Record<string, string | undefined>>;
-  readonly logger?: boolean;
+  /** Fastify 原生日志配置；stream 可采集真实日志，启动入口默认开启。 */
+  readonly logger?: FastifyServerOptions['logger'];
   /** 引擎装配工厂，默认 `@pwn2block/engine` 的 `createRuntime`。 */
   readonly createRuntime?: CreateRuntime;
   readonly sessions?: SessionStoreOptions;
@@ -135,7 +136,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const env = options.env ?? process.env;
   const challengeDir = options.challengeDir ?? defaultChallengeDir();
   const presetDir = options.presetDir ?? join(challengeDir, '..', 'presets');
-  const challenges = loadChallengeDir(challengeDir, { env, presetDir });
+  const challenges = loadChallengeDir(challengeDir, {
+    env,
+    presetDir,
+    onLoadFailure: (failure) => app.log.warn(
+      { event: 'challenge_load_failed', ...failure },
+      '题目加载失败，已停用；请运行 pnpm challenge:check --all 排查',
+    ),
+  });
   const assembleRuntime = options.createRuntime ?? engineRuntimeFactory;
   const sessions = new SessionStore(options.sessions);
   const limits = resolveRateLimit(options.rateLimit);
