@@ -1,20 +1,22 @@
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * 主路径 E2E 配置（01 §3 八步闭环）— owner F · 关卡 **G3 · D5**。
- *
- * 定位：D1 只搭骨架，**D5 才做真实验收**。
- * - 用例默认整组跳过，只有 `PWN2BLOCK_E2E=1` **且真实后端已经在跑**、并已加载真实首题 `ret2win` 时才执行。
- * - 配置里**故意不配 `webServer`**：验收要求服务确实在跑（真实后端 + 真实首题），而不是由 Playwright 起一个替身。
- *   验收人先 `pnpm dev` 或 `pnpm start`，再运行本配置。
- * - Playwright 浏览器二进制本轮**不下载**；D5 首次运行前执行 `pnpm exec playwright install chromium`。
- * - 后端地址：`PWN2BLOCK_BASE_URL`（默认 `http://127.0.0.1:<PWN2BLOCK_PORT 或 8787>`，与 04 §6 的 `DEFAULT_PORT` 一致）。
- *
- * 产物目录用 `.tmp/playwright`：根 `.gitignore` 已排除 `test-results/`、`playwright-report/`、
- * `blob-report/`、`playwright/.cache/`（28–31 行）与 `.tmp/`（20 行），所以不改默认目录也不会进 git；
- * 本配置仍把产物收进 `.tmp/playwright`，只为避免与 A 的集成提交目录混淆。
+ * 真实后端 + 生产构建验收：先 pnpm build / pnpm start，再设 PWN2BLOCK_E2E=1。
+ * 默认仍保留显式开关；不配置替身 webServer、不 mock API。
+ * 首次运行可执行 pnpm exec playwright install chromium 安装已有配置所需浏览器。
+ * chromium-desktop 保留原闭环；另三个 project 只跑指定尺寸的桌面冒烟。
+ * PWN2BLOCK_BASE_URL 可覆盖地址，否则使用 PWN2BLOCK_PORT（默认 8787）。
+ * PWN2BLOCK_E2E_OUTPUT_DIR 可为每轮证据选独立目录（相对仓库根或绝对路径）；
+ * 截图/trace 写入该目录，JSON 报告写到同名 .json 文件，避免复跑覆盖前轮证据。
+ * 命令与本次实测结果见同目录 README.md。
  */
+const evidenceDir = resolve(
+  fileURLToPath(new URL('../..', import.meta.url)),
+  process.env.PWN2BLOCK_E2E_OUTPUT_DIR ?? '.tmp/playwright',
+);
+
 export default defineConfig({
   testDir: fileURLToPath(new URL('.', import.meta.url)),
   testMatch: '**/*.spec.ts',
@@ -25,8 +27,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
-  outputDir: fileURLToPath(new URL('../../.tmp/playwright', import.meta.url)),
-  reporter: [['list']],
+  outputDir: evidenceDir,
+  reporter: [['list'], ['json', { outputFile: `${evidenceDir}.json` }]],
   use: {
     baseURL: process.env.PWN2BLOCK_BASE_URL ?? `http://127.0.0.1:${process.env.PWN2BLOCK_PORT ?? '8787'}`,
     locale: 'zh-CN',
@@ -34,5 +36,20 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'off',
   },
-  projects: [{ name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium-desktop',
+      testIgnore: '**/desktop-smoke.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    ...[
+      { width: 1280, height: 720 },
+      { width: 1440, height: 900 },
+      { width: 1920, height: 1080 },
+    ].map(viewport => ({
+      name: `chromium-desktop-${viewport.width}x${viewport.height}`,
+      testMatch: '**/desktop-smoke.spec.ts',
+      use: { ...devices['Desktop Chrome'], viewport },
+    })),
+  ],
 });
