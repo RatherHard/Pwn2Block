@@ -117,6 +117,20 @@ describe('输出区（05 §3、§5、§6）', () => {
     expect(json).not.toContain('判胜依据');
   });
 
+  it.each([false, true])('satisfied 的退出引导与实际终态一致（已退出=%s）', (exited) => {
+    const entries = outputEntries({
+      artifact: makeArtifact(ACTIONS), errors: [], stale: false, results: [],
+      projection: makeProjection({ status: 'satisfied', ...(exited ? { lastStop: { reason: 'exit' } } : {}) }),
+    });
+    const message = entries.find((entry) => entry.key === 'status-satisfied');
+    expect(message?.text).toContain('提交判题');
+    expect(message?.detail?.includes('程序已经退出')).toBe(exited);
+    for (const action of ['后退一步', '撤销', '重置']) {
+      expect(message?.detail?.includes(`「${action}」`)).toBe(exited);
+    }
+    expect(JSON.stringify(entries)).not.toMatch(/flag|判胜依据/);
+  });
+
   it('exited 给出重来引导', () => {
     const entries = outputEntries({
       artifact: makeArtifact(ACTIONS),

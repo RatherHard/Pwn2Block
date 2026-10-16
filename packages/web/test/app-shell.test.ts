@@ -49,11 +49,16 @@ interface Mounted {
   readonly api: FakeApi;
 }
 
-async function mountApp(api: FakeApi): Promise<Mounted> {
+function startApp(api: FakeApi): Pwn2BlockApp {
   const app = document.createElement('pwn2block-app') as Pwn2BlockApp;
   app.api = api.client;
   document.body.append(app);
   apps.push(app);
+  return app;
+}
+
+async function mountApp(api: FakeApi): Promise<Mounted> {
+  const app = startApp(api);
   await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '视图管理器出现');
   await settle(app);
   return { app, api };
@@ -249,6 +254,10 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     // 原因写在界面上，而不是只置灰（05 §6）。
     expect(textOf(runMenuOf(app))).toContain('程序已退出');
     expect(app.renderRoot.querySelector('.status')?.textContent).toContain('程序已经退出');
+    for (const action of ['后退一步', '撤销', '重置', '提交判题']) {
+      expect(app.renderRoot.querySelector('.status')?.textContent).toContain(`「${action}」`);
+      expect(textOf(inPanel(app, 'pwn2block-output-view'))).toContain(`「${action}」`);
+    }
 
     // 点「单步」不会发请求：组件渲染与控制器门禁用的是同一张表（05 §1）。
     clickRun(app, '单步');
@@ -424,21 +433,21 @@ describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §
   });
 });
 
-describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 2，05 §3.1）', () => {
-  /** 用真实画布编一份存档（存档格式归 H，测试不手写序列化内容）。 */
-  function archiveWithStep(): Record<string, unknown> {
-    const host = document.createElement('div');
-    document.body.append(host);
-    const bridge = mountBlockly(host, ret2winPublic);
-    const workspace = bridge.workspace;
-    if (workspace === undefined) throw new Error('画布没挂上');
-    chainAfterStart(workspace, [BLOCK_TYPES.actionStep]);
-    const archive = bridge.save();
-    bridge.dispose();
-    host.remove();
-    return archive;
-  }
+/** 用真实画布编一份存档（存档格式归 H，测试不手写序列化内容）。 */
+function archiveWithStep(): Record<string, unknown> {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const bridge = mountBlockly(host, ret2winPublic);
+  const workspace = bridge.workspace;
+  if (workspace === undefined) throw new Error('画布没挂上');
+  chainAfterStart(workspace, [BLOCK_TYPES.actionStep]);
+  const archive = bridge.save();
+  bridge.dispose();
+  host.remove();
+  return archive;
+}
 
+describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 2，05 §3.1）', () => {
   /** 画布上的积木类型（不含影子积木：`action_step` 的计数输入是影子块，不是用户拼的）。 */
   function blockTypesOf(app: Pwn2BlockApp): readonly (string | undefined)[] {
     return (
@@ -637,5 +646,65 @@ describe('单页骨架：判题被拒与回放时间线的可访问性（D5 ③�
 
     const range = shadowOf(verdict)?.querySelector<HTMLInputElement>('input[type="range"]');
     expect(range?.getAttribute('aria-valuetext')).toContain('已执行');
+  });
+});
+
+
+describe('启动失败的两种布局与重试（D5 观察）', () => {
+  it('题目列表不可用：显示失败页，重试后进入工作台', async () => {
+    const api = createFakeApi();
+    api.failNext(new ApiClientError('internal', '无法连接服务器', { network: true }));
+    const app = startApp(api);
+    await until(() => app.renderRoot.querySelector('.notice button') !== null, '重试出口');
+    await settle(app);
+    expect(app.renderRoot.querySelector('.boot')?.textContent).toContain('暂时开不了新会话');
+    expect(app.renderRoot.querySelector('pwn2block-payload-panel')).toBeNull();
+    const retry = app.renderRoot.querySelector<HTMLButtonElement>('.notice button');
+    expect(retry?.textContent).toContain('重试');
+    retry?.click();
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '重试进入工作台');
+    await settle(app);
+    expect(app.renderRoot.querySelector('.notice')).toBeNull();
+    expect(api.calls.map((call) => call.method)).toEqual([
+      'listChallenges', 'listChallenges', 'getChallenge', 'createSession',
+    ]);
+  });
+
+  it('建会话限流：保留已恢复的画布，运行按钮禁用，重试后原画布继续使用', async () => {
+    localStorage.setItem(canvasStorageKey('ret2win'), JSON.stringify(archiveWithStep()));
+    const api = createFakeApi();
+    const create = api.client.createSession;
+    let attempts = 0;
+    api.client.createSession = (id) => {
+      if (attempts++ === 0) {
+        api.failNext(new ApiClientError('rate_limited', '同一来源的会话数已达上限', { status: 429 }));
+      }
+      return create(id);
+    };
+    const app = startApp(api);
+    await until(() => app.renderRoot.querySelector('.notice button') !== null, '限流后的重试出口');
+    await settle(app);
+    const panel = panelOf(app);
+    const workspace = panel.workspace;
+    expect(workspace).toBeDefined();
+    expect(app.renderRoot.querySelector('.boot')).toBeNull();
+    expect(app.renderRoot.querySelector('.left')?.textContent).toContain('暂时开不了新会话');
+    expect(app.renderRoot.querySelector('.notice')?.textContent).toContain('请求过于频繁');
+    const buttons = runButtons(app);
+    expect(buttons).toHaveLength(8);
+    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(workspace?.getAllBlocks(false).map((block) => block.type)).toContain(BLOCK_TYPES.actionStep);
+    const ids = workspace?.getAllBlocks(false).map((block) => block.id);
+    app.renderRoot.querySelector<HTMLButtonElement>('.notice button')?.click();
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '重试恢复会话');
+    await settle(app);
+    expect(panelOf(app)).toBe(panel);
+    expect(panelOf(app).workspace).toBe(workspace);
+    expect(workspace?.getAllBlocks(false).map((block) => block.id)).toEqual(ids);
+    expect(app.renderRoot.querySelector('.notice')).toBeNull();
+    expect(runButtons(app).find((button) => button.textContent?.trim() === '重置')?.disabled).toBe(false);
+    expect(api.calls.map((call) => call.method)).toEqual([
+      'listChallenges', 'getChallenge', 'createSession', 'getChallenge', 'createSession',
+    ]);
   });
 });

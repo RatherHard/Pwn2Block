@@ -92,6 +92,10 @@ export function statusMarker(tone: StatusTone): string {
   return TONE_MARKERS[tone];
 }
 
+/** 满足条件且已退出：两处反馈使用同一份具体操作引导（05 §6）。 */
+export const SATISFIED_EXIT_GUIDANCE =
+  '程序已经退出，执行类动作会被拒绝。可直接「提交判题」，或用「后退一步」「撤销」「重置」继续调试。';
+
 function debugText(projection: Projection): StatusText {
   const failureNote = projection.failures > 0 ? `（已失败 ${projection.failures} 次）` : '';
   switch (projection.status) {
@@ -101,7 +105,7 @@ function debugText(projection: Projection): StatusText {
       return isExitedProjection(projection)
         ? {
             tone: 'ok',
-            text: '当前状态已满足成功条件，且程序已经退出：执行类动作会被拒绝，可继续「提交判题」，或用回退类动作重来。',
+            text: `当前状态已满足成功条件。${SATISFIED_EXIT_GUIDANCE}`,
           }
         : {
             tone: 'ok',

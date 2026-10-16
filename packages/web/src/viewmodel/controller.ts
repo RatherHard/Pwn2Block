@@ -55,6 +55,7 @@ import {
   type ViewManagerState,
 } from './views';
 
+/** 启动进度；unavailable 表示启动失败，是否保留工作台由已取得的 challenge 决定。 */
 export type ControllerPhase = 'loading' | 'choosing' | 'opening' | 'ready' | 'unavailable';
 
 export interface Notice {
@@ -325,9 +326,9 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
    * **启动路径**（题目列表 / 新建会话 / 接回会话）的失败收尾：`handleFailure` 给出提示与
    * 「重试」出口，这里再补一件它不做的事——把相位从 `loading` / `opening` 挪开。
    *
-   * 停在加载相位的后果是界面永远显示「正在…」，用户除了刷新没有别的动作（A 的巡检缺陷：
-   * 每 IP 会话配额打满时，页面卡在「正在创建会话」，提示还是「界面内部错误」）。
-   * `unavailable` 就是「现在开不了会话，屏幕上留着重试出口」这个相位。
+   * `unavailable` 记录启动失败，不直接决定画面：app-shell 按是否已有 challenge 分派。
+   * 未取得题面时，renderBoot 用该相位显示失败页；已有题面时仍保留工作台和画布，
+   * 由 notice 解释失败、无 session 的门禁禁用运行按钮。两条路径的重试出口都来自 notice。
    */
   function handleStartupFailure(error: unknown): void {
     handleFailure(error, undefined);

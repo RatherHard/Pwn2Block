@@ -13,7 +13,7 @@ import { blockIdForAction, isLocatableError } from '../compiler/locate';
 import type { CompileError } from '../compiler/types';
 import { actionRowFor, debugOffset } from './highlight';
 import { MESSAGE_STALE } from './program';
-import type { StatusTone } from './session';
+import { isExitedProjection, SATISFIED_EXIT_GUIDANCE, type StatusTone } from './session';
 
 export interface OutputEntry {
   /** lit 的 `repeat` 用的稳定 key。 */
@@ -109,7 +109,7 @@ function projectionEntries(projection: Projection): readonly OutputEntry[] {
           tone: 'ok',
           label: '满足条件',
           text: TEXT_SATISFIED,
-          detail: DETAIL_SATISFIED,
+          detail: isExitedProjection(projection) ? `${SATISFIED_EXIT_GUIDANCE} ${DETAIL_SATISFIED}` : DETAIL_SATISFIED,
         },
       ];
     case 'failed': {

@@ -328,6 +328,8 @@ export class Pwn2BlockApp extends LitElement {
   private renderBody(state: ControllerState) {
     const view = this.activeView(state);
     const challenge = state.challenge;
+    // 相位只决定无题面时的启动页；已有题面时即使 unavailable 也保留工作台与画布。
+    // 失败原因和重试出口来自 notice，避免建会话失败时销毁已恢复的程序。
     if (challenge === undefined) return this.renderBoot(state);
     const mode = state.page?.mode ?? 'debug';
     if (view === undefined) {
