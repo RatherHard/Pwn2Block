@@ -237,7 +237,7 @@ describe.runIf(HAS_DIST)('S06 发布边界 · 真实构建产物与真实静态 
       '/packages/web/package.json',
       '/packages/web/vite.config.ts',
       '/docs/README.md',
-      '/docs/04-会话与API.md',
+      '/docs/01-基本架构.md',
       '/CLAUDE.md',
     ];
 
@@ -247,7 +247,7 @@ describe.runIf(HAS_DIST)('S06 发布边界 · 真实构建产物与真实静态 
       'challenges/ret2win/solution.md',
       'challenges/endian/private.json',
       'packages/server/src/static.ts',
-      'docs/04-会话与API.md',
+      'docs/01-基本架构.md',
       '.env.example',
       'CLAUDE.md',
     ]) {

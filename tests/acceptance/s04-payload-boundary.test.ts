@@ -42,7 +42,7 @@ import type { ResponseLike, TempChallengeRoot } from './support';
  *   第 10 条：客户端提交的 `block` 展开结果被忽略，服务端自己展开。
  *   第 13 条：payload 里出现读状态积木时，提交被 `rejected`，不是静默当成零。
  *
- * 契约依据（03 §3、04 §2/§5.1、[docs/05-前端交互.md](../../docs/05-前端交互.md) §3.1/§4；
+ * 契约依据（docs/archive/mvp-2026-10-16/03-题目包格式.md §3、docs/archive/mvp-2026-10-16/04-会话与API.md §2/§5.1、[docs/archive/mvp-2026-10-16/05-前端交互.md](../../docs/archive/mvp-2026-10-16/05-前端交互.md) §3.1/§4；
  * 01 §6 第 3、4 条）：`block` 只发 `{id, args}`，唯一展开入口是服务端 `expandBlock`；
  * payload 必须自足，不允许含读取当前状态的构造；编译期上限（循环展开 256、表达式求值 4096 步、
  * 唯一开始块兜底）由 H 的编译器强制。
@@ -679,7 +679,7 @@ describe('S04 payload 边界 · 真实引擎 + 真实 HTTP', () => {
    *    `packages/engine/src/**` 里没有任何地方会产出该错误码。要在 HTTP 层断言 `reads_state`，
    *    先得有实现——而按现在的契约，**线上动作集根本无法表达「读当前状态」**（04 §2 的 12 个动作
    *    里，地址与值都是客户端给的十六进制字面量），所以这个错误码在服务端没有可触发的输入。
-   * 2. **真正会在编译期拒绝它的是 H 的编译器**（[docs/05-前端交互.md](../../docs/05-前端交互.md) §4）：
+   * 2. **真正会在编译期拒绝它的是 H 的编译器**（[docs/archive/mvp-2026-10-16/05-前端交互.md](../../docs/archive/mvp-2026-10-16/05-前端交互.md) §4）：
    *    `web/src/compiler` 的 `FORBIDDEN_STATE_BLOCK_TYPES` + `MESSAGE_READS_STATE` 是**前端编译
    *    错误**，不是 REST 响应；`packages/web/src/compiler/forbidden-state.test.ts` 已覆盖。
    * 3. **验收测试目前无法直接消费它**：根 `tsconfig.json` 的 `exclude` 含 `packages/web/**`，
@@ -701,7 +701,7 @@ describe('S04 payload 边界 · 真实引擎 + 真实 HTTP', () => {
    *
    * 循环展开 256 次与表达式求值 4096 步都是**编译器内部的常量折叠 / 展开预算**
    * （`limits.LOOP_UNROLL_LIMIT` / `EXPR_EVAL_STEP_LIMIT`，消费者是 H 的编译器，
-   * 见 [docs/05-前端交互.md](../../docs/05-前端交互.md) §4）。到达服务端的请求体只有**扁平的
+   * 见 [docs/archive/mvp-2026-10-16/05-前端交互.md](../../docs/archive/mvp-2026-10-16/05-前端交互.md) §4）。到达服务端的请求体只有**扁平的
    * 已经展开的**动作数组——服务端看不到循环 / 表达式结构，也就没有「这次编译做了多少次表达式
    * 求值」这个信息，因此**这条按原文在服务端不成立**（不是「还没实现」）。服务端真正能守住的量是
    * 「产物动作数 ≤ `MAX_SUBMIT_ACTIONS`」，那一条已在上面真实执行并通过。

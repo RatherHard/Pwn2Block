@@ -118,7 +118,7 @@ beforeAll(() => {
     'solution.md': `# ${SOLUTION_MARKER}\n`,
     'leak.txt': `${LEAK_MARKER}\n`,
     'packages/server/src/app.ts': `export const leak = '${SOURCE_MARKER}';\n`,
-    'docs/01-产品与范围.md': `# ${DOCS_MARKER}\n`,
+    'docs/01-基本架构.md': `# ${DOCS_MARKER}\n`,
     [`challenges/${CHALLENGE_ID}/private.json`]: `{"flag":"${CHALLENGE_PRIVATE_MARKER}"}\n`,
   });
 
@@ -273,7 +273,7 @@ describe('发布边界：静态根之外与敏感路径（08 §5 S06）', () => 
       for (const url of [
         '/packages/server/src/app.ts',
         '/packages/web/package.json',
-        '/docs/01-产品与范围.md',
+        '/docs/01-基本架构.md',
         '/docs/README.md',
         `/challenges/${CHALLENGE_ID}/private.json`,
         '/.env.example',
@@ -487,7 +487,7 @@ describe.skipIf(realEntry === undefined)('真实构建产物（`pnpm build` 之�
         '/solution.md',
         '/packages/server/src/app.ts',
         '/challenges/ret2win/private.json',
-        '/docs/01-产品与范围.md',
+        '/docs/01-基本架构.md',
         '/../challenges/ret2win/private.json',
         '/%2e%2e%2fchallenges%2fret2win%2fprivate.json',
         '/assets/../../challenges/ret2win/private.json',

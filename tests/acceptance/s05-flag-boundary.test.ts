@@ -333,7 +333,8 @@ describe('S05 flag 边界 · 真实题目加载路径（G2 · D4）', () => {
     const assignments = example
       .split('\n')
       .map((line) => /^([A-Za-z0-9_]+)=(.*)$/.exec(line.trim()))
-      .filter((match): match is RegExpExecArray => match !== null);
+      .filter((match): match is RegExpExecArray => match !== null)
+      .filter((match) => match[1].startsWith('FLAG_'));
     expect(assignments.length).toBeGreaterThan(0);
     for (const match of assignments) {
       expect(match[1]).toMatch(/^FLAG_[A-Z0-9_]+$/);

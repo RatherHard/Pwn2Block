@@ -62,7 +62,7 @@ export function dispatchSyscall(
     if (io === undefined) {
       throw new Error(
         `syscall ${syscall.name}（kind=${syscall.kind}）需要 fd 宿主：G02（D2–D3）在 engine/src/io/** ` +
-          '落地后由包入口注入 SyscallIo，见 docs/08-Agent并行开发日程.md §2 规则 2',
+          '落地后由包入口注入 SyscallIo，见 docs/archive/mvp-2026-10-16/08-Agent并行开发日程.md §2 规则 2',
       );
     }
     const result = io.transfer(state, syscall, args);

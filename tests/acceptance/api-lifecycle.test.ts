@@ -30,7 +30,7 @@ import type { TempChallengeRoot } from './support';
 /**
  * API 生命周期与终态 — owner F（C 配合）
  *
- * 依据 `docs/08-Agent并行开发日程.md` §3 的 **D4 行**：F 的验收项是「API 生命周期/终态；核心检查 S01–S05」，
+ * 依据 `docs/archive/mvp-2026-10-16/08-Agent并行开发日程.md` §3 的 **D4 行**：F 的验收项是「API 生命周期/终态；核心检查 S01–S05」，
  * 对应关卡 **G2 · D4**（真实 API 全部终态、调试/判题隔离、回退按契约工作）。本文件**不属于** S01–S06
  * 六组核心检查，是它们之外的 D4 验收面，所以单独成文件、单独在本目录 README §3.2 里登记。
  *

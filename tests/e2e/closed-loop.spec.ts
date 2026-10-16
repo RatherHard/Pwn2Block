@@ -43,8 +43,8 @@ import {
  * 3. **会话要自己收尾**：`afterAll` 里 `DELETE /api/sessions/:id`。不删会漏掉每 IP 的存活会话
  *    配额（`limits.ts` 默认 32），连跑几轮之后所有请求都会变成 429（D5 期间踩过）。
  *
- * 步骤出处：`docs/01-产品与范围.md` §3（1–6 调试段，7–8 判题段）；
- * 附加断言出处：`docs/08` §3 D5 行 / G3「调试不发 flag，正式提交成功才发」。
+ * 步骤出处：`docs/archive/mvp-2026-10-16/01-产品与范围.md` §3（1–6 调试段，7–8 判题段）；
+ * 附加断言出处：`docs/archive/mvp-2026-10-16/08-Agent并行开发日程.md` §3 D5 行 / G3「调试不发 flag，正式提交成功才发」。
  */
 
 const E2E_ENABLED = process.env.PWN2BLOCK_E2E === '1';
@@ -136,7 +136,7 @@ function collectKeys(value: unknown, into: Set<string> = new Set()): Set<string>
   return into;
 }
 
-/** 调色板按钮：`docs/05` §3 固定八个按钮，名字就是契约。 */
+/** 调色板按钮：`docs/archive/mvp-2026-10-16/05-前端交互.md` §3 固定八个按钮，名字就是契约。 */
 const runButton = (name: string): Locator => page.getByRole('button', { name, exact: true });
 
 interface Captured {
