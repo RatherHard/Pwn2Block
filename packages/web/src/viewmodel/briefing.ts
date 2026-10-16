@@ -25,6 +25,15 @@ export type MdBlock =
 
 const MAX_LIST_DEPTH = 3;
 
+/**
+ * 块起始的判定全部集中在这几个正则 + `matchListLine`，`isBlockStart` 和各
+ * `parse*Block` 共用它们，避免段落续行判定和块级分发各写一套、彼此漂移。
+ */
+const HEADING_START = /^#{1,6}(?:\s|$)/;
+const RULE_RE = /^-{3,}$/;
+const FENCE_RE = /^```/;
+const QUOTE_START = /^>\s?/;
+
 /** 列表项：缩进、是否有序、文字。嵌套层级 = `min(3, floor(缩进/2)+1)`。 */
 interface ListLine {
   readonly depth: number;
@@ -34,11 +43,11 @@ interface ListLine {
 
 function matchListLine(line: string): ListLine | undefined {
   const unordered = /^(\s*)[-*+]\s+(.+)$/.exec(line);
-  if (unordered !== undefined && unordered !== null) {
+  if (unordered !== null) {
     return { depth: listDepth(unordered[1]), ordered: false, text: unordered[2] };
   }
   const ordered = /^(\s*)\d+[.)]\s+(.+)$/.exec(line);
-  if (ordered !== undefined && ordered !== null) {
+  if (ordered !== null) {
     return { depth: listDepth(ordered[1]), ordered: true, text: ordered[2] };
   }
   return undefined;
@@ -46,6 +55,24 @@ function matchListLine(line: string): ListLine | undefined {
 
 function listDepth(indent: string): number {
   return Math.min(MAX_LIST_DEPTH, Math.floor(indent.length / 2) + 1);
+}
+
+/** 这一行是否会开启一个新块（标题/分隔线/围栏/引用/列表），段落续行判定据此停下。 */
+function isBlockStart(line: string): boolean {
+  return (
+    HEADING_START.test(line) ||
+    RULE_RE.test(line.trim()) ||
+    FENCE_RE.test(line.trim()) ||
+    QUOTE_START.test(line) ||
+    matchListLine(line) !== undefined
+  );
+}
+
+/** 标题标记后允许只有空白、甚至没有内容：和 `HEADING_START` 判定同一条件。 */
+function parseHeadingLine(line: string): { readonly level: number; readonly content: string } | undefined {
+  const match = /^(#{1,6})(?:\s+(.*))?$/.exec(line);
+  if (match === null) return undefined;
+  return { level: match[1].length, content: match[2] ?? '' };
 }
 
 /** 把一串同层级的列表行（已剥掉比 `baseDepth` 浅的缩进语境）组装成一个 list 块。 */
@@ -68,21 +95,81 @@ function buildList(lines: readonly ListLine[]): MdBlock {
   return { kind: 'list', ordered, items };
 }
 
-/** 按行扫描的块级状态机：段内换行、代码围栏、引用、列表、分隔线、标题。 */
+/** 一次块解析的结果：解出的块与下一次扫描应该从哪一行继续。 */
+interface BlockResult {
+  readonly block: MdBlock;
+  readonly next: number;
+}
+
+function parseHeadingBlock(line: string, index: number): BlockResult {
+  const heading = parseHeadingLine(line);
+  // 调用处已用 `isBlockStart` 判过是标题起始，这里一定能解析成功。
+  const content = heading?.content ?? '';
+  return {
+    block: { kind: 'heading', level: (heading?.level ?? 1) as 1 | 2 | 3 | 4 | 5 | 6, inline: parseInline(content) },
+    next: index + 1,
+  };
+}
+
+function parseFenceBlock(lines: readonly string[], index: number): BlockResult {
+  const codeLines: string[] = [];
+  let cursor = index + 1;
+  while (cursor < lines.length && !FENCE_RE.test(lines[cursor].trim())) {
+    codeLines.push(lines[cursor]);
+    cursor += 1;
+  }
+  const closed = cursor < lines.length;
+  if (closed) return { block: { kind: 'code', text: codeLines.join('\n') }, next: cursor + 1 };
+  // 未闭合的围栏：按段落原文显示，起始的 ``` 行也是文本的一部分。
+  return { block: buildParagraph([lines[index], ...codeLines]), next: cursor };
+}
+
+function parseQuoteBlock(lines: readonly string[], index: number): BlockResult {
+  const quoteLines: string[] = [];
+  let cursor = index;
+  while (cursor < lines.length && QUOTE_START.test(lines[cursor])) {
+    quoteLines.push(lines[cursor].replace(QUOTE_START, ''));
+    cursor += 1;
+  }
+  return { block: { kind: 'quote', blocks: parseMarkdown(quoteLines.join('\n')) }, next: cursor };
+}
+
+function parseListBlock(lines: readonly string[], index: number): BlockResult {
+  const listLines: ListLine[] = [];
+  let cursor = index;
+  while (cursor < lines.length) {
+    const line = matchListLine(lines[cursor]);
+    if (line === undefined) break;
+    listLines.push(line);
+    cursor += 1;
+  }
+  return { block: buildList(listLines), next: cursor };
+}
+
+function parseParagraphBlock(lines: readonly string[], index: number): BlockResult {
+  const paragraphLines: string[] = [];
+  let cursor = index;
+  while (cursor < lines.length && lines[cursor].trim().length > 0 && !isBlockStart(lines[cursor])) {
+    paragraphLines.push(lines[cursor]);
+    cursor += 1;
+  }
+  return { block: buildParagraph(paragraphLines), next: cursor };
+}
+
+function buildParagraph(paragraphLines: readonly string[]): MdBlock {
+  const inline: MdInline[] = [];
+  paragraphLines.forEach((paragraphLine, lineIndex) => {
+    if (lineIndex > 0) inline.push({ kind: 'break' });
+    inline.push(...parseInline(paragraphLine));
+  });
+  return { kind: 'paragraph', inline: mergeText(inline) };
+}
+
+/** 按行扫描的块级状态机：空行跳过，其余按 `isBlockStart` 判出的类型分发。 */
 export function parseMarkdown(text: string): readonly MdBlock[] {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const blocks: MdBlock[] = [];
   let index = 0;
-
-  const flushParagraph = (paragraphLines: readonly string[]): void => {
-    if (paragraphLines.length === 0) return;
-    const inline: MdInline[] = [];
-    paragraphLines.forEach((paragraphLine, lineIndex) => {
-      if (lineIndex > 0) inline.push({ kind: 'break' });
-      inline.push(...parseInline(paragraphLine));
-    });
-    blocks.push({ kind: 'paragraph', inline: mergeText(inline) });
-  };
 
   while (index < lines.length) {
     const line = lines[index];
@@ -92,88 +179,21 @@ export function parseMarkdown(text: string): readonly MdBlock[] {
       continue;
     }
 
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading !== null) {
-      blocks.push({ kind: 'heading', level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6, inline: parseInline(heading[2]) });
-      index += 1;
-      continue;
-    }
-
-    if (/^-{3,}$/.exec(line.trim()) !== null) {
-      blocks.push({ kind: 'rule' });
-      index += 1;
-      continue;
-    }
-
-    if (/^```/.exec(line.trim()) !== null) {
-      const codeLines: string[] = [];
-      let closed = false;
-      let cursor = index + 1;
-      while (cursor < lines.length) {
-        if (/^```/.exec(lines[cursor].trim()) !== null) {
-          closed = true;
-          break;
-        }
-        codeLines.push(lines[cursor]);
-        cursor += 1;
-      }
-      if (closed) {
-        blocks.push({ kind: 'code', text: codeLines.join('\n') });
-        index = cursor + 1;
-      } else {
-        // 未闭合的围栏：按段落原文显示，第一行（```）也是文本的一部分。
-        flushParagraph([line, ...codeLines]);
-        index = cursor;
-      }
-      continue;
-    }
-
-    if (/^>\s?/.exec(line) !== null) {
-      const quoteLines: string[] = [];
-      let cursor = index;
-      while (cursor < lines.length && /^>\s?/.exec(lines[cursor]) !== null) {
-        quoteLines.push(lines[cursor].replace(/^>\s?/, ''));
-        cursor += 1;
-      }
-      blocks.push({ kind: 'quote', blocks: parseMarkdown(quoteLines.join('\n')) });
-      index = cursor;
-      continue;
-    }
-
-    const list = matchListLine(line);
-    if (list !== undefined) {
-      const listLines: ListLine[] = [list];
-      let cursor = index + 1;
-      while (cursor < lines.length) {
-        const next = matchListLine(lines[cursor]);
-        if (next === undefined) break;
-        listLines.push(next);
-        cursor += 1;
-      }
-      blocks.push(buildList(listLines));
-      index = cursor;
-      continue;
-    }
-
-    const paragraphLines: string[] = [line];
-    let cursor = index + 1;
-    while (
-      cursor < lines.length &&
-      lines[cursor].trim().length > 0 &&
-      /^(#{1,6})\s+/.exec(lines[cursor]) === null &&
-      /^-{3,}$/.exec(lines[cursor].trim()) === null &&
-      /^```/.exec(lines[cursor].trim()) === null &&
-      /^>\s?/.exec(lines[cursor]) === null &&
-      matchListLine(lines[cursor]) === undefined
-    ) {
-      paragraphLines.push(lines[cursor]);
-      cursor += 1;
-    }
-    flushParagraph(paragraphLines);
-    index = cursor;
+    const result = parseOneBlock(lines, index, line);
+    blocks.push(result.block);
+    index = result.next;
   }
 
   return blocks;
+}
+
+function parseOneBlock(lines: readonly string[], index: number, line: string): BlockResult {
+  if (HEADING_START.test(line)) return parseHeadingBlock(line, index);
+  if (RULE_RE.test(line.trim())) return { block: { kind: 'rule' }, next: index + 1 };
+  if (FENCE_RE.test(line.trim())) return parseFenceBlock(lines, index);
+  if (QUOTE_START.test(line)) return parseQuoteBlock(lines, index);
+  if (matchListLine(line) !== undefined) return parseListBlock(lines, index);
+  return parseParagraphBlock(lines, index);
 }
 
 type InlineMark = '**' | '*' | '_' | '`' | '[';

@@ -83,7 +83,6 @@ export const markdownStyles: CSSResult = css`
   .md p:last-child {
     margin-bottom: 0;
   }
-  .md h1,
   .md h2,
   .md h3,
   .md h4,
@@ -93,7 +92,6 @@ export const markdownStyles: CSSResult = css`
     color: var(--p2b-fg);
     font-weight: 700;
   }
-  .md h1:first-child,
   .md h2:first-child,
   .md h3:first-child,
   .md h4:first-child,

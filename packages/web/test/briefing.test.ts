@@ -115,6 +115,16 @@ describe('parseMarkdown 块级', () => {
     expect(parseMarkdown('---')).toEqual([{ kind: 'rule' }]);
   });
 
+  it('标题标记后只有空白也算标题起始，段落续行判定与块级分发一致', () => {
+    expect(parseMarkdown('#   ')).toEqual([{ kind: 'heading', level: 1, inline: [] }]);
+    // 段落续行判定必须认出同一行是块起始而停下，否则 'a' 会把 '#   ' 吞进段落。
+    expect(parseMarkdown('a\n#   \nb')).toEqual([
+      { kind: 'paragraph', inline: [{ kind: 'text', text: 'a' }] },
+      { kind: 'heading', level: 1, inline: [] },
+      { kind: 'paragraph', inline: [{ kind: 'text', text: 'b' }] },
+    ]);
+  });
+
   it('CRLF 与 LF 等价', () => {
     expect(parseMarkdown('# a\r\n\r\n- b\r\n  - c')).toEqual(parseMarkdown('# a\n\n- b\n  - c'));
   });
