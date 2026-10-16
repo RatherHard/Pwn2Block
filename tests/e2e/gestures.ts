@@ -499,6 +499,23 @@ export async function connectFromToolbox(
 
 /** 在积木里按顺序找可编辑字段（含影子数字积木里的字段），点开并输入新值。 */
 export async function editBlockField(page: Page, blockId: string, index: number, value: string): Promise<void> {
+  const fieldExists = await page.evaluate<boolean>(`(() => { ${PAGE_HELPERS}
+    const main = __mainCanvas();
+    if (main === null) return false;
+    const g = main.querySelector('g.blocklyDraggable[data-id=' + JSON.stringify(${JSON.stringify(blockId)}) + ']');
+    if (g === null) return false;
+    return [...g.querySelectorAll('.blocklyEditableField')][${index}] !== undefined;
+  })()`);
+  if (!fieldExists) throw new Error(`积木 ${blockId} 的第 ${index} 个可编辑字段不存在`);
+
+  await page.evaluate<void>(`(() => { ${PAGE_HELPERS}
+    const main = __mainCanvas();
+    const g = main?.querySelector('g.blocklyDraggable[data-id=' + JSON.stringify(${JSON.stringify(blockId)}) + ']');
+    const field = g === null || g === undefined ? undefined : [...g.querySelectorAll('.blocklyEditableField')][${index}];
+    field?.scrollIntoView({ block: 'center', inline: 'center' });
+  })()`);
+
+  // 滚动后重新读取坐标；Blockly 的画布位置可能已改变，不能复用滚动前的矩形。
   const box = await page.evaluate<Box | null>(`(() => { ${PAGE_HELPERS}
     const main = __mainCanvas();
     if (main === null) return null;
