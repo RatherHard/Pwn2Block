@@ -136,7 +136,7 @@ function materializeSnapshot(
     stdin: restored.stdin,
     stdout: restored.stdout,
     fileOffsets: restored.fileOffsets,
-    // 退出码的槽位在快照里必填；写回状态时保持字段的存在性，形状与 `withoutError` 一致。
+    // 退出码的槽位在快照里必填；写回状态时省略不存在的值，与 lastStop / error 一致。
     ...(restored.exitCode === undefined ? {} : { exitCode: restored.exitCode }),
     memory: restored.memory as unknown as MemoryState,
     status: orchestration.status,

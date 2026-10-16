@@ -13,7 +13,6 @@ import {
   withLastStop,
   withStatus,
   withSteps,
-  withoutError,
 } from './state';
 import { invalidIpError, memFaultError, resourceLimitError } from './vm-errors';
 
@@ -87,18 +86,19 @@ export function fetchWindow(
 function judge(env: EngineEnv, state: VmState, ip: bigint): { state: VmState; stop: StopReason } {
   const verdict = evaluateVerdict(env.win, env.fail, predicateContext(env, state));
   const exited = isExited(state);
-  const cleared = withoutError(state);
+  // error 只由 failedState 与 failed 一起写入；stepOnce 对失败态及执行异常提前返回。
+  // 回退恢复整份历史状态，因此到达判题的状态没有待清理的 error。
 
   if (verdict === 'fail') {
     return {
-      state: withLastStop(withStatus(cleared, 'failed'), { reason: 'exception', addr: ip }),
+      state: withLastStop(withStatus(state, 'failed'), { reason: 'exception', addr: ip }),
       stop: 'exception',
     };
   }
   if (verdict === 'win') {
-    return { state: withStatus(cleared, 'satisfied'), stop: exited ? 'exit' : 'step' };
+    return { state: withStatus(state, 'satisfied'), stop: exited ? 'exit' : 'step' };
   }
-  return { state: withStatus(cleared, exited ? 'exited' : 'ready'), stop: exited ? 'exit' : 'step' };
+  return { state: withStatus(state, exited ? 'exited' : 'ready'), stop: exited ? 'exit' : 'step' };
 }
 
 /**

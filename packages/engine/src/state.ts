@@ -38,11 +38,6 @@ export function readRegister(state: VmState, name: string): bigint {
   return state.registers[name] ?? 0n;
 }
 
-/** 读一组寄存器（保持传入顺序）。 */
-export function readRegisters(state: VmState, names: readonly string[]): bigint[] {
-  return names.map((name) => readRegister(state, name));
-}
-
 /** 写单个寄存器，值按位宽掩蔽。 */
 export function writeRegister(state: VmState, name: string, value: bigint, mask: bigint): VmState {
   return { ...state, registers: { ...state.registers, [name]: maskTo(value, mask) } };
@@ -92,13 +87,6 @@ export function withStatus(state: VmState, status: InstanceStatus): VmState {
 
 export function withLastStop(state: VmState, lastStop: LastStop): VmState {
   return { ...state, lastStop };
-}
-
-/** 清掉 `error` 字段而不是留 `undefined`，让投影与快照里的状态形状稳定。 */
-export function withoutError(state: VmState): VmState {
-  if (state.error === undefined) return state;
-  const { error: _dropped, ...rest } = state;
-  return rest;
 }
 
 /**
