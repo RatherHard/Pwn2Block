@@ -50,7 +50,12 @@ function addressOf(raw: string): bigint | undefined {
   return isHex(raw) ? parseHex(raw) : undefined;
 }
 
-/** 动作层区间校验：隐藏 → `hidden_address`，未映射 / 越权 → `inaccessible_address`（04 §2）。 */
+/**
+ * 动作层区间校验：隐藏 → `hidden_address`，未映射 / 越权 → `inaccessible_address`（04 §2）。
+ *
+ * `len === 0`（只有 `write_bytes` 的空 `hex` 会走到）→ 一律放行：零长度不做任何地址判定，
+ * 与内存层 `planAccess` 同一规则（09 §7 第 8 条，理由见 `layout.ts` 的 `checkActionRange`）。
+ */
 function checkRange(
   env: EngineEnv,
   addr: bigint,
@@ -102,6 +107,12 @@ function stdinOverflowDetail(state: VmState, bytes: Uint8Array): string {
   return `stdin 累计 ${state.stdin.bytes.length + bytes.length} 字节超过上限 ${MAX_IO_BYTES}`;
 }
 
+/**
+ * `write_bytes`：`[addr, addr + len)` 写入十六进制字节（04 §2）。
+ *
+ * `hex === ''`（零字节）是**真正的空操作**：不做地址 / 权限 / 隐藏判定、不触碰任何字节，
+ * 但仍然是一次生效动作（计入 `executed` 与请求层历史）。非空区间照旧按 04 §2 判定。
+ */
 function writeBytesAction(env: EngineEnv, state: VmState, action: Extract<PrimitiveAction, { type: 'write_bytes' }>): PrimitiveOutcome {
   const addr = addressOf(action.addr);
   if (addr === undefined) return rejected(state, rejectError('invalid_arguments', 'write_bytes 的 addr 非法'));

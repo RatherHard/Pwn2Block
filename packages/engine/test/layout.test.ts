@@ -78,7 +78,7 @@ describe('checkActionRange：动作层的隐藏 / 权限判定', () => {
     const verdict = checkActionRange(index, 0x2000n, 16, 'w');
     expect(verdict.ok).toBe(true);
     if (!verdict.ok) return;
-    expect(verdict.region.id).toBe('data');
+    expect(verdict.region?.id).toBe('data');
   });
 
   it('未映射 → inaccessible_address', () => {
@@ -111,9 +111,17 @@ describe('checkActionRange：动作层的隐藏 / 权限判定', () => {
     });
   });
 
-  it('长度为 0 时只要求起点在可访问区域内', () => {
-    expect(checkActionRange(index, 0x2000n, 0, 'w').ok).toBe(true);
-    expect(checkActionRange(index, 0x6000n, 0, 'w').ok).toBe(false);
+  it('长度为 0 时不做任何地址、权限、隐藏判定（09 §7 第 8 条，与内存层 planAccess 统一）', () => {
+    // D5 对账后的决定：零长度不构成映射/权限探测，因此已映射、未映射、隐藏、只读、越界
+    // 全部放行，且没有匹配到任何区域（`region === undefined`）。原来这里钉的是
+    // 「只要求起点在可访问区域内」——那正是被判定为该消掉的特例。
+    expect(checkActionRange(index, 0x2000n, 0, 'w')).toEqual({ ok: true, region: undefined });
+    expect(checkActionRange(index, 0x5000n, 0, 'w')).toEqual({ ok: true, region: undefined });
+    expect(checkActionRange(index, 0x6000n, 0, 'w')).toEqual({ ok: true, region: undefined });
+    expect(checkActionRange(index, 0x4000n, 0, 'w')).toEqual({ ok: true, region: undefined });
+    expect(checkActionRange(index, 0x9000n, 0, 'r')).toEqual({ ok: true, region: undefined });
+    // 非法长度仍然是拒绝，与零长度不是一回事。
+    expect(checkActionRange(index, 0x2000n, -1, 'w').ok).toBe(false);
   });
 
   it('读判定与写判定分开', () => {

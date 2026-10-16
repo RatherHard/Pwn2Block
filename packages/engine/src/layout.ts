@@ -109,18 +109,31 @@ export function isRegionVisible(state: VmState, region: VmaRegion): boolean {
   return !region.hidden || state.revealed.includes(region.id);
 }
 
-/** 动作层一次区间访问的判定结果。 */
+/**
+ * 动作层一次区间访问的判定结果。
+ *
+ * `region` 只在 `len > 0` 时必然存在；`len === 0` 时没有任何区域被访问，因此是 `undefined`
+ * （见 `checkActionRange` 的零长度规则）。
+ */
 export type RangeVerdict =
-  | { readonly ok: true; readonly region: VmaRegion }
+  | { readonly ok: true; readonly region: VmaRegion | undefined }
   | { readonly ok: false; readonly code: 'hidden_address' | 'inaccessible_address' };
 
 /**
  * 判定“直接动作”能否访问 `[addr, addr + len)`（04 §2）。
  *
  * 规则与错误码：
+ * - `len === 0` → **一律放行**，不做地址、权限、隐藏判定（见下方理由）。
  * - 区间触及任何隐藏 VMA → `hidden_address`（布局公开，区分原因不泄露内容）。
  * - 区间未映射、跨越空洞或权限不足 → `inaccessible_address`。
  * - 区间必须完整落在**一个**可访问区域里。
+ *
+ * 零长度规则（09 §7 第 8 条，D5 对账后与内存层 `planAccess` 的 `len === 0` 统一）：
+ * 零长度不读也不写任何内容，既不违反「隐藏即不下发」，也不构成越权；反过来，若在这里判定，
+ * 就等于用动作层回答「这个地址是否已映射 / 可写」——那正是 09 §7 第 8 条说不该成为探测的事
+ * （文档说不构成探测、代码却在构成探测）。统一到「一律放行」是把特例**消掉**，
+ * 而不是再加一条「按隐藏判定」的规则——后者只是换一批地址被拒，仍然是个探测。
+ * 调用方（`actions.ts` 的 `checkRange`）保证零字节不会触碰内存。
  */
 export function checkActionRange(
   index: LayoutIndex,
@@ -130,6 +143,11 @@ export function checkActionRange(
 ): RangeVerdict {
   if (!Number.isSafeInteger(len) || len < 0) {
     return { ok: false, code: 'inaccessible_address' };
+  }
+
+  // 零长度：不查隐藏、不查映射、不查权限。
+  if (len === 0) {
+    return { ok: true, region: undefined };
   }
 
   const start = addr & index.mask;
