@@ -288,5 +288,160 @@ describe('会话控制器：运行与终止', () => {
     expect(api.calls.length).toBe(before);
     chunk.release();
     await until(() => !controller.state.running && !controller.state.busy, '本轮结束');
+    await flush();
+    // 终止本身一个请求都没加：只有 [reset] 与已在途的第一片。
+    expect(api.calls.length).toBe(before);
+    expect(actionsCalls(api).map((call) => call.actions?.length)).toEqual([1, 512]);
+    expect(controller.state.cursor).toBe(512);
+    expect(controller.state.aborted).toEqual({ executed: 512, total: 600 });
+  });
+
+  it('运行排在在途单步之后时终止：放行单步后一个 reset 都不发', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, [{ type: 'ret' }, { type: 'push', value: '0x1' }, { type: 'ret' }]);
+    const step = deferred();
+    api.gate(step.promise);
+    controller.run({ kind: 'step' });
+    await until(() => actionsCalls(api).length === 1, '单步发出');
+    api.gate(undefined);
+    controller.run({ kind: 'run-all' });
+    controller.run({ kind: 'abort' });
+    expect(controller.state.queued).toBe(1);
+
+    step.release();
+    await until(() => !controller.state.running && !controller.state.busy, '队列排空');
+    await flush();
+    expect(actionsCalls(api).map((call) => call.actions)).toEqual([[{ type: 'ret' }]]);
+    // 本轮还没开始就被终止：记下的是开始那一刻的游标（单步之后的 1）。
+    expect(controller.state.aborted).toEqual({ executed: 1, total: 3 });
+    expect(controller.state.cursor).toBe(1);
+  });
+});
+
+/** 三个可区分的动作：撤销后再单步，能看出提交的是哪一条。 */
+const DISTINCT = [
+  { type: 'ret' },
+  { type: 'push', value: '0x1' },
+  { type: 'push', value: '0x2' },
+] as const;
+
+describe('会话控制器：运行之后的撤销（服务端每个请求一层 undo，04 §3）', () => {
+  it('单步 → 运行（reset + 一片）→ 撤销：游标回到 reset 之后，再单步提交第一条', async () => {
+    const { api, tracker, controller } = await open({ history: { undo: 5, stepBack: 0 } });
+    compileInto(tracker, controller, DISTINCT);
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.cursor === 1 && !controller.state.busy, '先单步一次');
+    controller.run({ kind: 'run-all' });
+    await until(() => controller.state.cursor === 3 && !controller.state.running, '运行结束');
+
+    // 服务端撤掉的是最后那一片：实例回到 reset 之后的初态。
+    controller.run({ kind: 'undo' });
+    await until(() => actionsCalls(api).length === 4 && !controller.state.busy, '撤销一次');
+    expect(controller.state.cursor).toBe(0);
+    controller.run({ kind: 'step' });
+    await until(() => actionsCalls(api).length === 5 && !controller.state.busy, '再单步');
+    expect(actionsCalls(api)[4]?.actions).toEqual([{ type: 'ret' }]);
+  });
+
+  it('两次撤销回到运行前：游标历史层数等于运行实际生效的请求数', async () => {
+    const { api, tracker, controller } = await open({ history: { undo: 5, stepBack: 0 } });
+    compileInto(tracker, controller, DISTINCT);
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.cursor === 1 && !controller.state.busy, '先单步一次');
+    controller.run({ kind: 'run-all' });
+    await until(() => controller.state.cursor === 3 && !controller.state.running, '运行结束');
+
+    controller.run({ kind: 'undo' });
+    controller.run({ kind: 'undo' });
+    await until(() => actionsCalls(api).length === 5 && !controller.state.busy, '撤销两次');
+    // 第二次撤掉的是 reset：回到单步之后，下一条是第二个动作。
+    expect(controller.state.cursor).toBe(1);
+    controller.run({ kind: 'step' });
+    await until(() => actionsCalls(api).length === 6 && !controller.state.busy, '再单步');
+    expect(actionsCalls(api)[5]?.actions).toEqual([{ type: 'push', value: '0x1' }]);
+  });
+
+  it('多片运行逐片撤销：600 = reset + 512 + 88，三次撤销依次回到 512、0、1', async () => {
+    const { api, tracker, controller } = await open({ history: { undo: 5, stepBack: 0 } });
+    compileInto(tracker, controller, repeatedActions(600));
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.cursor === 1 && !controller.state.busy, '先单步一次');
+    controller.run({ kind: 'run-all' });
+    await until(() => controller.state.cursor === 600 && !controller.state.running, '运行结束');
+
+    const cursors: number[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      controller.run({ kind: 'undo' });
+      await until(() => actionsCalls(api).length === 5 + index && !controller.state.busy, `撤销 ${index + 1}`);
+      cursors.push(controller.state.cursor);
+    }
+    expect(cursors).toEqual([512, 0, 1]);
+  });
+
+  it('抛错的分片不留游标历史：撤销跳过它，直接回到上一片之前', async () => {
+    const { api, tracker, controller } = await open({ history: { undo: 5, stepBack: 0 } });
+    compileInto(tracker, controller, repeatedActions(1100));
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.cursor === 1 && !controller.state.busy, '先单步一次');
+    const chunk = await holdFirstChunk(api, controller);
+    api.failNext(new ApiClientError('internal', '连接不上服务端', { network: true }));
+    chunk.release();
+    await until(() => !controller.state.running && !controller.state.busy, '本轮结束');
+    expect(controller.state.cursor).toBe(512);
+
+    controller.run({ kind: 'undo' });
+    await until(() => actionsCalls(api).length === 5 && !controller.state.busy, '撤销一次');
+    expect(controller.state.cursor).toBe(0);
+    controller.run({ kind: 'undo' });
+    await until(() => actionsCalls(api).length === 6 && !controller.state.busy, '撤销两次');
+    expect(controller.state.cursor).toBe(1);
+  });
+
+  it('一条都没生效的分片（executed 0）不留游标历史：服务端也没压 undo 层', async () => {
+    const { api, tracker, controller } = await open({ history: { undo: 5, stepBack: 0 } });
+    compileInto(tracker, controller, DISTINCT);
+    controller.run({ kind: 'step' });
+    await until(() => controller.state.cursor === 1 && !controller.state.busy, '先单步一次');
+    respondToChunks(api, (actions) => ({
+      results: [{ ok: false, action: actions[0]?.type ?? 'ret', error: { code: 'invalid_ip', message: '越界' } }],
+      executed: 0,
+      projection: makeProjection(),
+      history: { undo: 5, stepBack: 0 },
+    }));
+    controller.run({ kind: 'run-all' });
+    await until(() => actionsCalls(api).length === 3 && !controller.state.running, '运行结束');
+
+    controller.run({ kind: 'undo' });
+    await until(() => actionsCalls(api).length === 4 && !controller.state.busy, '撤销一次');
+    // 唯一的服务端 undo 层属于 reset：撤销回到运行前的游标 1。
+    expect(controller.state.cursor).toBe(1);
+  });
+});
+
+describe('会话控制器：运行途中改动积木', () => {
+  it('改动积木（产物过期）后不再发下一片，也不记「已终止」', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, repeatedActions(600));
+    const chunk = await holdFirstChunk(api, controller);
+    controller.noteEdit();
+    chunk.release();
+    await until(() => !controller.state.running && !controller.state.busy, '本轮结束');
+    await flush();
+    expect(actionsCalls(api).map((call) => call.actions?.length)).toEqual([1, 512]);
+    expect(controller.state.running).toBe(false);
+    expect(controller.state.aborted).toBeUndefined();
+  });
+
+  it('自动重编译换了产物后不再发旧产物的分片', async () => {
+    const { api, tracker, controller } = await open();
+    compileInto(tracker, controller, repeatedActions(600));
+    const chunk = await holdFirstChunk(api, controller);
+    compileInto(tracker, controller, repeatedActions(700));
+    chunk.release();
+    await until(() => !controller.state.running && !controller.state.busy, '本轮结束');
+    await flush();
+    expect(actionsCalls(api).map((call) => call.actions?.length)).toEqual([1, 512]);
+    expect(controller.state.running).toBe(false);
+    expect(controller.state.aborted).toBeUndefined();
   });
 });

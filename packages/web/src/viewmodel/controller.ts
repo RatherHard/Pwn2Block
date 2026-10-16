@@ -30,6 +30,7 @@ import { ApiClientError, isSessionExpired, type ApiClient } from '../api';
 import {
   createArtifactTracker,
   type ArtifactTracker,
+  type PayloadArtifact,
   type PayloadCompileState,
 } from '../compiler/artifact';
 import type { ActionOrigin, NormalizedWorkspace } from '../compiler/types';
@@ -374,8 +375,8 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     }
   }
 
-  function pushCursor(): void {
-    const next = [...cursorStack, state.cursor];
+  function pushCursor(cursor: number = state.cursor): void {
+    const next = [...cursorStack, cursor];
     cursorStack = next.length > MAX_SNAPSHOTS ? next.slice(next.length - MAX_SNAPSHOTS) : next;
   }
 
@@ -490,6 +491,32 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   }
 
   /**
+   * 发运行里的一个请求，并按服务端的口径记游标历史（04 §3）：引擎**每个请求**压一层 undo
+   * （在第一个真正生效的动作之前；一条都没生效就不压），所以客户端也按请求记——
+   * 请求前的游标只在响应回来且 `executed > 0` 时才压栈。请求抛错时什么都不留，
+   * 撤销就不会弹出一条服务端并不存在的历史。
+   */
+  async function sendRunRequest(
+    id: string,
+    command: RunCommand,
+    actions: readonly Action[],
+  ): Promise<ActionsResponse> {
+    const before = state.cursor;
+    const response = await api.actions(id, actions);
+    if (response.executed > 0) pushCursor(before);
+    applyActions(command, response);
+    return response;
+  }
+
+  /**
+   * 运行途中积木被改动（产物过期，或自动重编译换了一份产物）：旧产物的后续分片已经不是
+   * 画布上的程序，不能再发。这不是用户的「终止」，所以不记 `aborted`。
+   */
+  function artifactChanged(artifact: PayloadArtifact): boolean {
+    return tracker.state.artifact !== artifact || tracker.state.stale;
+  }
+
+  /**
    * 运行（05 §3）：先 `[reset]` 回到初态，再从头按 512 分片发**完整**序列，末尾不补 `run`。
    *
    * 终止只在每次响应应用之后检查：在途那片的响应照常应用（服务端已经执行了它），之后不再发。
@@ -500,13 +527,11 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     const total = artifact.actions.length;
     // 排在别的命令后面时就被终止了：一个请求都不发。
     if (abortedBy(round, total)) return;
-    pushCursor();
-    const reset = await api.actions(id, [{ type: 'reset' }]);
-    applyActions({ kind: 'reset' }, reset);
+    const reset = await sendRunRequest(id, { kind: 'reset' }, [{ type: 'reset' }]);
     if (abortedBy(round, total) || stopped(reset, 1)) return;
     for (const chunk of runChunks(artifact.actions)) {
-      const response = await api.actions(id, chunk);
-      applyActions({ kind: 'run-all' }, response);
+      if (artifactChanged(artifact)) return;
+      const response = await sendRunRequest(id, { kind: 'run-all' }, chunk);
       if (abortedBy(round, total) || stopped(response, chunk.length)) return;
     }
   }
