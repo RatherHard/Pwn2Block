@@ -209,7 +209,7 @@ function buildContractSampleProjection(priv: PrivateChallenge): Record<string, u
     stdin: { hex: '', pos: 0 },
     stdout: { hex: '' },
     disasm: [],
-    lastStop: { reason: 'step' },
+    lastStop: { reason: 'exception', addr: '0x400000' },
   };
 }
 
