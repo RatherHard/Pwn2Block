@@ -194,8 +194,12 @@ export class Pwn2BlockTopBar extends LitElement {
         </label>
         <span class="desc">${enabled ? VIEW_DESCRIPTIONS[kind] : `${VIEW_DESCRIPTIONS[kind]}（本题未声明）`}</span>
         <span class="order">
-          <button type="button" title="上移" @click=${() => this.move(kind, -1)}>↑</button>
-          <button type="button" title="下移" @click=${() => this.move(kind, 1)}>↓</button>
+          <button type="button" title="上移" aria-label=${`上移${VIEW_TITLES[kind]}`} @click=${() => this.move(kind, -1)}>
+            ↑
+          </button>
+          <button type="button" title="下移" aria-label=${`下移${VIEW_TITLES[kind]}`} @click=${() => this.move(kind, 1)}>
+            ↓
+          </button>
         </span>
       </li>
     `;

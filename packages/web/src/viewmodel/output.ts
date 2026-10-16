@@ -9,7 +9,9 @@
  */
 import { isVmErrorCode, type ActionResultView, type Projection } from '@pwn2block/shared';
 import type { PayloadArtifact } from '../compiler/artifact';
+import { blockIdForAction, isLocatableError } from '../compiler/locate';
 import type { CompileError } from '../compiler/types';
+import { actionRowFor, debugOffset } from './highlight';
 import { MESSAGE_STALE } from './program';
 import type { StatusTone } from './session';
 
@@ -32,6 +34,11 @@ export interface OutputInput {
   /** 最近一次请求的动作结果（04 §5 的 `results`）。 */
   readonly results: readonly ActionResultView[];
   readonly projection?: Projection;
+  /**
+   * 程序区游标（05 §3）：用来把结果里的第 k 条对回产物里的第几个动作，
+   * 从而给被拒绝 / 异常的动作一个「定位积木」出口（05 §5、§6）。
+   */
+  readonly cursor?: number;
 }
 
 export const TEXT_SATISFIED = '当前状态已满足成功条件：确认 payload 自足后点「提交判题」。';
@@ -52,7 +59,9 @@ function compileEntries(errors: readonly CompileError[]): readonly OutputEntry[]
       tone: 'error' as StatusTone,
       label: `第 ${index + 1} 条`,
       text: error.message,
-      ...(error.blockId === '' ? {} : { blockId: error.blockId }),
+      // 定位判据来自 H 的 `compiler/locate.ts`：空串 blockId 表示「没有具体位置」，
+      // 不能把它当成积木 id 传给 Blockly（那会变成「清空高亮」，看起来像没报错）。
+      ...(isLocatableError(error) ? { blockId: error.blockId } : {}),
     })),
   ];
 }
@@ -62,7 +71,17 @@ function errorText(error: { readonly message: string; readonly note?: string; re
   return `${error.message}${note} · 错误码 ${error.code}`;
 }
 
-function resultEntry(result: ActionResultView, index: number): OutputEntry {
+/** 结果第 `index` 条对应的积木：对不上产物时返回 `undefined`（不猜，09 §3.4）。 */
+function resultBlockId(input: OutputInput, index: number): string | undefined {
+  const cursor = input.cursor;
+  if (cursor === undefined) return undefined;
+  // 服务端 `results` 的下标基准是**分片起点**（`debugOffset` 里有推导）。
+  const batchStart = debugOffset(input.results, cursor);
+  const row = actionRowFor(input.artifact, input.results, batchStart, index);
+  return row === undefined ? undefined : blockIdForAction(input.artifact, row);
+}
+
+function resultEntry(result: ActionResultView, index: number, input: OutputInput): OutputEntry {
   const position = `第 ${index + 1} 个动作 ${result.action}`;
   if (result.ok) {
     return { key: `result-${index}`, tone: 'ok', label: '成功', text: `${position} 执行成功` };
@@ -70,12 +89,14 @@ function resultEntry(result: ActionResultView, index: number): OutputEntry {
   const error = result.error;
   // 运行期异常（指令出错）与动作被拒绝是两回事（04 §2）：界面要说清是哪一种。
   const exception = error !== undefined && isVmErrorCode(error.code);
+  const blockId = resultBlockId(input, index);
   return {
     key: `result-${index}`,
     tone: 'error',
     label: exception ? '异常' : '拒绝',
     text: exception ? `${position} 触发运行期异常` : `${position} 被拒绝，状态未改变`,
     ...(error === undefined ? {} : { detail: errorText(error) }),
+    ...(blockId === undefined ? {} : { blockId }),
   };
 }
 
@@ -133,7 +154,7 @@ export function outputEntries(input: OutputInput): readonly OutputEntry[] {
     });
   }
 
-  entries.push(...input.results.map((result, index) => resultEntry(result, index)));
+  entries.push(...input.results.map((result, index) => resultEntry(result, index, input)));
 
   const projection = input.projection;
   if (projection !== undefined) entries.push(...projectionEntries(projection));

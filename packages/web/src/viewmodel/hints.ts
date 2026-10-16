@@ -8,6 +8,7 @@
  * - 本地保存只是便利：丢失、损坏、被禁用都不影响做题，进度退化成当前页面内存。
  */
 import type { Hint } from '@pwn2block/shared';
+import type { KeyValueStore } from './storage';
 
 export interface HintItem {
   readonly index: number;
@@ -126,22 +127,10 @@ export function hintStorageKey(challengeId: string): string {
   return `pwn2block.hints.v${HINT_STORAGE_VERSION}.${challengeId}`;
 }
 
-/** 只依赖 `getItem` / `setItem`：`localStorage` 与测试替身都满足，node 下也不需要 DOM。 */
-export interface KeyValueStore {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-/** 进程里没有 `localStorage`（node 单测、隐私模式）时返回 `undefined`，进度退化成内存。 */
-export function defaultStore(): KeyValueStore | undefined {
-  try {
-    const storage = (globalThis as { readonly localStorage?: KeyValueStore }).localStorage;
-    return storage === undefined ? undefined : storage;
-  } catch {
-    // 某些浏览器在禁用存储时读属性就抛：本地保存只是便利，不能因此打断做题。
-    return undefined;
-  }
-}
+// `KeyValueStore` / `defaultStore` 的唯一实现在 `viewmodel/storage.ts`（D5 起画布存档与会话记录
+// 也用它）：同一套「存储接口 + 安全退化」实现两份必然漂移（09 §6）。
+export { defaultStore } from './storage';
+export type { KeyValueStore } from './storage';
 
 /** 读取手动揭示条数：缺失、非数字、越界（题目换了 / 数据损坏）一律按 0。 */
 export function readRevealed(store: KeyValueStore | undefined, challengeId: string, total: number): number {

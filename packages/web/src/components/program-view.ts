@@ -56,6 +56,26 @@ export class Pwn2BlockProgramView extends LitElement {
       li.done button.row {
         color: var(--p2b-dim);
       }
+      /* 被拒绝的那一步（05 §6）：颜色之外还有 × 与「被拒绝」文字（05 §7）。 */
+      li.rejected button.row {
+        background: #2a1614;
+        border-color: var(--p2b-error);
+      }
+      li.rejected .type,
+      li.rejected .tag {
+        color: var(--p2b-error);
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
       .mark {
         width: 0.9rem;
       }
@@ -100,6 +120,7 @@ export class Pwn2BlockProgramView extends LitElement {
     stale: { type: Boolean },
     cursor: { type: Number },
     emptyMessage: { attribute: false },
+    errorBlockId: { attribute: false },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）。 */
@@ -107,6 +128,8 @@ export class Pwn2BlockProgramView extends LitElement {
   declare stale: boolean;
   declare cursor: number;
   declare emptyMessage: string;
+  /** 编译失败时该高亮的积木 id（`viewmodel/highlight.ts` 算好）；没有可定位错误时 `undefined`。 */
+  declare errorBlockId?: string;
 
   constructor() {
     super();
@@ -125,7 +148,14 @@ export class Pwn2BlockProgramView extends LitElement {
         ${this.stale ? html`<span class="stale">已过期：积木已改动，请重新编译</span>` : ''}
       </div>
       ${total === 0
-        ? html`<p class="empty">${this.emptyMessage}</p>`
+        ? html`<p class="empty">${this.emptyMessage}</p>
+            ${this.errorBlockId === undefined
+              ? ''
+              : html`<p class="empty">
+                  <button type="button" title="在画布上高亮编译出错的积木" @click=${this.locateError}>
+                    定位出错积木
+                  </button>
+                </p>`}`
         : html`
             <ol>
               ${repeat(
@@ -139,14 +169,22 @@ export class Pwn2BlockProgramView extends LitElement {
   }
 
   private renderRow(row: ProgramRow) {
-    const mark = row.current ? '▶' : row.done ? '✓' : '·';
-    const tag = row.current ? '当前执行位置' : row.done ? '已提交' : '';
-    const title =
+    const mark = row.rejected ? '×' : row.current ? '▶' : row.done ? '✓' : '·';
+    const tag = row.rejected ? '被拒绝' : row.current ? '当前执行位置' : row.done ? '已提交' : '';
+    const base =
       row.blockId === undefined
         ? '来源表里没有对应积木：无法跳回画布定位'
         : `点这一行可在画布上高亮产生它的积木（${row.blockId}）`;
+    const title = row.rejected ? `这一步被服务端拒绝：${base}` : base;
+    const classes = [
+      row.current ? 'current' : '',
+      row.done ? 'done' : '',
+      row.rejected ? 'rejected' : '',
+    ]
+      .filter((name) => name !== '')
+      .join(' ');
     return html`
-      <li class=${[row.current ? 'current' : '', row.done ? 'done' : ''].filter((c) => c !== '').join(' ')}>
+      <li class=${classes}>
         <button
           type="button"
           class="row"
@@ -155,6 +193,7 @@ export class Pwn2BlockProgramView extends LitElement {
           @click=${() => this.select(row)}
         >
           <span class="mark" aria-hidden="true">${mark}</span>
+          <span class="sr-only">${row.rejected ? '被拒绝：' : row.current ? '当前执行位置：' : ''}</span>
           <span class="no">${row.index + 1}</span>
           <span class="type">${row.type}</span>
           <span class="label">${row.label}</span>
@@ -162,6 +201,19 @@ export class Pwn2BlockProgramView extends LitElement {
         </button>
       </li>
     `;
+  }
+
+  /** 编译失败时程序区没有行：这个按钮是唯一的出口，目标与画布上正亮着的积木一致。 */
+  private locateError(): void {
+    const blockId = this.errorBlockId;
+    if (blockId === undefined) return;
+    this.dispatchEvent(
+      new CustomEvent<{ readonly blockId: string }>('p2b-block-select', {
+        detail: { blockId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private select(row: ProgramRow): void {

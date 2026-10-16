@@ -50,6 +50,38 @@ describe('输出区（05 §3、§5、§6）', () => {
     expect(entries[2]?.text).toContain('运行期异常');
   });
 
+  it('被拒绝 / 异常的动作带上定位积木（05 §5、§6）：结果按游标对回产物', () => {
+    const artifact = makeArtifact(ACTIONS, ['b0', 'b1']);
+    const entries = outputEntries({
+      artifact,
+      errors: [],
+      stale: false,
+      cursor: 2,
+      results: [
+        { ok: true, action: 'write_bytes' },
+        { ok: false, action: 'ret', error: { code: 'invalid_ip', message: '指令指针越界' } },
+      ],
+    });
+    expect(entries[1]?.blockId).toBe('b1');
+    // 少了游标就对不回产物：宁可没有定位按钮，也不指错积木（09 §3.4）。
+    const withoutCursor = outputEntries({
+      artifact,
+      errors: [],
+      stale: false,
+      results: [{ ok: false, action: 'ret', error: { code: 'invalid_ip', message: '指令指针越界' } }],
+    });
+    expect(withoutCursor[0]?.blockId).toBeUndefined();
+    // 动作类型对不上同样不定位。
+    const mismatched = outputEntries({
+      artifact,
+      errors: [],
+      stale: false,
+      cursor: 1,
+      results: [{ ok: false, action: 'pop', error: { code: 'empty_history', message: '栈是空的' } }],
+    });
+    expect(mismatched[0]?.blockId).toBeUndefined();
+  });
+
   it('投影的 error.message 与 note 进错误解释（05 §5）', () => {
     const entries = outputEntries({
       artifact: makeArtifact(ACTIONS),

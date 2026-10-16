@@ -120,7 +120,11 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         </div>
       `;
     }
-    const model = verdictModel({ response: verdict.response, origins: verdict.origins });
+    const model = verdictModel({
+      response: verdict.response,
+      origins: verdict.origins,
+      originsVersion: verdict.originsVersion,
+    });
     const replay = verdict.response.replay;
     const last = replay.frames.length;
     return html`
@@ -145,7 +149,13 @@ export class Pwn2BlockVerdictPanel extends LitElement {
       </div>
       <div class="timeline">
         <label for="replay-range">回放时间线</label>
-        <button type="button" title="上一帧" ?disabled=${verdict.position <= 0} @click=${() => this.move(verdict.position - 1)}>
+        <button
+          type="button"
+          title="上一帧"
+          aria-label="上一帧"
+          ?disabled=${verdict.position <= 0}
+          @click=${() => this.move(verdict.position - 1)}
+        >
           ◀
         </button>
         <input
@@ -161,6 +171,7 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         <button
           type="button"
           title="下一帧"
+          aria-label="下一帧"
           ?disabled=${verdict.position >= last}
           @click=${() => this.move(verdict.position + 1)}
         >

@@ -23,11 +23,12 @@ import {
   type SessionController,
 } from '../viewmodel/controller';
 import { diffProjections } from '../viewmodel/diff';
+import { highlightBlockId } from '../viewmodel/highlight';
 import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
-import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode } from '../viewmodel/session';
+import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
+import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import { runMenuModel, type RunCommand } from '../viewmodel/toolbar';
-import { verdictModel } from '../viewmodel/verdict';
 import {
   VIEW_KINDS,
   availableViews as availableViewsOf,
@@ -162,6 +163,7 @@ export class Pwn2BlockApp extends LitElement {
   static override properties = {
     state: { attribute: false },
     api: { attribute: false },
+    store: { attribute: false },
   };
 
   /**
@@ -172,6 +174,9 @@ export class Pwn2BlockApp extends LitElement {
 
   /** 后端客户端注入点：默认用真实 `fetch`，测试传假实现（组件本身不关心谁提供它）。 */
   declare api?: ApiClient;
+
+  /** 本地保存注入点（05 §3.1）：默认 `localStorage`，没有就退化成「不保存」。 */
+  declare store?: KeyValueStore;
 
   private controller?: SessionController;
   /** 会话建立前的视图状态兜底：`undefined` 会覆盖子组件的默认值，所以显式给一份。 */
@@ -196,7 +201,13 @@ export class Pwn2BlockApp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('keydown', this.onKeyDown);
-    const controller = this.controller ?? createSessionController({ api: this.api ?? createApiClient() });
+    const controller =
+      this.controller ??
+      createSessionController({
+        api: this.api ?? createApiClient(),
+        store: this.store ?? defaultStore(),
+        canvas: { restore: () => this.restoreCanvas() },
+      });
     this.controller = controller;
     this.state = controller.state;
     this.offState = controller.subscribe((state) => {
@@ -253,37 +264,91 @@ export class Pwn2BlockApp extends LitElement {
   private renderBody(state: ControllerState) {
     const view = this.activeView(state);
     const challenge = state.challenge;
+    if (challenge === undefined) return this.renderBoot(state);
     const mode = state.page?.mode ?? 'debug';
-    if (view === undefined || challenge === undefined) return this.renderBoot(state);
+    if (view === undefined) {
+      // 第一相位（只有题面、还没有投影，05 §3.1）：画布必须在这一相位就挂上，
+      // 所以左侧空着说明原因、右侧照常渲染 payload 窗口。
+      //
+      // **两个相位必须走同一个模板**：Lit 按模板缓存复用 DOM，换成另一个模板会把
+      // payload 窗口整个重建——画布跟着被销毁，「先装回画布、再接会话」就白做了。
+      const failure = state.notice;
+      const known = failure !== undefined && failure.action !== undefined;
+      return this.renderLayout(
+        state,
+        challenge,
+        known ? failure.tone : 'info',
+        known
+          ? html`<span class="marker" aria-hidden="true">${statusMarker(failure.tone)}</span>
+              <span>${failure.text}</span>`
+          : html`<span class="marker" aria-hidden="true">${statusMarker('info')}</span>
+              <span>正在恢复本地保存的程序并接回调试实例…</span>`,
+        known
+          ? html`<h2>暂时开不了新会话</h2>
+              <p class="lead">${failure.text}</p>`
+          : html`<p class="lead">左侧视图读的是服务端投影：调试实例接回来之后才显示。</p>`,
+      );
+    }
     const status = statusTextOf(view.projection, mode);
-    return html`
-      <p class="status ${status.tone}" role="status" aria-live="polite">
-        <span class="marker" aria-hidden="true">${statusMarker(status.tone)}</span>
+    return this.renderLayout(
+      state,
+      challenge,
+      status.tone,
+      html`<span class="marker" aria-hidden="true">${statusMarker(status.tone)}</span>
         <span class="mode">${statusLine(view.projection, mode)}</span>
-        <span> — ${status.text}</span>
-      </p>
+        <span> — ${status.text}</span>`,
+      html`<pwn2block-view-manager
+        .context=${this.viewContext(view, challenge)}
+        .views=${state.page?.views ?? this.fallbackViews}
+        .available=${availableViewsOf(view.projection, challenge)}
+      ></pwn2block-view-manager>`,
+    );
+  }
+
+  /** 三区骨架：状态行 + 左（视图管理器）+ 右（payload 窗口）。两种相位共用同一份模板。 */
+  private renderLayout(
+    state: ControllerState,
+    challenge: PublicChallenge,
+    tone: StatusTone,
+    status: unknown,
+    left: unknown,
+  ) {
+    return html`
+      <p class="status ${tone}" role="status" aria-live="polite">${status}</p>
       <main>
-        <section class="left" aria-label="视图管理器">
-          <pwn2block-view-manager
-            .context=${this.viewContext(view, challenge)}
-            .views=${state.page?.views ?? this.fallbackViews}
-            .available=${availableViewsOf(view.projection, challenge)}
-          ></pwn2block-view-manager>
-        </section>
-        <section class="right" aria-label="payload 窗口">
-          <pwn2block-payload-panel
-            .challenge=${challenge}
-            .sessionId=${state.sessionId}
-            .state=${state}
-            .runModel=${this.runModel(state)}
-            .highlightBlockId=${this.autoHighlight(state)}
-            @p2b-run=${this.onRun}
-            @p2b-compile=${this.onCompile}
-            @p2b-edit=${this.onEdit}
-          ></pwn2block-payload-panel>
-        </section>
+        <section class="left" aria-label="视图管理器">${left}</section>
+        <section class="right" aria-label="payload 窗口">${this.renderPayloadPanel(state, challenge)}</section>
       </main>
     `;
+  }
+
+  private renderPayloadPanel(state: ControllerState, challenge: PublicChallenge) {
+    return html`<pwn2block-payload-panel
+      .challenge=${challenge}
+      .sessionId=${state.sessionId}
+      .state=${state}
+      .runModel=${this.runModel(state)}
+      .highlightBlockId=${this.autoHighlight(state)}
+      .store=${this.store ?? defaultStore()}
+      @p2b-run=${this.onRun}
+      @p2b-compile=${this.onCompile}
+      @p2b-edit=${this.onEdit}
+    ></pwn2block-payload-panel>`;
+  }
+
+  /**
+   * 画布存档的还原出口（05 §3.1 的「先画布、再会话」靠它保证）。
+   *
+   * 控制器发出第一相位状态之后调用：这里等页面壳自己渲染完（payload 窗口这时才存在）、
+   * 再等窗口把 Blockly 挂上，然后把存档交给窗口去装。装不进去只是「程序没恢复」，
+   * 窗口会返回原因、控制器负责提示，画布内容由桥保证逐块不变（09 §3.2）。
+   */
+  private async restoreCanvas(): Promise<string | undefined> {
+    await this.updateComplete;
+    const panel = this.renderRoot.querySelector<Pwn2BlockPayloadPanel>('pwn2block-payload-panel');
+    if (panel === null) return undefined;
+    await panel.updateComplete;
+    return panel.restoreArchive();
   }
 
   /** 首屏：题目列表来自 `GET /api/challenges`（多题时在这里选，只有一题时控制器直接开局）。 */
@@ -315,11 +380,16 @@ export class Pwn2BlockApp extends LitElement {
       case 'unavailable':
       case 'ready':
       default:
-        return html`<section class="boot" aria-label="等待重新开始">
-          <h2>暂时开不了新会话</h2>
-          <p class="lead">${state.notice?.text ?? '请点「重试」或「重新开始」。'}</p>
-        </section>`;
+        return this.renderUnavailable(state);
     }
+  }
+
+  /** 「现在开不了会话」：说明卡在哪一步，出口是上面那条 notice 里的按钮（重试 / 重新开始）。 */
+  private renderUnavailable(state: ControllerState) {
+    return html`<section class="boot" aria-label="等待重新开始">
+      <h2>暂时开不了新会话</h2>
+      <p class="lead">${state.notice?.text ?? '请点「重试」或「重新开始」。'}</p>
+    </section>`;
   }
 
   private renderNotice(state: ControllerState) {
@@ -412,18 +482,29 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   /**
-   * 自动高亮（05 §4、§6）：判题结果里的被拒绝动作，或第一条编译错误。
+   * 自动高亮（05 §4、§6）：判题里的被拒绝动作、调试里被拒绝的动作，或第一条编译错误。
+   * 判定收口在 `viewmodel/highlight.ts`（内部走 H 的 `compiler/locate.ts`），
+   * 程序区的「定位出错积木」按钮与输出区的定位按钮读的是同一个 id，不各算一套。
    * 点程序区 / 输出区行时由 payload 面板自己高亮，不走这里。
    */
   private autoHighlight(state: ControllerState): string | undefined {
     const verdict = state.verdict;
-    if (state.page?.mode === 'verdict' && verdict !== undefined) {
-      return verdictModel({ response: verdict.response, origins: verdict.origins }).rejected?.blockId;
-    }
-    const errors = state.artifact.errors;
-    if (state.artifact.artifact !== undefined || errors.length === 0) return undefined;
-    const blockId = errors[0]?.blockId ?? '';
-    return blockId === '' ? undefined : blockId;
+    return highlightBlockId({
+      mode: state.page?.mode ?? 'debug',
+      ...(verdict === undefined
+        ? {}
+        : {
+            verdict: {
+              results: verdict.response.results,
+              origins: verdict.origins,
+              originsVersion: verdict.originsVersion,
+            },
+          }),
+      artifact: state.artifact.artifact,
+      errors: state.artifact.errors,
+      results: state.results,
+      cursor: state.cursor,
+    });
   }
 
   private panel(): Pwn2BlockPayloadPanel | undefined {

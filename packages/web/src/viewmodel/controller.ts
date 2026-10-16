@@ -7,8 +7,9 @@
  *    动作在**任务真正开始时**才根据最新状态计算，连点两次「单步」提交的是两条不同的动作。
  * 2. **完整投影进 `PageState`**（04 §4）：每次响应都复用 `viewmodel/session.ts` 的
  *    `applyProjection` / `setMode`，不在这里另造一套页面状态。
- * 3. **按钮门禁只有一份**：`run()` 直接查 `viewmodel/toolbar.ts` 的 `runMenuModel`，
- *    与组件渲染用的是同一张表——界面上禁用的动作，控制器也一定不会发出去。
+ * 3. **按钮门禁只有一份**：`run()`（点击时）与 `execute()`（任务真正开始时）查的是同一张
+ *    `runMenuModel` 表——界面上禁用的动作，控制器在**发出请求之前**一定不会发出去。
+ *    D5 ① 修的正是「只有点击时求值」：排队期间实例可能已经进入终止态，那时必须复查。
  * 4. **调试实例的投影不被提交改动**（05 §6）：提交前保存调试投影，`backToDebug()` 原样恢复。
  *
  * 产物与过期状态**全部**来自 H 的 `ArtifactTracker`（09 §3.2），这里不维护第二份。
@@ -35,6 +36,7 @@ import type { ActionOrigin, NormalizedWorkspace } from '../compiler/types';
 import { runAction, stepAction } from './program';
 import { createSerialQueue } from './queue';
 import { defaultPosition } from './replay';
+import { clearSession, readSession, writeSession, type KeyValueStore } from './storage';
 import {
   applyProjection,
   createPageState,
@@ -68,6 +70,11 @@ export interface VerdictState {
   readonly position: number;
   /** 提交那份产物的来源表：判题动作 → 积木。 */
   readonly origins: readonly ActionOrigin[];
+  /**
+   * 来源表版本（09 §3.4）：判题结果的「高亮哪块积木」也走 `compiler/locate.ts` 的
+   * `blockIdForAction()`，版本对不上就按「来源未知」处理，不做猜测式定位。
+   */
+  readonly originsVersion: number;
 }
 
 export interface ControllerState {
@@ -105,10 +112,36 @@ type Intent =
   | { readonly kind: 'open'; readonly id: string }
   | { readonly kind: 'run'; readonly command: RunCommand };
 
+/** 本地会话记录里要应用到程序区的那部分（见 `pendingResume` 的注释）。 */
+interface StoredResume {
+  readonly cursor: number;
+  readonly results: readonly ActionResultView[];
+  readonly actionsLength: number;
+}
+
 export interface SessionControllerDeps {
   readonly api: ApiClient;
   /** 编译产物追踪器；默认新建一个（09 §3.2 冻结的接口，测试可注入假实现）。 */
   readonly tracker?: ArtifactTracker;
+  /**
+   * 本地保存用的存储（05 §3.1）。**缺省不保存**：页面壳显式传 `defaultStore()`，
+   * 测试不传就不会碰到 jsdom 里那份真实 `localStorage`（否则用例之间会互相串会话）。
+   */
+  readonly store?: KeyValueStore;
+  /** 画布存档的还原出口（05 §3.1 的「先画布、再会话」顺序靠它保证）。 */
+  readonly canvas?: CanvasPort;
+}
+
+/**
+ * 画布端口（05 §3.1）：控制器不能碰 Blockly（`blocks/**` 是唯一接触点，09 §6），
+ * 所以「把本地存档装回画布」这件事由页面壳实现、控制器只按顺序调用。
+ */
+export interface CanvasPort {
+  /**
+   * 保证画布已挂载并装回存档，返回 `undefined` 表示成功（没有存档也算成功），
+   * 否则返回**给用户看**的失败原因。实现方负责等画布挂载完成，别在这里抛错。
+   */
+  restore(): Promise<string | undefined>;
 }
 
 export interface SessionController {
@@ -147,6 +180,14 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   let cursorStack: readonly number[] = [];
   let debugSnapshot: DebugSnapshot | undefined;
   let lastIntent: Intent | undefined;
+  /**
+   * 会话恢复时待应用的「程序区指针」（05 §3.1、04 §1.1）。
+   *
+   * 服务端只回投影，不回「程序区走到第几条动作」——那是纯前端的指针，所以它跟会话 id 一起
+   * 存在本地。**只有产物的动作条数跟存的时候一致才认**：画布存档丢了或被改过，产物就对不上，
+   * 硬套一个旧指针会让下一次试运行把已经执行过的动作再提交一遍。
+   */
+  let pendingResume: StoredResume | undefined;
 
   let state: ControllerState = {
     phase: 'loading',
@@ -215,6 +256,22 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     };
   }
 
+  /**
+   * 命令当前被挡住的**原因**；放行时返回 `undefined`。
+   *
+   * 这是 `run()`（点击时）与 `execute()`（任务真正开始时）共用的唯一判定，
+   * 所以两处不可能给出不同的结论（D5 ① 的缺陷就是「只有点击时求值」）。
+   *
+   * 被禁的是**执行类动作在终止态下**这一类（以及产物过期、无产物、无可退历史、判题模式…），
+   * `busy` / `queued` **不是**门禁：串行队列本来就允许合法排队（04 §1），
+   * 把排队也算成禁用会砍掉「连点两次单步按序执行」这个正常用法。
+   */
+  function blockedReason(command: RunCommand): string | undefined {
+    const button = buttonModel(runMenuModel(menuInput()), command.kind);
+    if (button === undefined) return '这个动作现在不可用';
+    return button.enabled ? undefined : button.disabledReason ?? '这个动作现在不可用';
+  }
+
   function enqueue(task: () => Promise<void>): void {
     void queue.push(task).catch((error: unknown) => {
       // 正常情况下 `execute` 自己吞掉异常；走到这里说明是控制器的 bug，必须显式报出来。
@@ -224,6 +281,9 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
   function handleFailure(error: unknown, command: RunCommand | undefined): void {
     if (isSessionExpired(error)) {
+      // 会话已经死了：本地那条会话记录也不能留，否则下一次刷新会拿一个必然 404 的 id 去接。
+      if (state.challengeId !== undefined) clearSession(deps.store, state.challengeId);
+      pendingResume = undefined;
       patch({
         sessionExpired: true,
         notice: {
@@ -259,6 +319,21 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
         action: 'retry',
       },
     });
+  }
+
+  /**
+   * **启动路径**（题目列表 / 新建会话 / 接回会话）的失败收尾：`handleFailure` 给出提示与
+   * 「重试」出口，这里再补一件它不做的事——把相位从 `loading` / `opening` 挪开。
+   *
+   * 停在加载相位的后果是界面永远显示「正在…」，用户除了刷新没有别的动作（A 的巡检缺陷：
+   * 每 IP 会话配额打满时，页面卡在「正在创建会话」，提示还是「界面内部错误」）。
+   * `unavailable` 就是「现在开不了会话，屏幕上留着重试出口」这个相位。
+   */
+  function handleStartupFailure(error: unknown): void {
+    handleFailure(error, undefined);
+    if (state.notice?.action === 'retry' || state.notice?.tone === 'error') {
+      patch({ phase: 'unavailable' });
+    }
   }
 
   function pushCursor(): void {
@@ -348,6 +423,8 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       notice: undefined,
       sessionExpired: false,
     });
+    // 程序区位置变了就落盘：刷新后要接着这里，而不是把已经执行过的动作再发一遍。
+    persistResume();
   }
 
   async function stepOnce(id: string, command: RunCommand): Promise<void> {
@@ -400,7 +477,12 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       };
     }
     patch({
-      verdict: { response, position: defaultPosition(response.replay), origins: artifact.origins },
+      verdict: {
+        response,
+        position: defaultPosition(response.replay),
+        origins: artifact.origins,
+        originsVersion: artifact.originsVersion,
+      },
       // `results` 保持调试实例的最近一次结果：判题结果有自己的 `results`（在 verdict 里），
       // 而调试实例并没有被这次提交改动（04 §5.1）。
       page: page === undefined ? page : setMode(page, 'verdict'),
@@ -412,6 +494,17 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   async function execute(command: RunCommand): Promise<void> {
     if (sessionId === undefined) {
       notify('error', '会话还没准备好：先选一道题');
+      return;
+    }
+    // **门禁复查（D5 ①）**：点击时放行不等于任务真正开始时还放行。串行队列里的任务可能排了
+    // 好一会儿，排在前面的响应足以把实例推进终止态（或让产物过期、把历史退空）。
+    // G2 Phase 2 的 jsdom 探针实测：同一 tick 连点两次「单步」，第一次响应已把实例推到
+    // `failed`，第二次仍然发出请求（`sentActionsRequests: 2`），多出来的那次被
+    // `not_executable` 拒绝、白记一次 `failures`。这里用与点击时**同一张**按钮表复查，
+    // 被挡住就不发请求，并给出与点击时一致的 `disabledReason` 通知。
+    const blocked = blockedReason(command);
+    if (blocked !== undefined) {
+      notify('warn', blocked);
       return;
     }
     try {
@@ -447,28 +540,188 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     }
   }
 
+  /**
+   * 画布存档的还原（05 §3.1）：失败只是「本地程序没恢复」，画布在桥那一侧**逐块保持原样**
+   * （09 §3.2 的事务式语义），所以这里把原因转成提示，不抛。
+   */
+  async function restoreCanvas(): Promise<string | undefined> {
+    const port = deps.canvas;
+    if (port === undefined) return undefined;
+    try {
+      return await port.restore();
+    } catch (error) {
+      return `本地保存的程序恢复失败（画布保持原样）：${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  /**
+   * 接回上次的调试会话，接不上就新建一个（04 §1.1 的 `GET /api/sessions/:id`、05 §3.1）。
+   *
+   * 两种「接不上」要分开对待：
+   * - **404 / 会话已回收**：正常现象（空闲回收、服务端重启），清掉记录后安静地新建，
+   *   只提示一句，不把「会话已失效」那种红色错误甩给刚刚刷新的用户；
+   * - **网络 / 限流**：交给 `handleFailure` 统一给出「重试」出口，并返回 `undefined` 让调用方
+   *   停在第一相位——第一相位（题面 + 画布）已经发布了，用户的程序还在屏幕上，可以重试。
+   */
+  async function resumeOrCreate(id: string): Promise<
+    | {
+        readonly sessionId: string;
+        readonly projection: PageState['projection'];
+        readonly history: HistoryDepthView;
+        readonly resume?: StoredResume;
+        readonly notice?: Notice;
+      }
+    | undefined
+  > {
+    const stored = readSession(deps.store, id);
+    if (stored !== undefined) {
+      try {
+        const resumed = await api.sessionState(stored.sessionId);
+        return {
+          sessionId: resumed.sessionId,
+          projection: resumed.projection,
+          history: resumed.history,
+          resume: { cursor: stored.cursor, results: stored.results, actionsLength: stored.actionsLength },
+        };
+      } catch (error) {
+        if (!isSessionExpired(error)) {
+          handleStartupFailure(error);
+          return undefined;
+        }
+        clearSession(deps.store, id);
+        const created = await createFresh(id);
+        if (created === undefined) return undefined;
+        return {
+          ...created,
+          notice: {
+            tone: 'warn',
+            text: '上次的调试会话已经不可用了（服务端已回收或重启），已新建一个。本地保存的程序还在。',
+          },
+        };
+      }
+    }
+    return createFresh(id);
+  }
+
+  /**
+   * 新建调试会话。失败**必须**交给 `handleStartupFailure`：让异常穿透到 `enqueue` 的 catch
+   * 会显示「界面内部错误」并把界面留在启动页（429 配额、网络抖动都是真实会发生的）。
+   */
+  async function createFresh(id: string): Promise<
+    | {
+        readonly sessionId: string;
+        readonly projection: PageState['projection'];
+        readonly history: HistoryDepthView;
+      }
+    | undefined
+  > {
+    try {
+      const session = await api.createSession(id);
+      return { sessionId: session.sessionId, projection: session.projection, history: session.history };
+    } catch (error) {
+      handleStartupFailure(error);
+      return undefined;
+    }
+  }
+
+  /**
+   * 打开一道题（05 §3.1）。**两个相位，顺序是硬要求**：
+   * 1. 题面 + 画布：先把 `challenge` 发下去让页面壳挂上画布并装回本地存档；
+   * 2. 会话：`GET /api/sessions/:id` 接回旧实例或新建。
+   *
+   * 反过来的话，会话状态先到、画布还是空的，用户会看到「服务端调试状态回来了、程序区空着」的
+   * 半恢复；而画布装载本身会触发一次重编译，重编译的产物必须落在**已经恢复好的**画布上。
+   */
   async function openSession(id: string): Promise<void> {
     await releaseRetiredSession();
     const challenge: PublicChallenge = await api.getChallenge(id);
-    const session = await api.createSession(id);
-    sessionId = session.sessionId;
-    tracker.clear();
+    // **换题**才清产物：`state.challenge` 记得的是画布当前挂的那道题（`open()` 只改
+    // `challengeId`，不动它）。同一道题重新打开（「重新开始」/ 重试）时画布没换，
+    // 产物与它仍然对得上，清掉只会让程序区空着而画布上还有积木——又一种半恢复。
+    if (state.challenge?.id !== id) tracker.clear();
     cursorStack = [];
     debugSnapshot = undefined;
+    pendingResume = undefined;
+    // 第一相位：题面先到（`page` 还没有，页面壳为此渲染「正在恢复」的骨架 + payload 窗口）。
     publish({
       ...state,
-      phase: 'ready',
+      phase: 'opening',
       challengeId: id,
       challenge,
-      sessionId: session.sessionId,
-      page: createPageState(session.projection),
-      history: session.history,
+      sessionId: undefined,
+      page: undefined,
+      history: EMPTY_HISTORY,
       artifact: tracker.state,
       cursor: 0,
       results: [],
       notice: undefined,
       sessionExpired: false,
       verdict: undefined,
+    });
+    const canvasFailure = await restoreCanvas();
+    // 第二相位：会话。画布已经就位，这一相位里发生的任何重编译都作用在恢复后的程序上。
+    const resumed = await resumeOrCreate(id);
+    // 网络 / 限流：`resumeOrCreate` 已经给出提示与「重试」出口，就停在这里（第一相位不回滚）。
+    if (resumed === undefined) return;
+    sessionId = resumed.sessionId;
+    publish({
+      ...state,
+      phase: 'ready',
+      challengeId: id,
+      challenge,
+      sessionId: resumed.sessionId,
+      page: createPageState(resumed.projection),
+      history: resumed.history,
+      artifact: tracker.state,
+      cursor: 0,
+      results: [],
+      notice: canvasFailure === undefined ? resumed.notice : { tone: 'warn', text: canvasFailure },
+      sessionExpired: false,
+      verdict: undefined,
+    });
+    // 指针要等产物编译出来才能认（`compile()` 里还会再试一次）。
+    pendingResume = resumed.resume;
+    applyPendingResume();
+    persistResume();
+  }
+
+  /**
+   * 把「程序区走到哪儿」写进本地会话记录（05 §3.1）：刷新后要接着上次的位置，而不是从头发一遍。
+   *
+   * 还没套上旧指针时（`pendingResume` 有值，产物还没编译出来）**不写**：这时候 `state.cursor`
+   * 还是刚重置的 0，落盘会把刚读出来的旧指针覆盖掉。
+   */
+  function persistResume(): void {
+    const id = state.challengeId;
+    if (id === undefined || sessionId === undefined || pendingResume !== undefined) return;
+    writeSession(deps.store, id, {
+      sessionId,
+      cursor: state.cursor,
+      results: state.results,
+      actionsLength: tracker.state.artifact?.actions.length ?? 0,
+    });
+  }
+
+  /**
+   * 把会话恢复时读到的程序区指针套上去，**只认条数对得上的产物**；对不上就丢掉并说明，
+   * 绝不把一个指向别的动作序列的指针硬套上去。
+   */
+  function applyPendingResume(): void {
+    const pending = pendingResume;
+    if (pending === undefined) return;
+    const actions = tracker.state.artifact?.actions;
+    if (actions === undefined) return; // 画布还没编出产物：等 `compile()`。
+    pendingResume = undefined;
+    if (actions.length !== pending.actionsLength) {
+      notify(
+        'warn',
+        '本地保存的程序与上次的调试进度对不上（积木被改过，或画布存档没恢复成功），程序区从第一条动作重新开始。',
+      );
+      return;
+    }
+    patch({
+      cursor: Math.min(pending.cursor, actions.length),
+      results: pending.results,
     });
   }
 
@@ -484,7 +737,15 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     lastIntent = { kind: 'list' };
     patch({ phase: 'loading', notice: undefined });
     enqueue(async () => {
-      const challenges = await api.listChallenges();
+      // 列表加载失败（网络不通 / 被限流）同样要有出口：`handleStartupFailure` 会给出带
+      // 「重试」的提示并把相位挪出 `loading`，`retry()` 再按 `lastIntent` 重跑 `start()`。
+      let challenges: readonly ChallengeSummary[];
+      try {
+        challenges = await api.listChallenges();
+      } catch (error) {
+        handleStartupFailure(error);
+        return;
+      }
       if (challenges.length === 0) {
         publish({
           ...state,
@@ -510,9 +771,9 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   }
 
   function run(command: RunCommand): void {
-    const button = buttonModel(runMenuModel(menuInput()), command.kind);
-    if (button === undefined || !button.enabled) {
-      notify('warn', button?.disabledReason ?? '这个动作现在不可用');
+    const blocked = blockedReason(command);
+    if (blocked !== undefined) {
+      notify('warn', blocked);
       return;
     }
     lastIntent = { kind: 'run', command };
@@ -542,9 +803,13 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       // 重新开始也要把旧会话还回去：它可能还活着（只是被判题结果 / 编辑折腾过），
       // 而存活会话有配额（04 §6）。已经被回收的会话 DELETE 会回 404，忽略即可。
       retireSession();
+      // 新会话就等于新实例：本地那条会话记录（含程序区指针）必须一起丢掉，
+      // 否则刷新后会拿旧指针去对新实例。**画布与产物不动**——积木是用户的程序，
+      // 不是会话的一部分（D5 批次 2；`openSession` 也按同一条口径决定要不要清产物）。
+      if (id !== undefined) clearSession(deps.store, id);
       debugSnapshot = undefined;
       cursorStack = [];
-      tracker.clear();
+      pendingResume = undefined;
       publish({
         ...state,
         phase: id === undefined ? 'loading' : 'opening',
@@ -608,6 +873,10 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       tracker.compile(program, challenge);
       cursorStack = [];
       patch({ artifact: tracker.state, cursor: 0, results: [] });
+      // 画布恢复会走到这里：产物刚编出来，正是判断「上次的程序区指针还算不算数」的时候。
+      applyPendingResume();
+      // 产物条数是新的，会话记录里的 `actionsLength` 也要跟着走。
+      persistResume();
     },
 
     noteEdit(): void {
@@ -633,6 +902,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
         cursor: snapshot.cursor,
         results: snapshot.results,
       });
+      persistResume();
     },
 
     selectPosition(position: number): void {

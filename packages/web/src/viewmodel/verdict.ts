@@ -11,6 +11,8 @@
  */
 import type { ActionResultView, ReplayView, SubmitResponse, Verdict } from '@pwn2block/shared';
 import type { ActionOrigin } from '../compiler/types';
+import { ACTION_ORIGIN_VERSION } from '../compiler/types';
+import { blockIdForAction } from '../compiler/locate';
 import { actionInstructionsAt, actionPositions, defaultPosition, failurePosition, frameAt, positionLabel } from './replay';
 import { STATUS_NAMES, statusMarker, type StatusTone } from './session';
 
@@ -56,6 +58,11 @@ export interface VerdictInput {
   readonly response: SubmitResponse;
   /** 提交时那份产物的来源表：判题动作 → 积木（09 §3.4，只活在前端内存里）。 */
   readonly origins?: readonly ActionOrigin[];
+  /**
+   * 来源表版本（09 §3.4）：与当前版本不符时按「来源未知」处理，文案也就不再声称已高亮积木。
+   * 省略时按当前版本算——控制器一定会传真实版本，省略只出现在直接构造的测试里。
+   */
+  readonly originsVersion?: number;
 }
 
 const DETAILS: Readonly<Record<Verdict, { readonly title: string; readonly tone: StatusTone }>> = {
@@ -80,6 +87,7 @@ function rejectedAt(
   results: readonly ActionResultView[],
   replay: ReplayView,
   origins: readonly ActionOrigin[] | undefined,
+  originsVersion: number,
 ): RejectedInfo | undefined {
   const actionIndex = results.findIndex((result) => !result.ok);
   if (actionIndex < 0) return undefined;
@@ -87,8 +95,11 @@ function rejectedAt(
   if (result === undefined) return undefined;
   // 第 k 个提交动作对应第 k 个 `action` 帧（09 §3.4：中间指令帧属于后一个动作，不影响这条对应）。
   const position = actionPositions(replay)[actionIndex];
-  const origin = origins?.[actionIndex];
-  const blockId = origin !== undefined && origin.index === actionIndex ? origin.blockId : undefined;
+  // 定位判据与画布高亮同源（`compiler/locate.ts`）：版本不符 / 下标错位一律按「来源未知」处理。
+  const blockId = blockIdForAction(
+    origins === undefined ? undefined : { origins, originsVersion },
+    actionIndex,
+  );
   return {
     actionIndex,
     action: result.action,
@@ -169,7 +180,10 @@ export function verdictModel(input: VerdictInput): VerdictModel {
   const { response } = input;
   const replay = response.replay;
   const meta = DETAILS[response.verdict];
-  const rejected = response.verdict === 'rejected' ? rejectedAt(response.results, replay, input.origins) : undefined;
+  const rejected =
+    response.verdict === 'rejected'
+      ? rejectedAt(response.results, replay, input.origins, input.originsVersion ?? ACTION_ORIGIN_VERSION)
+      : undefined;
   // `rejected` 也要算失败帧：服务端没在结果里标出哪一条被拒时，这是唯一的兜底说明。
   const failure =
     response.verdict === 'failed' || response.verdict === 'rejected' ? failureOfRun(replay) : undefined;

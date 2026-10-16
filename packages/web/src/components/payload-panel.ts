@@ -15,8 +15,10 @@ import type * as Blockly from 'blockly';
 import { mountBlockly, type BlocklyBridge } from '../blocks/mount';
 import type { NormalizedWorkspace } from '../compiler/types';
 import type { ControllerState } from '../viewmodel/controller';
+import { debugOffset, rejectedRowFor } from '../viewmodel/highlight';
 import { outputEntries } from '../viewmodel/output';
 import { programRows } from '../viewmodel/program';
+import { defaultStore, readCanvas, writeCanvas, type KeyValueStore } from '../viewmodel/storage';
 import type { RunButtonModel } from '../viewmodel/toolbar';
 import { sharedStyles, terminalTheme } from '../theme';
 import './output-view';
@@ -94,6 +96,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     state: { attribute: false },
     runModel: { attribute: false },
     highlightBlockId: { attribute: false },
+    store: { attribute: false },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）。 */
@@ -102,11 +105,15 @@ export class Pwn2BlockPayloadPanel extends LitElement {
   declare state?: ControllerState;
   declare runModel: readonly RunButtonModel[];
   declare highlightBlockId?: string;
+  /** 本地保存用的存储（05 §3.1）；缺省取 `localStorage`，没有就退化成「不保存」。 */
+  declare store?: KeyValueStore;
 
   private bridge?: BlocklyBridge;
   private offChange?: () => void;
   private mountedFor = '';
   private lastHighlight?: string;
+  /** 这一轮挂载的存档还原结果：`failed` 有值表示画布保持原样、原因需要提示出来。 */
+  private restored?: { readonly failed?: string };
 
   constructor() {
     super();
@@ -121,9 +128,14 @@ export class Pwn2BlockPayloadPanel extends LitElement {
   override render() {
     const state = this.state;
     const artifact = state?.artifact.artifact;
+    const errors = state?.artifact.errors ?? [];
     const stale = state?.artifact.stale ?? false;
     const cursor = state?.cursor ?? 0;
     const mode = state?.page?.mode ?? 'debug';
+    // 编译失败时程序区没有行可显示，只留一个「定位出错积木」出口：目标就是画布上正亮着的那块
+    // （`highlightBlockId` 由页面壳用 `compiler/locate.ts` 算好，两处不会指到不同积木）。
+    const errorBlockId = artifact === undefined && errors.length > 0 ? this.highlightBlockId : undefined;
+    const rejectedRow = this.rejectedRowOf(state);
     return html`
       <div class="toolbar">
         <h2>Payload</h2>
@@ -141,11 +153,13 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       </div>
       <div class="program">
         <pwn2block-program-view
-          .rows=${programRows(artifact, cursor)}
+          .rows=${programRows(artifact, cursor, rejectedRow)}
           .stale=${stale}
           .cursor=${cursor}
-          .emptyMessage=${state?.challenge === undefined ? '会话还没开始。' : '点「编译」把画布上的积木编译成动作序列。'}
+          .errorBlockId=${errorBlockId}
+          .emptyMessage=${this.emptyProgramMessage(state, errors.length)}
           @p2b-program-select=${this.onProgramSelect}
+          @p2b-block-select=${this.onBlockSelect}
         ></pwn2block-program-view>
       </div>
       <div class="output">
@@ -155,9 +169,10 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         <pwn2block-output-view
           .entries=${outputEntries({
             artifact,
-            errors: state?.artifact.errors ?? [],
+            errors,
             stale,
             results: state?.results ?? [],
+            cursor,
             ...(state?.page === undefined ? {} : { projection: state.page.projection }),
           })}
           @p2b-block-select=${this.onBlockSelect}
@@ -206,22 +221,103 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     this.highlight(this.lastHighlight === detail.blockId ? undefined : detail.blockId);
   }
 
+  /**
+   * 被拒绝的那个动作在程序区的行号（05 §6 的 `rejected` 结论：高亮对应积木）。
+   *
+   * 判题结果模式优先用**提交那份结果**（横幅讲的就是它）：判题动作序列与程序区行一一对应，
+   * 偏移是 0；提交没被拒时退回调试结果。映射对不上产物时 `undefined`（不猜，09 §3.4）。
+   */
+  private rejectedRowOf(state: ControllerState | undefined): number | undefined {
+    if (state === undefined) return undefined;
+    const artifact = state.artifact.artifact;
+    const verdict = state.verdict;
+    if ((state.page?.mode ?? 'debug') === 'verdict' && verdict !== undefined) {
+      const fromSubmission = rejectedRowFor(artifact, verdict.response.results, 0);
+      if (fromSubmission !== undefined) return fromSubmission;
+    }
+    // 服务端 `results` 的下标基准是**分片起点**（`debugOffset` 里有推导）。
+    const batchStart = debugOffset(state.results, state.cursor);
+    return rejectedRowFor(artifact, state.results, batchStart);
+  }
+
+  /** 程序区空态的说明：编译失败时要说清「没有可用产物」，而不是让用户以为忘了点编译。 */
+  private emptyProgramMessage(state: ControllerState | undefined, errorCount: number): string {
+    if (state?.challenge === undefined) return '会话还没开始。';
+    if (errorCount > 0) {
+      return `编译失败：共 ${errorCount} 条错误，程序区没有可用动作序列（错误逐条列在输出区）。`;
+    }
+    return '点「编译」把画布上的积木编译成动作序列。';
+  }
+
   private onBlockSelect(event: Event): void {
     const { blockId } = (event as CustomEvent<{ readonly blockId: string }>).detail;
     this.highlight(blockId);
   }
 
-  /** 用户手势改了积木：产物过期（05 §3），并立即重新编译（本批任务第 6 条）。 */
+  /** 用户手势改了积木：先落盘再重编译（本地保存是便利，顺序无所谓，但要保证改完就存）。 */
   private onBlocklyChange(): void {
+    this.saveArchive();
     this.dispatchEvent(new CustomEvent('p2b-edit', { bubbles: true, composed: true }));
     this.recompile();
+  }
+
+  /**
+   * 把本地存档装回画布（05 §3.1，D5 批次 2）。**幂等**：同一轮挂载只装一次，
+   * 第二次调用直接返回第一次的结果，所以页面壳可以在「画布挂载完成」后放心再问一遍。
+   *
+   * 契约要点（09 §3.2）：`loadProgram` 失败即**无副作用**——画布逐块保持原样、不通知、
+   * 原错误抛给这里；所以坏存档的后果只是「程序没被恢复」，用户的当前程序绝不会被抹掉。
+   * 返回失败原因（成功或没有存档时为 `undefined`），由调用方决定怎么提示。
+   */
+  restoreArchive(): string | undefined {
+    const done = this.restored;
+    if (done !== undefined) return done.failed;
+    const bridge = this.bridge;
+    const challenge = this.challenge;
+    if (bridge === undefined || challenge === undefined) {
+      // 画布还没挂载：不记结果，等挂载完成后再问一次（调用方按契约会重试）。
+      return undefined;
+    }
+    const archive = readCanvas(this.store ?? defaultStore(), challenge.id);
+    if (archive === undefined) {
+      this.restored = {};
+      return undefined;
+    }
+    try {
+      bridge.loadProgram(archive);
+      this.restored = {};
+      return undefined;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.restored = { failed: `本地保存的程序恢复失败（画布保持原样）：${reason}` };
+      return this.restored.failed;
+    }
+  }
+
+  /**
+   * 当前画布落盘（05 §3.1）。`bridge.save()` 是纯函数（不改画布、不通知），`dispose()` 之后会抛错，
+   * 所以只能在持有 `bridge` 时调用。存不进去只说明本地保存不可用，绝不打断做题。
+   */
+  saveArchive(): boolean {
+    const bridge = this.bridge;
+    const challenge = this.challenge;
+    if (bridge === undefined || challenge === undefined) return false;
+    try {
+      return writeCanvas(this.store ?? defaultStore(), challenge.id, bridge.save());
+    } catch {
+      // `save()` 只在已卸载的画布上抛错；卸载是同步的，所以这里只是兜底，不能让它冒出去。
+      return false;
+    }
   }
 
   private syncMount(): void {
     const challenge = this.challenge;
     const host = this.renderRoot.querySelector<HTMLElement>('#blockly-host');
     if (challenge === undefined || host === null) return;
-    const key = `${challenge.id}#${this.sessionId ?? ''}`;
+    // 挂载键**只认题目**（D5 批次 2 起）：画布是用户的程序，不是会话的一部分。
+    // 原来键里带 `sessionId`，会话一换就重挂一次、把画布清空——那与本地存档自相矛盾
+    // （存档按题目保存，清空的画布下一次刷新又会被装回来），「重新开始」也会白丢用户的程序。
+    const key = challenge.id;
     if (this.bridge !== undefined && this.mountedFor === key) return;
     this.teardown();
     const bridge = mountBlockly(host, challenge);
@@ -260,6 +356,8 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     this.bridge = undefined;
     this.mountedFor = '';
     this.lastHighlight = undefined;
+    // 换了画布（换题 / 会话变了）就要让下一轮挂载重新尝试恢复存档。
+    this.restored = undefined;
     if (bridge !== undefined) bridge.dispose();
     this.setPlaceholderHidden(false);
   }

@@ -49,6 +49,13 @@ describe('程序区（05 §3）', () => {
     expect(programRows(undefined, 0)).toEqual([]);
   });
 
+  it('被拒绝的那一行带 rejected 标记，其余行不带（05 §6）', () => {
+    const rows = programRows(makeArtifact(ACTIONS, ['b0', 'b1', 'b2']), 2, 1);
+    expect(rows.map((row) => row.rejected)).toEqual([false, true, false]);
+    // 没有拒绝（或不传）时全部为 false，不会凭空标红一行。
+    expect(programRows(makeArtifact(ACTIONS), 1).every((row) => !row.rejected)).toBe(true);
+  });
+
   it('动作说明覆盖全部动作类型（step / run / 出题人积木）', () => {
     expect(describeAction({ type: 'step', count: 5 })).toContain('5 条指令');
     expect(describeAction({ type: 'run' })).toContain('连续执行');

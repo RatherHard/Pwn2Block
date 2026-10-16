@@ -31,6 +31,11 @@ export interface ProgramRow {
   readonly current: boolean;
   /** 已经提交过的动作。 */
   readonly done: boolean;
+  /**
+   * 这一步被服务端拒绝（05 §6 的 `rejected` 结论）：行上给「× 被拒绝」，
+   * 颜色不是唯一信息载体（05 §7）。没有拒绝时全部为 `false`。
+   */
+  readonly rejected: boolean;
 }
 
 function argsText(args: Readonly<Record<string, string | number>>): string {
@@ -70,6 +75,7 @@ export function describeAction(action: CompiledAction): string {
 export function programRows(
   artifact: PayloadArtifact | undefined,
   cursor: number,
+  rejectedRow?: number,
 ): readonly ProgramRow[] {
   if (artifact === undefined) return [];
   return artifact.actions.map((action, index) => ({
@@ -79,6 +85,7 @@ export function programRows(
     blockId: artifact.origins[index]?.blockId,
     current: index === cursor,
     done: index < cursor,
+    rejected: index === rejectedRow,
   }));
 }
 

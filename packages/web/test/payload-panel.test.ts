@@ -6,6 +6,8 @@ import { ret2winPublic } from '@pwn2block/shared';
 import '../src/components/payload-panel';
 import type { Pwn2BlockPayloadPanel } from '../src/components/payload-panel';
 import { BLOCK_TYPES } from '../src/compiler/types';
+import { mountBlockly } from '../src/blocks/mount';
+import { readCanvas, readSession, writeCanvas, type KeyValueStore } from '../src/viewmodel/storage';
 import { FAKE_SESSION_ID, makeArtifact, makeControllerState } from './fake-api';
 
 /**
@@ -179,5 +181,104 @@ describe('payload 窗口：输出区（05 §6）', () => {
     // 颜色不是唯一信息载体（05 §7）：条目带文字标签。
     expect(output?.renderRoot.textContent).toContain('编译失败');
     expect(output?.renderRoot.textContent).not.toContain('flag');
+  });
+});
+
+describe('payload 窗口：画布本地保存与恢复（D5 批次 2，05 §3.1）', () => {
+  /** 内存存储：面板只认注入进来的 store，不传就等于这台环境不保存。 */
+  function memoryStore(): KeyValueStore & { readonly data: Map<string, string> } {
+    const data = new Map<string, string>();
+    return {
+      data,
+      getItem: (key) => data.get(key) ?? null,
+      setItem: (key, value) => {
+        data.set(key, value);
+      },
+      removeItem: (key) => {
+        data.delete(key);
+      },
+    };
+  }
+
+  async function mountedWith(store: KeyValueStore): Promise<Pwn2BlockPayloadPanel> {
+    const panel = document.createElement('pwn2block-payload-panel') as Pwn2BlockPayloadPanel;
+    panel.challenge = ret2winPublic;
+    panel.sessionId = FAKE_SESSION_ID;
+    panel.store = store;
+    document.body.append(panel);
+    await panel.updateComplete;
+    await panel.updateComplete;
+    panels.push(panel);
+    return panel;
+  }
+
+  /** 先拿一块真实画布编出存档（存档的格式归 H，测试不该手写序列化内容）。 */
+  function archiveWith(blockType: string): Record<string, unknown> {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const bridge = mountBlockly(host, ret2winPublic);
+    bridge.workspace?.newBlock(blockType);
+    const archive = bridge.save();
+    bridge.dispose();
+    host.remove();
+    return archive;
+  }
+
+  it('用户手势改动后立刻落盘（刷新时才有东西可恢复）', async () => {
+    const store = memoryStore();
+    const panel = await mountedWith(store);
+    const block = panel.workspace?.newBlock(BLOCK_TYPES.actionRet);
+    expect(block).toBeDefined();
+
+    panel.workspace?.fireChangeListener(syntheticEvent('create', false));
+    expect(readCanvas(store, ret2winPublic.id)).toBeDefined();
+    expect(readSession(store, ret2winPublic.id)).toBeUndefined(); // 会话记录归控制器写
+  });
+
+  it('restoreArchive() 把存档装回画布，并且是幂等的', async () => {
+    const store = memoryStore();
+    writeCanvas(store, ret2winPublic.id, archiveWith(BLOCK_TYPES.actionRet));
+
+    const panel = await mountedWith(store);
+    const events: string[] = [];
+    panel.addEventListener('p2b-compile', () => events.push('compile'));
+    expect(panel.restoreArchive()).toBeUndefined();
+    // 装载会触发一次重编译（桥在装载完成后主动通知一次，09 §3.2）。
+    expect(panel.workspace?.getAllBlocks(false).map((each) => each.type)).toEqual([BLOCK_TYPES.actionRet]);
+    expect(panel.restoreArchive()).toBeUndefined();
+
+    // 没有存档时同样是「成功」，不会去动画布。
+    const empty = memoryStore();
+    const bare = await mountedWith(empty);
+    expect(bare.restoreArchive()).toBeUndefined();
+    expect(bare.workspace?.getAllBlocks(false)).toHaveLength(0);
+  });
+
+  it('坏存档：画布逐块保持原样，返回原因是给人看的', async () => {
+    const store = memoryStore();
+    writeCanvas(store, ret2winPublic.id, { blocks: { blocks: [{ type: '不存在的积木' }] } });
+
+    const panel = await mountedWith(store);
+    const before = panel.workspace?.getAllBlocks(false).map((each) => each.id);
+    const reason = panel.restoreArchive();
+    expect(reason).toContain('本地保存的程序恢复失败');
+    // 事务式语义（09 §3.2）：失败即无副作用，用户的程序还在。
+    expect(panel.workspace?.getAllBlocks(false).map((each) => each.id)).toEqual(before);
+  });
+
+  it('画布没挂上时先不返回失败，挂上之后还能再问一次', async () => {
+    const store = memoryStore();
+    writeCanvas(store, ret2winPublic.id, archiveWith(BLOCK_TYPES.actionRet));
+    const panel = document.createElement('pwn2block-payload-panel') as Pwn2BlockPayloadPanel;
+    panel.challenge = ret2winPublic;
+    panel.store = store;
+    // 还没插进文档：没有画布，也没有「装过了」的记忆。
+    expect(panel.restoreArchive()).toBeUndefined();
+    document.body.append(panel);
+    panels.push(panel);
+    await panel.updateComplete;
+    await panel.updateComplete;
+    expect(panel.restoreArchive()).toBeUndefined();
+    expect(panel.workspace?.getAllBlocks(false).map((each) => each.type)).toEqual([BLOCK_TYPES.actionRet]);
   });
 });

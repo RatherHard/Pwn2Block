@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
+import type * as Blockly from 'blockly';
+import { ret2winPublic } from '@pwn2block/shared';
 // 副作用导入：注册自定义元素（只在类型位置用到类名时，编译期会把 import 整条删掉）。
 import '../src/components/app-shell';
 import type { Pwn2BlockApp } from '../src/components/app-shell';
-import { BLOCK_TYPES, MESSAGE_NO_START_BLOCK } from '../src/compiler/types';
+import { ApiClientError } from '../src/api';
+import { mountBlockly } from '../src/blocks/mount';
+import { BLOCK_TYPES, MESSAGE_ACTION_NOT_ALLOWED, MESSAGE_NO_START_BLOCK } from '../src/compiler/types';
 import { MESSAGE_REPLAY_DISASM_STALE } from '../src/viewmodel/replay';
-import { CHANGED_CODE_VMA, createFakeApi, makeReplay, makeSubmitResponse, type FakeApi } from './fake-api';
+import { canvasStorageKey, sessionStorageKey } from '../src/viewmodel/storage';
+import {
+  CHANGED_CODE_VMA,
+  createFakeApi,
+  FAKE_SESSION_ID,
+  makeReplay,
+  makeSubmitResponse,
+  type FakeApi,
+} from './fake-api';
 import { makeProjection } from './helpers';
 
 /**
@@ -92,8 +104,38 @@ function buttonsOf(element: Element | null | undefined): HTMLButtonElement[] {
   return [...(shadowOf(element)?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
 }
 
+function buttonLabels(element: Element | null | undefined): readonly string[] {
+  return buttonsOf(element).map((button) => button.textContent?.trim() ?? '');
+}
+
+/** Blockly 没有公开的高亮读取接口，读它自己记录的运行时数组（同 `payload-panel.test.ts`）。 */
+function highlightedIds(workspace: Blockly.WorkspaceSvg): readonly string[] {
+  const internal = workspace as unknown as { readonly highlightedBlocks: readonly Blockly.Block[] };
+  return internal.highlightedBlocks.map((block) => block.id);
+}
+
+/** 把「开始 → 给定积木」接起来；返回接在开始积木下面的那块。 */
+function chainAfterStart(workspace: Blockly.WorkspaceSvg, types: readonly string[]): readonly Blockly.Block[] {
+  const start = workspace.newBlock(BLOCK_TYPES.start);
+  let previous = start;
+  const blocks: Blockly.Block[] = [];
+  for (const type of types) {
+    const block = workspace.newBlock(type);
+    const next = previous.nextConnection;
+    const before = block.previousConnection;
+    if (next === null || before === null) throw new Error('语句连接不存在：定义有误');
+    next.connect(before);
+    blocks.push(block);
+    previous = block;
+  }
+  return blocks;
+}
+
 afterEach(() => {
   for (const app of apps.splice(0)) app.remove();
+  // 本地保存走的是 jsdom 的真实 `localStorage`（D5 批次 2），用例之间必须清干净：
+  // 否则上一条用例存的画布存档/会话记录会被下一条当成「上次的程序」恢复起来。
+  localStorage.clear();
 });
 
 describe('单页骨架：首屏与装配（05 §1）', () => {
@@ -131,7 +173,11 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
     );
     if (button === undefined) throw new Error('没找到题目按钮');
     button.click();
-    await until(() => app.renderRoot.querySelector('pwn2block-payload-panel') !== null, '会话就绪');
+    // 等「会话建好了」而不是「payload 窗口出现了」：D5 批次 2 起，第一相位（题面 + 画布）
+    // 就会渲染 payload 窗口，用它当就绪信号会等到 createSession 之前。
+    await until(() => api.calls.some((call) => call.method === 'createSession'), '会话就绪');
+    await settle(app);
+    expect(app.renderRoot.querySelector('pwn2block-payload-panel')).not.toBeNull();
     expect(api.calls.find((call) => call.method === 'createSession')?.challengeId).toBe('b');
   });
 });
@@ -330,5 +376,266 @@ describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
     expect(root?.querySelectorAll('li .text')).toHaveLength(3);
     expect(root?.querySelectorAll('.tag')).toHaveLength(3);
     expect(root?.querySelector('[role="status"]')?.textContent).toContain('自动解锁第 1、2、3 条提示');
+  });
+});
+
+describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §4）', () => {
+  it('画布高亮、输出区条目与程序区出口指向同一块积木', async () => {
+    const { app } = await mountApp(createFakeApi());
+    const workspace = panelOf(app).workspace;
+    if (workspace === undefined) throw new Error('画布没挂上');
+    // ret2win 的 allowedActions 里没有 push：这块积木一定编译失败，且错误带得到它的 id。
+    const [push] = chainAfterStart(workspace, [BLOCK_TYPES.actionPush]);
+
+    clickRun(app, '编译');
+    await settle(app);
+
+    // ① 输出区：错误逐条列出，条目带定位出口。
+    const output = inPanel(app, 'pwn2block-output-view');
+    expect(textOf(output)).toContain(MESSAGE_ACTION_NOT_ALLOWED('push'));
+    expect(buttonLabels(output)).toEqual(['定位积木']);
+
+    // ② 程序区：编译失败没有行，只留一个定位出口。
+    const program = inPanel(app, 'pwn2block-program-view');
+    expect(textOf(program)).toContain('编译失败');
+    expect(buttonLabels(program)).toEqual(['定位出错积木']);
+
+    // ③ 画布：出错积木被自动高亮（第一条可定位的错误）。
+    expect(highlightedIds(workspace)).toEqual([push?.id]);
+
+    // 手动清掉高亮后点程序区的出口：同一块积木又被点亮——三处读的是同一个 id。
+    workspace.highlightBlock(null);
+    expect(highlightedIds(workspace)).toEqual([]);
+    buttonsOf(program)
+      .find((button) => button.textContent?.trim() === '定位出错积木')
+      ?.click();
+    await settle(app);
+    expect(highlightedIds(workspace)).toEqual([push?.id]);
+  });
+
+  it('没有具体位置的编译错误（缺开始积木）不给定位出口，也不把空串当积木 id', async () => {
+    const { app } = await mountApp(createFakeApi());
+    panelOf(app).recompile();
+    await settle(app);
+
+    expect(textOf(inPanel(app, 'pwn2block-output-view'))).toContain(MESSAGE_NO_START_BLOCK);
+    expect(buttonLabels(inPanel(app, 'pwn2block-output-view'))).toEqual([]);
+    expect(buttonLabels(inPanel(app, 'pwn2block-program-view'))).toEqual([]);
+  });
+});
+
+describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 2，05 §3.1）', () => {
+  /** 用真实画布编一份存档（存档格式归 H，测试不手写序列化内容）。 */
+  function archiveWithStep(): Record<string, unknown> {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const bridge = mountBlockly(host, ret2winPublic);
+    const workspace = bridge.workspace;
+    if (workspace === undefined) throw new Error('画布没挂上');
+    chainAfterStart(workspace, [BLOCK_TYPES.actionStep]);
+    const archive = bridge.save();
+    bridge.dispose();
+    host.remove();
+    return archive;
+  }
+
+  /** 画布上的积木类型（不含影子积木：`action_step` 的计数输入是影子块，不是用户拼的）。 */
+  function blockTypesOf(app: Pwn2BlockApp): readonly (string | undefined)[] {
+    return (
+      panelOf(app)
+        .workspace?.getAllBlocks(false)
+        .filter((block) => !block.isShadow())
+        .map((block) => block.type) ?? []
+    );
+  }
+
+  function storeSession(cursor: number, actionsLength: number): void {
+    localStorage.setItem(
+      sessionStorageKey('ret2win'),
+      JSON.stringify({
+        sessionId: FAKE_SESSION_ID,
+        cursor,
+        results: cursor === 0 ? [] : [{ ok: true, action: 'step' }],
+        actionsLength,
+      }),
+    );
+  }
+
+  it('刷新：先装回画布，再 GET /api/sessions/:id；程序区立刻有产物', async () => {
+    localStorage.setItem(canvasStorageKey('ret2win'), JSON.stringify(archiveWithStep()));
+    storeSession(1, 1);
+
+    const api = createFakeApi();
+    const app = document.createElement('pwn2block-app') as Pwn2BlockApp;
+    app.api = api.client;
+    // 探针：会话请求发出的那一刻，画布上必须已经有恢复出来的积木（05 §3.1 的硬顺序）。
+    // 探针只是包一层，真正的请求仍走假客户端（调用记录、响应形状都保持一致）。
+    let typesAtSessionFetch: readonly (string | undefined)[] = [];
+    const originalSessionState = api.client.sessionState;
+    api.client.sessionState = (sessionId) => {
+      const probe = app.renderRoot.querySelector('pwn2block-payload-panel');
+      typesAtSessionFetch =
+        probe?.workspace
+          ?.getAllBlocks(false)
+          .filter((block) => !block.isShadow())
+          .map((block) => block.type) ?? [];
+      return originalSessionState(sessionId);
+    };
+    document.body.append(app);
+    apps.push(app);
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '视图管理器出现');
+    await settle(app);
+
+    // 没有新建会话：列表 → 题目 → 接回旧会话。
+    expect(api.calls.map((call) => call.method)).toEqual(['listChallenges', 'getChallenge', 'sessionState']);
+    expect(typesAtSessionFetch).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
+    // 画布与程序区都是恢复出来的内容（程序区的产物是画布编出来的，不是别人塞的）。
+    expect(blockTypesOf(app)).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
+    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
+    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
+    // 接回成功不说废话（没有 notice）。
+    expect(app.renderRoot.querySelector('.notice')).toBeNull();
+    // 记录被刷新成当前状态：下一次刷新还接着走。
+    expect(JSON.parse(localStorage.getItem(sessionStorageKey('ret2win')) ?? '{}')).toMatchObject({
+      sessionId: FAKE_SESSION_ID,
+      actionsLength: 1,
+    });
+  });
+
+  it('没有会话记录时照常新建会话，本地画布仍然先装回去（不是半恢复）', async () => {
+    localStorage.setItem(canvasStorageKey('ret2win'), JSON.stringify(archiveWithStep()));
+
+    const api = createFakeApi();
+    const app = document.createElement('pwn2block-app') as Pwn2BlockApp;
+    app.api = api.client;
+    let typesAtCreate: readonly (string | undefined)[] = [];
+    const originalCreate = api.client.createSession;
+    api.client.createSession = (challengeId) => {
+      typesAtCreate =
+        app.renderRoot
+          .querySelector('pwn2block-payload-panel')
+          ?.workspace?.getAllBlocks(false)
+          .filter((block) => !block.isShadow())
+          .map((block) => block.type) ?? [];
+      return originalCreate(challengeId);
+    };
+    document.body.append(app);
+    apps.push(app);
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '视图管理器出现');
+    await settle(app);
+
+    expect(api.calls.map((call) => call.method)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
+    expect(typesAtCreate).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
+    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
+  });
+
+  it('旧会话已被回收（404）：提示一句并新建，程序还在画布上', async () => {
+    localStorage.setItem(canvasStorageKey('ret2win'), JSON.stringify(archiveWithStep()));
+    storeSession(0, 1);
+
+    const api = createFakeApi();
+    const app = document.createElement('pwn2block-app') as Pwn2BlockApp;
+    app.api = api.client;
+    // 让这一次接回会话返回 404：只在**这个请求**上下毒（`failNext` 会被紧随其后的 settle 消费）。
+    const originalSessionState = api.client.sessionState;
+    api.client.sessionState = (sessionId) => {
+      api.failNext(
+        new ApiClientError('session_expired', '会话不存在', { status: 404, sessionExpired: true }),
+      );
+      return originalSessionState(sessionId);
+    };
+    document.body.append(app);
+    apps.push(app);
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '视图管理器出现');
+    await settle(app);
+
+    expect(api.calls.map((call) => call.method)).toEqual([
+      'listChallenges',
+      'getChallenge',
+      'sessionState',
+      'createSession',
+    ]);
+    const notice = app.renderRoot.querySelector('.notice');
+    expect(notice?.textContent).toContain('本地保存的程序还在');
+    expect(textOf(inPanel(app, 'pwn2block-program-view'))).toContain('step');
+  });
+});
+
+describe('单页骨架：判题被拒与回放时间线的可访问性（D5 ③，05 §6/§7）', () => {
+  async function rejected(): Promise<Mounted> {
+    const replay = makeReplay([
+      { kind: 'action', label: 'step', status: 'ready' },
+      { kind: 'action', label: 'step', status: 'failed', error: { code: 'invalid_ip', message: '指令指针越界' } },
+    ]);
+    const api = createFakeApi({
+      submit: makeSubmitResponse('rejected', {
+        executed: 1,
+        results: [
+          { ok: true, action: 'step' },
+          {
+            ok: false,
+            action: 'step',
+            error: { code: 'invalid_ip', message: '指令指针越界', note: '看看 ret 弹到哪去' },
+          },
+        ],
+        replay,
+      }),
+    });
+    const mounted = await mountApp(api);
+    const workspace = panelOf(mounted.app).workspace;
+    if (workspace === undefined) throw new Error('画布没挂上');
+    chainAfterStart(workspace, [BLOCK_TYPES.actionStep, BLOCK_TYPES.actionStep]);
+    clickRun(mounted.app, '编译');
+    await settle(mounted.app);
+    return mounted;
+  }
+
+  it('程序区标出被拒绝的那一行，并高亮产生它的那块积木', async () => {
+    const { app } = await rejected();
+    const workspace = panelOf(app).workspace;
+    const blocks = [...(workspace?.getAllBlocks(false) ?? [])].filter(
+      (block) => block.type === BLOCK_TYPES.actionStep,
+    );
+    const second = blocks[1];
+    if (workspace === undefined || second === undefined) throw new Error('画布上应有两块 step 积木');
+
+    clickRun(app, '提交判题');
+    await until(() => app.renderRoot.querySelector('pwn2block-verdict-panel') !== null, '判题面板出现');
+    await settle(app);
+
+    const verdict = app.renderRoot.querySelector('pwn2block-verdict-panel');
+    expect(textOf(verdict)).toContain('动作被拒绝');
+    expect(textOf(verdict)).toContain('第 2 个动作 step 被拒绝');
+    // 被拒绝的动作对应录像里那一帧：默认选中它。
+    expect(shadowOf(verdict)?.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('2');
+
+    // 程序区：只有第二行带「× 被拒绝」（颜色不是唯一信息载体，05 §7）。
+    const rows = [...(shadowOf(inPanel(app, 'pwn2block-program-view'))?.querySelectorAll('li') ?? [])];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).not.toContain('被拒绝');
+    expect(rows[1]?.textContent).toContain('被拒绝');
+    // 画布高亮的是产生被拒动作的那块积木（来源表 index 1）。
+    expect(highlightedIds(workspace)).toEqual([second.id]);
+  });
+
+  it('回放时间线的箭头按钮有可读的名字，range 带 aria-valuetext', async () => {
+    const { app } = await rejected();
+    clickRun(app, '提交判题');
+    await until(() => app.renderRoot.querySelector('pwn2block-verdict-panel') !== null, '判题面板出现');
+    await settle(app);
+
+    const verdict = app.renderRoot.querySelector('pwn2block-verdict-panel');
+    const timeline = [...buttonsOf(verdict)];
+    const prev = timeline.find((button) => button.getAttribute('aria-label') === '上一帧');
+    const next = timeline.find((button) => button.getAttribute('aria-label') === '下一帧');
+    // 箭头只有 ◀ / ▶ 一个字符，必须另有可读的名字（05 §7）。
+    expect(prev?.textContent?.trim()).toBe('◀');
+    expect(next?.textContent?.trim()).toBe('▶');
+    // 位置 2 是最后一帧：首尾禁箭头。
+    expect(next?.disabled).toBe(true);
+    expect(prev?.disabled).toBe(false);
+
+    const range = shadowOf(verdict)?.querySelector<HTMLInputElement>('input[type="range"]');
+    expect(range?.getAttribute('aria-valuetext')).toContain('已执行');
   });
 });
