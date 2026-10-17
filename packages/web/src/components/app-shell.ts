@@ -28,7 +28,8 @@ import { viewScrollDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
 import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
-import { runMenuModel } from '../viewmodel/toolbar';
+import { outputEntries } from '../viewmodel/output';
+import { payloadControls, runMenuModel, type RunMenuInput } from '../viewmodel/toolbar';
 import {
   VIEW_KINDS,
   availableViews as availableViewsOf,
@@ -37,6 +38,7 @@ import {
 } from '../viewmodel/views';
 import { sharedStyles, terminalTheme } from '../theme';
 import './briefing-panel';
+import './output-view';
 import './payload-panel';
 import './top-bar';
 import './verdict-panel';
@@ -160,6 +162,19 @@ export class Pwn2BlockApp extends LitElement {
       .right {
         background: var(--p2b-bg);
       }
+      .output {
+        flex: none;
+        margin: 0 0.8rem 0.8rem;
+        padding: 0.9rem 0.75rem 0.75rem;
+      }
+      .mode-hint {
+        margin: 0 0 0.65rem;
+        padding: 0.5rem 0.65rem;
+        border-left: 3px solid var(--p2b-changed);
+        border-radius: 0;
+        color: var(--p2b-changed);
+        background: var(--p2b-bg);
+      }
       .boot {
         flex: 1;
         min-height: 0;
@@ -204,7 +219,8 @@ export class Pwn2BlockApp extends LitElement {
       @media (max-width: 620px) {
         .briefing,
         .notice,
-        .status {
+        .status,
+        .output {
           margin-left: 0.6rem;
           margin-right: 0.6rem;
         }
@@ -384,6 +400,7 @@ export class Pwn2BlockApp extends LitElement {
         <section class="left" aria-label="视图管理器">${left}</section>
         <section class="right" aria-label="payload 窗口">${this.renderPayloadPanel(state, challenge)}</section>
       </main>
+      ${this.renderOutput(state)}
     `;
   }
 
@@ -392,13 +409,45 @@ export class Pwn2BlockApp extends LitElement {
       .challenge=${challenge}
       .sessionId=${state.sessionId}
       .state=${state}
-      .runModel=${this.runModel(state)}
+      .controls=${this.payloadModel(state)}
       .highlightBlockId=${this.autoHighlight(state)}
       .store=${this.activeStore}
       @p2b-run=${this.onRun}
       @p2b-compile=${this.onCompile}
       @p2b-edit=${this.onEdit}
     ></pwn2block-payload-panel>`;
+  }
+
+  /**
+   * 输出区（05 §6）：挂在页面壳里，位于工作区下方、横跨整行（§5.1）。数据来自
+   * `outputEntries`（纯函数），与原来在 payload 面板里的那一份完全一致，只是搬了地方。
+   * 判题结果模式下，原来程序区上方的说明文字改放在这里顶部。
+   */
+  private renderOutput(state: ControllerState) {
+    const artifact = state.artifact.artifact;
+    const errors = state.artifact.errors;
+    const stale = state.artifact.stale;
+    const cursor = state.cursor;
+    const mode = state.page?.mode ?? 'debug';
+    return html`
+      <section class="output box" aria-label="输出区">
+        <h2 class="box-title">输出</h2>
+        ${mode === 'verdict'
+          ? html`<p class="mode-hint">下面是调试实例的历史结果；这一轮判题的结论见上方横幅。</p>`
+          : ''}
+        <pwn2block-output-view
+          .entries=${outputEntries({
+            artifact,
+            errors,
+            stale,
+            results: state.results,
+            cursor,
+            ...(state.page === undefined ? {} : { projection: state.page.projection }),
+          })}
+          @p2b-block-select=${this.onBlockSelect}
+        ></pwn2block-output-view>
+      </section>
+    `;
   }
 
   /**
@@ -528,9 +577,10 @@ export class Pwn2BlockApp extends LitElement {
     return availableViewsOf(view.projection, challenge);
   }
 
-  private runModel(state: ControllerState) {
+  /** `runMenuModel` 与 `payloadControls` 共用的输入：只在这一处拼，不让两份模型漂移。 */
+  private menuInputOf(state: ControllerState): RunMenuInput {
     const page = state.page;
-    return runMenuModel({
+    return {
       mode: page?.mode ?? 'debug',
       hasSession: state.sessionId !== undefined && state.challenge !== undefined,
       sessionExpired: state.sessionExpired,
@@ -543,7 +593,16 @@ export class Pwn2BlockApp extends LitElement {
       // 终止态与控制器取同一份派生（04 §1.1）：`failed` 与「已退出」都禁执行类动作，
       // 两者的禁用原因不同（判负 ≠ 已退出），所以传原因而不是布尔（05 §6）。
       terminal: page === undefined ? undefined : terminalReasonOf(page.projection),
-    });
+    };
+  }
+
+  private runModel(state: ControllerState) {
+    return runMenuModel(this.menuInputOf(state));
+  }
+
+  /** payload 面板的「运行 / 终止」（05 §6）：复用同一份输入，只多传 `running`。 */
+  private payloadModel(state: ControllerState) {
+    return payloadControls({ ...this.menuInputOf(state), running: state.running });
   }
 
   /**

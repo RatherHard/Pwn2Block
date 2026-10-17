@@ -8,6 +8,7 @@ import type { Pwn2BlockPayloadPanel } from '../src/components/payload-panel';
 import { BLOCK_TYPES } from '../src/compiler/types';
 import { mountBlockly } from '../src/blocks/mount';
 import { readCanvas, readSession, writeCanvas, type KeyValueStore } from '../src/viewmodel/storage';
+import { payloadControls, type PayloadControlsInput } from '../src/viewmodel/toolbar';
 import { FAKE_SESSION_ID, makeControllerState } from './fake-api';
 
 /**
@@ -145,24 +146,52 @@ describe('payload 窗口：积木改动 → 过期 + 重编译（05 §3.1 备忘
   });
 });
 
-describe('payload 窗口：输出区（05 §6）', () => {
-  it('编译错误逐条列出并带定位积木按钮，satisfied 只提示去提交', async () => {
+describe('payload 窗口：标题栏（本批任务第 6 条）', () => {
+  it('标题栏只有 payload 与运行 / 终止', async () => {
     const panel = await mountPanel();
-    panel.state = makeControllerState({
-      artifact: {
-        artifact: undefined,
-        errors: [{ blockId: 'missing-input', message: 'gets 的 data 输入还空着' }],
-        stale: false,
-        revision: 0,
-      },
-    });
+    const root = panel.renderRoot;
+    const bar = root.querySelector('.box');
+    expect(bar?.querySelector('.box-title')?.textContent?.trim()).toBe('payload');
+    expect([...(bar?.querySelectorAll('button') ?? [])].map((b) => b.textContent?.trim())).toEqual([
+      '运行',
+      '终止',
+    ]);
+    // 输出区与运行菜单都已经移出这个组件（输出区移到页面壳，运行菜单只剩顶栏那份）。
+    expect(root.querySelector('pwn2block-output-view, pwn2block-run-menu')).toBeNull();
+  });
+
+  it('禁用按钮带原因，点击可用按钮派发 p2b-run', async () => {
+    const panel = await mountPanel();
+    const input: PayloadControlsInput = {
+      mode: 'debug',
+      hasSession: false,
+      sessionExpired: false,
+      artifact: undefined,
+      stale: false,
+      compileErrorCount: 0,
+      history: { undo: 0, stepBack: 0 },
+      cursor: 0,
+      allowedActions: [],
+      running: true,
+    };
+    panel.controls = payloadControls(input);
     await panel.updateComplete;
-    const output = panel.renderRoot.querySelector('pwn2block-output-view');
-    expect(output?.renderRoot.textContent).toContain('gets 的 data 输入还空着');
-    expect(output?.renderRoot.querySelector('button')?.textContent).toContain('定位积木');
-    // 颜色不是唯一信息载体（05 §7）：条目带文字标签。
-    expect(output?.renderRoot.textContent).toContain('编译失败');
-    expect(output?.renderRoot.textContent).not.toContain('flag');
+
+    const buttons = [...panel.renderRoot.querySelectorAll('button')];
+    const run = buttons.find((b) => b.textContent?.trim() === '运行');
+    const abort = buttons.find((b) => b.textContent?.trim() === '终止');
+    // 「运行」被会话门禁拦住：禁用原因只做 title，不置灰之外还要可读。
+    expect(run?.disabled).toBe(true);
+    expect(run?.title).toBe('会话还没准备好：先在上面选一道题');
+
+    // 「终止」在 running 为真时可用：点击派发 p2b-run，detail 为 abort。
+    expect(abort?.disabled).toBe(false);
+    let detail: unknown;
+    panel.addEventListener('p2b-run', (event) => {
+      detail = (event as CustomEvent).detail;
+    });
+    abort?.click();
+    expect(detail).toEqual({ kind: 'abort' });
   });
 });
 

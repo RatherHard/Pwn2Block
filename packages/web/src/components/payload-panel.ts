@@ -1,15 +1,17 @@
 /**
- * Payload 窗口（05 §3）：积木画布 + 工具栏 + 输出区。
+ * Payload 窗口（05 §3）：积木画布 + 标题栏上的「运行 / 终止」。
  *
  * 职责边界：
  * - **Blockly 挂载桥**是页面与 Blockly 之间唯一的接口（09 §3.2），所以画布只在这里挂载，
  *   高亮也只在这里做；组件把「编译请求」「积木被改动」派发出去，由页面壳转给控制器。
- * - **输出区**是纯展示：条目由 `viewmodel/output.ts` 算好，数据源一律是控制器的
- *   `ArtifactTracker` 快照（09 §3.2），这里不维护第二份状态。画布高亮是唯一的定位线索
- *   （05 §4，程序区已删除）：出错 / 被拒绝的动作通过 `highlightBlockId` 高亮对应积木，
- *   出口是输出区条目上的「定位积木」按钮。
+ * - **输出区已移到页面壳**（本批任务第 6 条）：这里不再维护任何输出相关的状态。
+ *   画布高亮是唯一的定位线索（05 §4）：出错 / 被拒绝的动作通过 `highlightBlockId` 高亮
+ *   对应积木，出口是页面壳输出区条目上的「定位积木」按钮，点击后由页面壳调用这里的
+ *   `highlight()`。
+ * - 「运行 / 终止」的可用性与禁用原因只有一处事实来源：`PayloadControlsModel`（控制器算好，
+ *   见 `viewmodel/toolbar.ts` 的 `payloadControls`），这里只渲染、只派发，不自己判定。
  * - 用户手势改动积木 → `p2b-edit`（产物过期）+ 立即重编译；**程序化装载/生成程序不会派发事件**，
- *   所以那样做之后必须自己调 `recompile()`（05 §3.1 实现备忘、本批任务第 6 条）。
+ *   所以那样做之后必须自己调 `recompile()`（05 §3.1 实现备忘）。
  */
 import { LitElement, css, html } from 'lit';
 import type { PublicChallenge } from '@pwn2block/shared';
@@ -17,12 +19,20 @@ import type * as Blockly from 'blockly';
 import { mountBlockly, type BlocklyBridge } from '../blocks/mount';
 import type { NormalizedWorkspace } from '../compiler/types';
 import type { ControllerState } from '../viewmodel/controller';
-import { outputEntries } from '../viewmodel/output';
 import { defaultStore, readCanvas, writeCanvas, type KeyValueStore } from '../viewmodel/storage';
-import type { RunButtonModel } from '../viewmodel/toolbar';
+import {
+  MESSAGE_NOT_RUNNING,
+  type PayloadControlsModel,
+  type RunButtonModel,
+  type RunCommand,
+} from '../viewmodel/toolbar';
 import { sharedStyles, terminalTheme } from '../theme';
-import './output-view';
-import './run-menu';
+
+/** 还没拿到控制器算好的模型时的兜底：两个按钮都禁用（没有会话 / 没有在运行）。 */
+const DEFAULT_CONTROLS: PayloadControlsModel = {
+  run: { id: 'run-all', label: '运行', hint: '', enabled: false },
+  abort: { id: 'abort', label: '终止', hint: '', enabled: false, disabledReason: MESSAGE_NOT_RUNNING },
+};
 
 export class Pwn2BlockPayloadPanel extends LitElement {
   static override styles = [
@@ -40,15 +50,21 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         scroll-padding-block: 0.85rem;
         scrollbar-color: var(--p2b-line) transparent;
       }
-      .toolbar {
+      .box {
         display: flex;
-        align-items: center;
-        gap: 0.8rem;
-        flex-wrap: wrap;
-        padding: 0.1rem 0.1rem 0.2rem;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        padding: 0.9rem 0.75rem 0.75rem;
       }
-      .toolbar h2 {
-        margin-right: auto;
+      .controls {
+        position: absolute;
+        top: -0.7em;
+        right: 0.6rem;
+        display: flex;
+        gap: 0.6rem;
+        padding: 0 0.3rem;
+        background: var(--p2b-bg);
       }
       #blockly-host {
         position: absolute;
@@ -85,8 +101,8 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       }
       .canvas-wrap {
         position: relative;
-        height: clamp(18rem, 38vh, 29rem);
-        min-height: 16rem;
+        flex: 1;
+        min-height: 0;
         overflow: hidden;
         border: 1px solid var(--p2b-line);
         border-radius: 0;
@@ -107,22 +123,6 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       .placeholder[hidden] {
         display: none;
       }
-      .output {
-        flex-shrink: 0;
-        min-height: 4rem;
-        padding: 0.75rem;
-        border: 1px solid var(--p2b-line);
-        border-radius: 0;
-        background: var(--p2b-bg);
-      }
-      .mode-hint {
-        margin: 0 0 0.65rem;
-        padding: 0.5rem 0.65rem;
-        border-left: 3px solid var(--p2b-changed);
-        border-radius: 0;
-        color: var(--p2b-changed);
-        background: var(--p2b-bg);
-      }
     `,
   ];
 
@@ -130,7 +130,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     challenge: { attribute: false },
     sessionId: { attribute: false },
     state: { attribute: false },
-    runModel: { attribute: false },
+    controls: { attribute: false },
     highlightBlockId: { attribute: false },
     store: { attribute: false },
   };
@@ -139,7 +139,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
   declare challenge?: PublicChallenge;
   declare sessionId?: string;
   declare state?: ControllerState;
-  declare runModel: readonly RunButtonModel[];
+  declare controls: PayloadControlsModel | undefined;
   declare highlightBlockId?: string;
   /** 本地保存用的存储（05 §3.1）；缺省取 `localStorage`，没有就退化成「不保存」。 */
   declare store?: KeyValueStore;
@@ -153,7 +153,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
 
   constructor() {
     super();
-    this.runModel = [];
+    this.controls = undefined;
   }
 
   override disconnectedCallback(): void {
@@ -162,44 +162,40 @@ export class Pwn2BlockPayloadPanel extends LitElement {
   }
 
   override render() {
-    const state = this.state;
-    const artifact = state?.artifact.artifact;
-    const errors = state?.artifact.errors ?? [];
-    const stale = state?.artifact.stale ?? false;
-    const cursor = state?.cursor ?? 0;
-    const mode = state?.page?.mode ?? 'debug';
+    const controls = this.controls ?? DEFAULT_CONTROLS;
     return html`
-      <div class="toolbar">
-        <h2>Payload</h2>
-        <pwn2block-run-menu
-          .model=${this.runModel}
-          .busy=${state?.busy ?? false}
-          .pending=${state?.queued ?? 0}
-        ></pwn2block-run-menu>
-      </div>
-      <div class="canvas-wrap">
-        <div id="blockly-host" aria-label="积木画布"></div>
-        <p class="placeholder" id="blockly-placeholder">
-          积木画布正在准备：会话建立后会挂载 Blockly。未连到「开始」积木的积木不参与编译（05 §3.1）。
-        </p>
-      </div>
-      <div class="output">
-        ${mode === 'verdict'
-          ? html`<p class="mode-hint">下面是调试实例的历史结果；这一轮判题的结论见上方横幅。</p>`
-          : ''}
-        <pwn2block-output-view
-          .entries=${outputEntries({
-            artifact,
-            errors,
-            stale,
-            results: state?.results ?? [],
-            cursor,
-            ...(state?.page === undefined ? {} : { projection: state.page.projection }),
-          })}
-          @p2b-block-select=${this.onBlockSelect}
-        ></pwn2block-output-view>
+      <div class="box">
+        <h2 class="box-title">payload</h2>
+        <div class="controls">
+          ${this.renderButton(controls.run, { kind: 'run-all' })}
+          ${this.renderButton(controls.abort, { kind: 'abort' })}
+        </div>
+        <div class="canvas-wrap">
+          <div id="blockly-host" aria-label="积木画布"></div>
+          <p class="placeholder" id="blockly-placeholder">
+            积木画布正在准备：会话建立后会挂载 Blockly。未连到「开始」积木的积木不参与编译（05 §3.1）。
+          </p>
+        </div>
       </div>
     `;
+  }
+
+  /** 手工渲染「运行 / 终止」按钮：禁用原因只做 `title`，不像 `run-menu.ts` 那样拼进文案。 */
+  private renderButton(button: RunButtonModel, command: RunCommand) {
+    return html`<button
+      type="button"
+      title=${button.enabled ? button.hint : button.disabledReason ?? ''}
+      ?disabled=${!button.enabled}
+      @click=${() => this.emitRun(command)}
+    >
+      ${button.label}
+    </button>`;
+  }
+
+  private emitRun(command: RunCommand): void {
+    this.dispatchEvent(
+      new CustomEvent<RunCommand>('p2b-run', { detail: command, bubbles: true, composed: true }),
+    );
   }
 
   override updated(): void {
@@ -233,11 +229,6 @@ export class Pwn2BlockPayloadPanel extends LitElement {
   /** 当前挂载的画布工作区（未挂载时 `undefined`）。只读出口，方便外部做错误定位与测试。 */
   get workspace(): Blockly.WorkspaceSvg | undefined {
     return this.bridge?.workspace;
-  }
-
-  private onBlockSelect(event: Event): void {
-    const { blockId } = (event as CustomEvent<{ readonly blockId: string }>).detail;
-    this.highlight(blockId);
   }
 
   /** 用户手势改了积木：先落盘再重编译（本地保存是便利，顺序无所谓，但要保证改完就存）。 */

@@ -75,12 +75,15 @@ function panelOf(app: Pwn2BlockApp) {
   return panel;
 }
 
-function inPanel(app: Pwn2BlockApp, selector: string): Element | null {
-  return shadowOf(panelOf(app))?.querySelector(selector) ?? null;
+/** 输出区已经移到页面壳自己的影子根里（本批任务第 6 条），不再嵌在 payload 面板下面。 */
+function outputOf(app: Pwn2BlockApp): Element | null {
+  return app.renderRoot.querySelector('pwn2block-output-view');
 }
 
+/** 「运行」菜单只剩顶栏那一份（payload 面板只留「运行 / 终止」两个按钮）。 */
 function runMenuOf(app: Pwn2BlockApp): Element {
-  const menu = inPanel(app, 'pwn2block-run-menu');
+  const topBar = app.renderRoot.querySelector('pwn2block-top-bar');
+  const menu = shadowOf(topBar)?.querySelector('pwn2block-run-menu') ?? null;
   if (menu === null) throw new Error('运行菜单没渲染');
   return menu;
 }
@@ -187,13 +190,48 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
   });
 });
 
+describe('单页骨架：输出区改为通栏（本批任务第 6 条）', () => {
+  it('输出区在 main 之后、横跨整行，不嵌在右侧 payload 窗口里', async () => {
+    const { app } = await mountApp(createFakeApi());
+    const main = app.renderRoot.querySelector('main');
+    const output = app.renderRoot.querySelector('section.output');
+    expect(output).not.toBeNull();
+    // 横跨整行：是 main 的下一个兄弟节点，不在 .right 容器内部。
+    expect(main?.nextElementSibling).toBe(output);
+    expect(app.renderRoot.querySelector('section.right pwn2block-output-view')).toBeNull();
+    expect(outputOf(app)).toBe(output?.querySelector('pwn2block-output-view') ?? null);
+  });
+
+  it('判题结果模式下输出区顶部有提示：这是调试实例的历史结果', async () => {
+    const replay = makeReplay([{ kind: 'action', label: 'step' }]);
+    const api = createFakeApi({
+      submit: makeSubmitResponse('won', { flag: 'flag{demo}', results: [{ ok: true, action: 'step' }], replay }),
+    });
+    const { app } = await mountApp(api);
+    const workspace = panelOf(app).workspace;
+    if (workspace === undefined) throw new Error('画布没挂上');
+    chainAfterStart(workspace, [BLOCK_TYPES.actionStep]);
+    panelOf(app).recompile();
+    await settle(app);
+
+    clickRun(app, '提交判题');
+    await until(() => app.renderRoot.querySelector('pwn2block-verdict-panel') !== null, '判题面板出现');
+    await settle(app);
+
+    const output = app.renderRoot.querySelector('section.output');
+    expect(output?.querySelector('.mode-hint')?.textContent).toContain(
+      '下面是调试实例的历史结果；这一轮判题的结论见上方横幅。',
+    );
+  });
+});
+
 describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
   it('空画布编译：错误逐条进输出区，提交被判门禁拦住', async () => {
     const { app, api } = await mountApp(createFakeApi());
     panelOf(app).recompile();
     await settle(app);
 
-    const output = inPanel(app, 'pwn2block-output-view');
+    const output = outputOf(app);
     expect(textOf(output)).toContain('编译失败');
     expect(textOf(output)).toContain(MESSAGE_NO_START_BLOCK);
 
@@ -219,7 +257,7 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     panelOf(app).recompile();
     await settle(app);
 
-    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
+    expect(textOf(outputOf(app))).not.toContain('编译失败');
   });
 
   it('Ctrl+方向键在视图内切换，但不抢走影子根内输入框的按键', async () => {
@@ -274,7 +312,7 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     expect(app.renderRoot.querySelector('.status')?.textContent).toContain('程序已经退出');
     for (const action of ['后退一步', '撤销', '重置', '提交判题']) {
       expect(app.renderRoot.querySelector('.status')?.textContent).toContain(`「${action}」`);
-      expect(textOf(inPanel(app, 'pwn2block-output-view'))).toContain(`「${action}」`);
+      expect(textOf(outputOf(app))).toContain(`「${action}」`);
     }
 
     // 点「单步」不会发请求：组件渲染与控制器门禁用的是同一张表（05 §1）。
@@ -418,7 +456,7 @@ describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §
     await settle(app);
 
     // ① 输出区：错误逐条列出，条目带定位出口。
-    const output = inPanel(app, 'pwn2block-output-view');
+    const output = outputOf(app);
     expect(textOf(output)).toContain(MESSAGE_ACTION_NOT_ALLOWED('push'));
     expect(buttonLabels(output)).toEqual(['定位积木']);
 
@@ -440,8 +478,8 @@ describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §
     panelOf(app).recompile();
     await settle(app);
 
-    expect(textOf(inPanel(app, 'pwn2block-output-view'))).toContain(MESSAGE_NO_START_BLOCK);
-    expect(buttonLabels(inPanel(app, 'pwn2block-output-view'))).toEqual([]);
+    expect(textOf(outputOf(app))).toContain(MESSAGE_NO_START_BLOCK);
+    expect(buttonLabels(outputOf(app))).toEqual([]);
   });
 });
 
@@ -512,7 +550,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
     expect(typesAtSessionFetch).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
     // 画布是恢复出来的内容，产物也编出来了（输出区没有编译错误，不是半恢复）。
     expect(blockTypesOf(app)).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
-    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
+    expect(textOf(outputOf(app))).not.toContain('编译失败');
     // 接回成功不说废话（没有 notice）。
     expect(app.renderRoot.querySelector('.notice')).toBeNull();
     // 记录被刷新成当前状态：下一次刷新还接着走。
@@ -546,7 +584,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
 
     expect(api.calls.map((call) => call.method)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
     expect(typesAtCreate).toEqual([BLOCK_TYPES.start, BLOCK_TYPES.actionStep]);
-    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
+    expect(textOf(outputOf(app))).not.toContain('编译失败');
   });
 
   it('旧会话已被回收（404）：提示一句并新建，程序还在画布上', async () => {
@@ -577,7 +615,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（D5 批次 
     ]);
     const notice = app.renderRoot.querySelector('.notice');
     expect(notice?.textContent).toContain('本地保存的程序还在');
-    expect(textOf(inPanel(app, 'pwn2block-output-view'))).not.toContain('编译失败');
+    expect(textOf(outputOf(app))).not.toContain('编译失败');
   });
 });
 
