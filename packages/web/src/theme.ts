@@ -9,8 +9,8 @@ import { css } from 'lit';
 export const terminalTheme = css`
   :host {
     --p2b-bg: #0c0c0c;
-    --p2b-fg: #e0e0e0;
-    --p2b-dim: #a0a0a0;
+    --p2b-fg: #ffffff;
+    --p2b-dim: #c3c3c3;
     --p2b-line: #6a6a6a;
     /* 面板与控件的边框宽度；表格、列表的行分隔线保持 1px，避免密集行显得太重。 */
     --p2b-border: 2px;
