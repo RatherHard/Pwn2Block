@@ -109,3 +109,27 @@ it('切回标签时补做跟随滚动', async () => {
   expect(body.scrollTo).toHaveBeenCalledTimes(1);
   expect(body.scrollTo).toHaveBeenCalledWith({ top: 100 });
 });
+
+it('栈视图切回标签时补做跟随：滚到 sp 行', async () => {
+  const { body, view } = await mount('pwn2block-stack-view');
+  // 手动窗口起点保持不变，让新 sp 落在第 6 行。
+  const field = view.renderRoot.querySelector<HTMLInputElement>('[aria-label="跳转到地址"]')!;
+  field.value = '0x7ffffee0';
+  field.dispatchEvent(new Event('input'));
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+  await view.updateComplete;
+  view.active = false;
+  await view.updateComplete;
+  vi.mocked(body.scrollTo).mockClear();
+  const row = view.renderRoot.querySelectorAll('tbody tr')[5]!;
+  vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 380, bottom: 400 } as DOMRect);
+  const next = makeProjection({ registers: { RSP: '0x7fffff08', RBP: '0x7fffff10', RIP: '0x400001' }, steps: 1 });
+  view.context = { ...context, projection: next };
+  await view.updateComplete;
+  expect(body.scrollTo).not.toHaveBeenCalled();
+  view.active = true;
+  await view.updateComplete;
+  expect(view.renderRoot.querySelector('[data-row="5"]')).toBe(row);
+  expect(body.scrollTo).toHaveBeenCalledTimes(1);
+  expect(body.scrollTo).toHaveBeenCalledWith({ top: 100 });
+});

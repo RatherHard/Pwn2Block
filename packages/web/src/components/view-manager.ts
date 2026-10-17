@@ -198,6 +198,8 @@ export class Pwn2BlockViewManager extends LitElement {
   }
 
   private readonly onTabKey = (event: KeyboardEvent): void => {
+    // 带修饰键的组合不归标签栏：Alt+← 是浏览器后退，Ctrl+↑/↓ 由页面壳处理。
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const target = this.keyTarget(event.key);
     if (target === undefined) return;
     event.preventDefault();

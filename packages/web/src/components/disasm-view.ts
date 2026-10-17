@@ -212,6 +212,7 @@ export class Pwn2BlockDisasmView extends LitElement {
   override updated(changed: Map<PropertyKey, unknown>): void {
     if (!this.active) return;
     const previous = changed.get('context') as ViewContext | undefined;
+    // 只有切回标签与同投影的 context 变化落在同一次更新里时才起作用：否则下一行不会提前返回。
     const reactivated = changed.get('active') === false;
     if (!reactivated && changed.has('context') && previous?.projection === this.context?.projection) return;
     const selector = this.focusedAddr === undefined ? 'tr.ip' : 'tr.focused';

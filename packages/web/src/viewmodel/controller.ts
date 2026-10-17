@@ -36,7 +36,7 @@ import {
 import type { ActionOrigin, NormalizedWorkspace } from '../compiler/types';
 import { runAction, stepAction } from './program';
 import { createSerialQueue } from './queue';
-import { defaultPosition } from './replay';
+import { defaultPosition, displayedView } from './replay';
 import { clearSession, readSession, readViewTab, writeSession, writeViewTab, type KeyValueStore } from './storage';
 import {
   applyProjection,
@@ -254,7 +254,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   ): void {
     const page = state.page;
     if (page === undefined) return;
-    const views = update(page.views, availableViews(page.projection, state.challenge));
+    const views = update(page.views, availableViews(displayedView(page, state.verdict).projection, state.challenge));
     if (views === page.views) return;
     writeViewTab(deps.store, views.active);
     patch({ page: { ...page, views } });

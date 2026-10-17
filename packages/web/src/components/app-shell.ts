@@ -14,7 +14,7 @@
  * 它自己负责把事件接对、把 `aria-live` 播报区放对。
  */
 import { LitElement, css, html } from 'lit';
-import type { Hint, Projection, PublicChallenge } from '@pwn2block/shared';
+import type { Hint, PublicChallenge } from '@pwn2block/shared';
 import { createApiClient, type ApiClient } from '../api';
 import { createViewContext } from '../viewmodel/context';
 import {
@@ -25,7 +25,7 @@ import {
 import { diffProjections } from '../viewmodel/diff';
 import { highlightBlockId } from '../viewmodel/highlight';
 import { viewTabDelta } from '../viewmodel/keymap';
-import { frameProjection } from '../viewmodel/replay';
+import { displayedView, type FrameProjection } from '../viewmodel/replay';
 import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import { outputEntries } from '../viewmodel/output';
@@ -48,11 +48,7 @@ import type { RunMenuCommand } from './run-menu';
 import type { ViewContext } from './view-context';
 
 /** 当前要渲染的投影：调试模式读调试实例，判题结果读录像帧（05 §1）。 */
-interface ActiveView {
-  readonly projection: Projection;
-  readonly previous?: Projection;
-  readonly disasmNotice?: string;
-}
+type ActiveView = FrameProjection;
 
 /** 题目没声明提示时的稳定空表：避免每次渲染都新建数组，让子组件的属性判定不抖动。 */
 const EMPTY_HINTS: readonly Hint[] = [];
@@ -533,25 +529,9 @@ export class Pwn2BlockApp extends LitElement {
     `;
   }
 
-  /**
-   * 视图数据源（05 §1）：判题结果模式读录像里选中的那一帧，调试模式读调试实例的投影。
-   * 录像帧的反汇编可用性按 09 §3.4 判定，不可用时把禁用提示交给指令视图。
-   */
+  /** 视图数据源（05 §1）：与控制器计算可用标签共用 `displayedView`，见 viewmodel/replay.ts。 */
   private activeView(state: ControllerState): ActiveView | undefined {
-    const page = state.page;
-    if (page === undefined) return undefined;
-    const verdict = state.verdict;
-    if (page.mode === 'verdict' && verdict !== undefined) {
-      const frame = frameProjection(verdict.response.replay, verdict.position);
-      return {
-        projection: frame.projection,
-        ...(frame.previous === undefined ? {} : { previous: frame.previous }),
-        ...(frame.disasmNotice === undefined ? {} : { disasmNotice: frame.disasmNotice }),
-      };
-    }
-    return page.previous === undefined
-      ? { projection: page.projection }
-      : { projection: page.projection, previous: page.previous };
+    return state.page === undefined ? undefined : displayedView(state.page, state.verdict);
   }
 
   private viewContext(view: ActiveView, challenge: PublicChallenge): ViewContext {

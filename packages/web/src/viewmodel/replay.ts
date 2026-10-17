@@ -15,7 +15,7 @@
  * 而它的中间状态 = 前一个 `action` 帧之后、它之前的那段 `instruction` 帧。
  */
 import type { Projection, ReplayFrameView, ReplayView, VmaView } from '@pwn2block/shared';
-import { STATUS_NAMES } from './session';
+import { STATUS_NAMES, type PageState } from './session';
 
 /** 09 §3.4：录像期间代码段被改写时，指令视图必须显示这句而不是过期反汇编。 */
 export const MESSAGE_REPLAY_DISASM_STALE = '录像中代码已变化，指令视图不可用';
@@ -251,4 +251,23 @@ export function actionInstructionsAt(replay: ReplayView, position: number): Acti
   if (action === undefined) return undefined;
   const positions = instructionPositionsFor(replay, action);
   return { action, positions, labels: positions.map((each) => positionLabel(replay, each)) };
+}
+
+/** `displayedView` 只需要判题状态里的录像与时间线位置。 */
+export interface VerdictFrameSource {
+  readonly response: { readonly replay: ReplayView };
+  readonly position: number;
+}
+
+/**
+ * 视图当前显示的投影（05 §1）：判题结果模式读录像里选中的那一帧，调试模式读调试实例的投影。
+ * 页面渲染与控制器计算可用标签都走这里，保证两边的数据源一致。
+ */
+export function displayedView(page: PageState, verdict: VerdictFrameSource | undefined): FrameProjection {
+  if (page.mode === 'verdict' && verdict !== undefined) {
+    return frameProjection(verdict.response.replay, verdict.position);
+  }
+  return page.previous === undefined
+    ? { projection: page.projection }
+    : { projection: page.projection, previous: page.previous };
 }

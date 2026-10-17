@@ -59,8 +59,16 @@ describe('视图面板（设计 §3.2）', () => {
     await manager.updateComplete;
     expect(manager.renderRoot.querySelector('pwn2block-stack-view')).toBe(stack);
     expect(panelOf(manager, 'pwn2block-stack-view').hidden).toBe(true);
+    expect(stack?.active).toBe(false);
+    const disasm = manager.renderRoot.querySelector('pwn2block-disasm-view');
+    expect(disasm?.active).toBe(false);
     expect(panelOf(manager, 'pwn2block-registers-view').hidden).toBe(false);
     expect(manager.renderRoot.querySelectorAll('[role="tabpanel"]')).toHaveLength(5);
+    // 只有栈视图与指令视图有 active（跟随滚动用）；切到指令后它变为 true。
+    manager.views = { active: 'disasm' };
+    await manager.updateComplete;
+    expect(disasm?.active).toBe(true);
+    expect(stack?.active).toBe(false);
   });
 
   it('无 I/O 题目不渲染 I/O 视图与标签', async () => {
@@ -85,6 +93,22 @@ describe('视图面板（设计 §3.2）', () => {
     }
     expect(kinds).toEqual(['disasm', 'stack', 'io', 'stack', 'io']);
     expect(manager.shadowRoot?.activeElement?.textContent?.trim()).toBe('[5 I/O]');
+  });
+
+  it('带修饰键的方向键不归标签栏：Alt+← 不切换、不拦截', async () => {
+    const manager = await mount('disasm');
+    const kinds: string[] = [];
+    manager.addEventListener('p2b-view-select', (event) => {
+      kinds.push((event as CustomEvent<{ kind: ViewKind }>).detail.kind);
+    });
+    const tab = tabs(manager)[1];
+    if (!tab) throw new Error('缺少指令标签');
+    tab.focus();
+    const press = new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true, composed: true, cancelable: true });
+    tab.dispatchEvent(press);
+    await manager.updateComplete;
+    expect(kinds).toEqual([]);
+    expect(press.defaultPrevented).toBe(false);
   });
 
   it('点击标签派发 p2b-view-select', async () => {
