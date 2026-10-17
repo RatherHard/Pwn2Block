@@ -68,12 +68,18 @@ export const sharedStyles = css`
     cursor: pointer;
   }
 
+  /*
+   * 装饰字符一律写成两条 content：第二条带空替代文本，不计入无障碍名称（读屏不念括号）；
+   * 不认识「/ ''」语法的旧浏览器丢弃第二条，仍显示第一条的装饰。
+   */
   button::before {
     content: '[ ';
+    content: '[ ' / '';
   }
 
   button::after {
     content: ' ]';
+    content: ' ]' / '';
   }
 
   button:hover:not(:disabled),
@@ -207,9 +213,11 @@ export const sharedStyles = css`
 
   .box > .box-title::before {
     content: '─ ';
+    content: '─ ' / '';
   }
 
   .box > .box-title::after {
     content: ' ─';
+    content: ' ─' / '';
   }
 `;

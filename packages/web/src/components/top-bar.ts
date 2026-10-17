@@ -63,6 +63,7 @@ export class Pwn2BlockTopBar extends LitElement {
         margin-left: 0.45rem;
         color: var(--p2b-dim);
         content: '⌄';
+        content: '⌄' / '';
       }
       .menu > summary:hover,
       .menu[open] > summary {
@@ -72,6 +73,7 @@ export class Pwn2BlockTopBar extends LitElement {
       }
       .menu[open] > summary::after {
         content: '⌃';
+        content: '⌃' / '';
       }
       .menu-body {
         position: absolute;

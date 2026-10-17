@@ -12,6 +12,22 @@ import { describe, expect, it } from 'vitest';
 const THEME_PATH = fileURLToPath(new URL('../src/theme.ts', import.meta.url));
 const MOUNT_PATH = fileURLToPath(new URL('../src/blocks/mount.ts', import.meta.url));
 
+/**
+ * 每条装饰性 `content` 后面紧跟同值的空替代文本版本：`content: 'x'; content: 'x' / '';`。
+ * 否则 Chromium 把「[ 」「 ]」「⌄」算进按钮 / 菜单的无障碍名称，读屏会念出来。
+ * 返回不合规的声明，空数组表示合规。
+ */
+export function contentWithoutAltText(source: string): readonly string[] {
+  const lines = source.split('\n');
+  const bad: string[] = [];
+  for (const [index, line] of lines.entries()) {
+    const match = /^(\s*)content: ('[^']+');$/.exec(line);
+    if (match === null) continue;
+    if (lines[index + 1] !== `${match[1]}content: ${match[2]} / '';`) bad.push(line.trim());
+  }
+  return bad;
+}
+
 function readSource(path: string): string {
   return readFileSync(path, 'utf-8');
 }
@@ -41,6 +57,7 @@ export const BANNED_PATTERNS: readonly RegExp[] = [
   /font-size:(?!\s*(?:inherit|var\(--p2b-size\)))/,
 ];
 
+
 const [BOX_SHADOW, BORDER_RADIUS, FONT_SIZE] = [
   BANNED_PATTERNS[1]!,
   BANNED_PATTERNS[2]!,
@@ -58,6 +75,19 @@ describe('TUI 样式清扫（设计 §1）', () => {
     expect('font-size: 12px;').toMatch(FONT_SIZE);
   });
 
+
+  it('装饰性 content 检查能识别缺少替代文本的写法', () => {
+    expect(contentWithoutAltText("  content: '[ ';\n  content: '[ ' / '';")).toEqual([]);
+    expect(contentWithoutAltText("  content: '[ ';")).toEqual(["content: '[ ';"]);
+    expect(contentWithoutAltText("  content: '⌄';\n  content: '⌃' / '';")).toEqual(["content: '⌄';"]);
+  });
+
+  it('theme.ts 与组件里的装饰性 content 都带空替代文本，不计入无障碍名称', async () => {
+    expect(contentWithoutAltText(readSource(THEME_PATH)), 'theme.ts').toEqual([]);
+    for (const [file, source] of await componentSources()) {
+      expect(contentWithoutAltText(source), file).toEqual([]);
+    }
+  });
 
   it('theme.ts 不含装饰性 CSS、旧 token 或禁用标记，并声明 color-scheme: dark', async () => {
     const source = readSource(THEME_PATH);
