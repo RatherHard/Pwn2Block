@@ -1,5 +1,17 @@
 # 浏览器回归与证据
 
+## 2026-10-17 前端 TUI 化后的用例调整
+
+三个 spec 按新交互改写，旧记录保留作为历史基线：
+
+- 不再点「编译」：改积木自动编译，改为断言状态栏 `动作 n/m` 与输出区；程序区相关断言全部删除。
+- 「试运行」改为 payload 标题栏的「运行」：断言先发 `[reset]`、再发完整序列，末尾不补 `run`；单步、运行 N 步、后退一步、撤销、重置和提交判题从顶栏「运行」菜单操作。
+- 视图菜单改为标签：`frontend-details.spec.ts` 覆盖 ←/→/Home/End、Ctrl+↑/↓、`p2b:view-tab` 跨刷新与跨题目共用、非法值回退到栈；冒烟用键盘逐个切换全部标签。
+- 页面改为整页纵向滚动：冒烟的 `layout()` 不再要求两栏整高落入视口，只要求露出、横向不越界且 `scrollWidth <= innerWidth`；画布的舍入容差由 1 改为 2 CSS px（滚入视口后底边约 1.2 px 裁切）。
+- 闭环第 5 步在改字段前拖动空白画布把工作区左移 160 px：画布变窄后积木栈右缘会压到竖向滚动条。
+- 刷新后的动作指针与刷新前一致（单步再后退不回拨指针），冒烟改为比较刷新前后的 `动作 n/m`。
+- 截图 `04-compiled-program.png` 更名为 `04-compiled-payload.png`。
+
 ## 2026-10-16 前端细节修复验收
 
 本轮在 `F:/Pwn2Block` 验证产品修改，以下 D7 记录保留作为历史基线。
@@ -41,7 +53,7 @@ pnpm e2e
 - 原 `closed-loop.spec.ts` 10 项保持原样，在 `chromium-desktop` 的 1600×1000 自建 context 执行。
 - 新 `desktop-smoke.spec.ts` 分别在 1280×720、1440×900、1920×1080 执行，使用 Playwright page fixture，避免自建 context 覆盖 project 尺寸。
 - 每个尺寸检查生产入口 / 六题列表、真实会话、题面键盘折叠、等宽双栏与横向溢出、八个工具栏按钮可达、视图菜单键盘开关、真实鼠标连接开始和普通单步积木、编译、单步与回退、incomplete 判题、键盘时间线、回到调试的状态隔离、刷新接回旧会话和画布。
-- 检查页面异常与 console.error；测试结束删除会话并检查返回值。仅对画布边框允许 1 CSS px 舍入容差，按钮仍要求完整进入可视区域。
+- 检查页面异常与 console.error；测试结束删除会话并检查返回值。仅对画布边框允许 1 CSS px 舍入容差，按钮仍要求完整进入可视区域。（2026-10-17 起为 2 CSS px，见文首。）
 - 每个尺寸保存 7 张原 viewport 截图；浏览器版本、viewport、CDP 进程 PID 写入 JSON 报告的 `browser-environment` attachment。
 
 ## 可重复运行
@@ -133,7 +145,7 @@ pnpm lint
 1. `01-challenge-list.png`
 2. `02-briefing-expanded.png`
 3. `03-desktop-layout.png`
-4. `04-compiled-program.png`
+4. `04-compiled-payload.png`（2026-10-17 前为 `04-compiled-program.png`）
 5. `05-verdict-replay.png`
 6. `06-debug-output.png`
 7. `07-restored.png`

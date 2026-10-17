@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page, type Response } from '@playwright/test';
 import { parseSolutionMarkdown, type Action, type Projection } from '@pwn2block/shared';
 import {
   blockFieldTexts,
@@ -136,8 +136,51 @@ function collectKeys(value: unknown, into: Set<string> = new Set()): Set<string>
   return into;
 }
 
-/** 调色板按钮：`docs/archive/mvp-2026-10-16/05-前端交互.md` §3 固定八个按钮，名字就是契约。 */
+/** 页面上的普通按钮（题目入口、回到调试、提示等），按可访问名精确匹配。 */
 const runButton = (name: string): Locator => page.getByRole('button', { name, exact: true });
+
+/**
+ * payload 标题栏上的「运行 / 终止」。顶栏也有一个叫「运行」的菜单标题，
+ * 所以必须限定在 payload 窗口里找。
+ */
+const payloadButton = (name: '运行' | '终止'): Locator =>
+  page.locator('pwn2block-payload-panel').getByRole('button', { name, exact: true });
+
+/** 底部状态栏：`DEBUG │ <状态文案> │ ip=0x… │ 动作 n/m`。 */
+const statusBar = (): Locator => page.locator('pwn2block-app .status');
+
+/** 顶栏「运行」菜单默认收起；菜单里的按钮只有展开后才可点击。已展开时不重复点击。 */
+/** 在画布下方的空白处按住拖动，让 Blockly 工作区整体左移 `dx` 像素（只滚动视口，不改积木关系）。 */
+async function panWorkspaceLeft(dx: number): Promise<void> {
+  const host = await page.locator('pwn2block-payload-panel #blockly-host').boundingBox();
+  if (host === null) throw new Error('积木画布不可见，无法平移');
+  const from = { x: host.x + host.width * 0.6, y: host.y + Math.min(host.height - 60, 420) };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x - dx, from.y, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+}
+
+async function openRunMenu(): Promise<void> {
+  const menu = page.locator('pwn2block-top-bar details.menu');
+  if ((await menu.getAttribute('open')) === null) await page.locator('pwn2block-top-bar summary').filter({ hasText: /^运行$/ }).click();
+  await expect(menu).toHaveAttribute('open', '');
+}
+
+/** 收起顶栏「运行」菜单（Esc），避免展开的下拉层挡住后面的积木手势。 */
+async function closeRunMenu(): Promise<void> {
+  const menu = page.locator('pwn2block-top-bar details.menu');
+  if ((await menu.getAttribute('open')) === null) return;
+  await page.keyboard.press('Escape');
+  await expect(menu).not.toHaveAttribute('open', '');
+}
+
+/** 顶栏「运行」菜单里的按钮（单步 / 运行 N 步 / 后退一步 / 撤销 / 重置 / 提交判题）：先展开菜单再返回。 */
+async function menuButton(name: string): Promise<Locator> {
+  await openRunMenu();
+  return page.locator('pwn2block-top-bar pwn2block-run-menu').getByRole('button', { name, exact: true });
+}
 
 interface Captured {
   readonly status: number;
@@ -147,12 +190,7 @@ interface Captured {
   readonly requestText: string;
 }
 
-/** 点一个按钮，并抓它触发的那次 API 响应（真手势 + 真响应，不用轮询猜）。 */
-async function clickAndCapture(name: string, match: (url: string) => boolean): Promise<Captured> {
-  const [response] = await Promise.all([
-    page.waitForResponse((res) => match(res.url()), { timeout: 30_000 }),
-    runButton(name).click(),
-  ]);
+async function toCaptured(response: Response): Promise<Captured> {
   const text = await response.text();
   let body: unknown;
   try {
@@ -163,8 +201,48 @@ async function clickAndCapture(name: string, match: (url: string) => boolean): P
   return { status: response.status(), text, body, requestText: response.request().postData() ?? '' };
 }
 
+/** 点一个按钮，并抓它触发的那次 API 响应（真手势 + 真响应，不用轮询猜）。 */
+async function clickAndCapture(target: Locator, match: (url: string) => boolean): Promise<Captured> {
+  const [response] = await Promise.all([
+    page.waitForResponse((res) => match(res.url()), { timeout: 30_000 }),
+    target.click(),
+  ]);
+  return toCaptured(response);
+}
+
 const isActions = (url: string): boolean => url.includes('/api/sessions/') && url.endsWith('/actions');
 const isSubmit = (url: string): boolean => url.includes('/api/sessions/') && url.endsWith('/submit');
+
+/** 请求体是不是「运行」开头那一发 `[reset]`。 */
+function isResetOnly(postData: string | null): boolean {
+  try {
+    const parsed = JSON.parse(postData ?? '') as { actions?: { type?: string }[] };
+    return parsed.actions?.length === 1 && parsed.actions[0]?.type === 'reset';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 点 payload 标题栏的「运行」：前端先发一发 `[reset]`，再按 512 分片发完整序列（末尾不补 `run`）。
+ * 两份响应都抓下来：`reset` 是开头那一发，`run` 是携带程序动作的第一片。
+ */
+async function runAllAndCapture(): Promise<{ readonly reset: Captured; readonly run: Captured }> {
+  const isActionsResponse = (res: Response): boolean => isActions(res.url()) && res.request().method() === 'POST';
+  const reset = page.waitForResponse((res) => isActionsResponse(res) && isResetOnly(res.request().postData()), {
+    timeout: 30_000,
+  });
+  const run = page.waitForResponse((res) => isActionsResponse(res) && !isResetOnly(res.request().postData()), {
+    timeout: 30_000,
+  });
+  await expect(payloadButton('运行'), '「运行」应当可用').toBeEnabled();
+  await payloadButton('运行').click();
+  const [resetResponse, runResponse] = await Promise.all([reset, run]);
+  const captured = { reset: await toCaptured(resetResponse), run: await toCaptured(runResponse) };
+  recordDebugResponse(captured.reset);
+  recordDebugResponse(captured.run);
+  return captured;
+}
 
 /** 调试实例的响应：创建 / 动作 / GET 三种，都不许带 flag。 */
 function recordDebugResponse(captured: Captured): Captured {
@@ -379,20 +457,24 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
   test('第 4 步：运行 N 步、后退一步、撤销、重置（工具栏真手势）', async () => {
     const before = await fetchProjection();
 
-    await test.step('「单步」在没编译前是禁用的，且给出中文原因（05 §6）', async () => {
-      // 05 §3：单步/试运行是**程序区**层面的动作，要先有编译产物；
+    await test.step('画布为空时「单步」与「运行」禁用，且给出中文原因（05 §6）', async () => {
+      // 05 §3：单步与「运行」都作用于画布编译出的动作序列，要先有产物；
       // 「运行 N 步」才是纯粹的 `step(count)`。这条差异是设计，不是缺陷。
-      await expect(runButton('单步')).toBeDisabled();
+      await expect(await menuButton('单步')).toBeDisabled();
+      // payload 标题栏的「运行」同样禁用，原因只放在 title 里（标题栏没有原因清单）。
+      await expect(payloadButton('运行')).toBeDisabled();
+      await expect(payloadButton('运行')).toHaveAttribute('title', '画布还没有可运行的程序：先拼积木');
+      await expect(payloadButton('终止'), '没有在运行时「终止」禁用').toBeDisabled();
+      await expect(payloadButton('终止')).toHaveAttribute('title', '没有正在进行的运行');
       // 禁用原因必须写出来，不能只靠置灰（05 §6）：颜色不是唯一信息载体。
-      // 顶部「运行」菜单与 payload 工具栏渲染的是**同一个** `pwn2block-run-menu`（05 §1），
-      // 所以 DOM 里有两份原因文本；折叠的那份不在可访问性树里，这里取 payload 窗口里的那份。
-      const reasons = page.locator('pwn2block-payload-panel pwn2block-run-menu details.reasons');
+      const reasons = page.locator('pwn2block-top-bar pwn2block-run-menu details.reasons');
       await reasons.locator('summary').click();
       await expect(reasons, '禁用原因必须是可见文字').toBeVisible();
-      await expect(reasons).toContainText('单步');
-      await expect(reasons).toContainText('编译');
       // 禁用的那一条要能说清缺什么，而不是一句「不可用」。
-      await expect(reasons).toContainText('程序区还没有编译产物');
+      // 同一原因的按钮合并成一行（如「单步、提交判题：…」），所以分开断言按钮名与原因。
+      await expect(reasons).toContainText('单步');
+      await expect(reasons).toContainText('画布还没有可运行的程序：先拼积木');
+      await expect(reasons, '原因里不再指向已删除的「编译」按钮与程序区').not.toContainText('程序区');
       // 手工写字节在首题上不可达：allowedActions 不含 write_bytes（challenge 设计使然）。
       await reasons.locator('summary').click();
       const detail = await page.request.get(`/api/challenges/${CHALLENGE_ID}`);
@@ -406,9 +488,10 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     });
 
     await test.step('「运行 N 步」提交一条带 count 的 step，投影按 04 §4 前进', async () => {
+      await openRunMenu();
       const input = page.getByRole('spinbutton', { name: '运行步数' });
       await input.fill('2');
-      const captured = recordDebugResponse(await clickAndCapture('运行 N 步', isActions));
+      const captured = recordDebugResponse(await clickAndCapture(await menuButton('运行 N 步'), isActions));
       expect(captured.status).toBe(200);
       // 05 §3 的 hint 写得很明确：运行 N 步 = step 带 count，不是 run。
       const sent = JSON.parse(captured.requestText) as { actions: { type: string; count?: number }[] };
@@ -429,7 +512,7 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     });
 
     await test.step('「后退一步」退回一条指令，状态与执行前逐字段相等', async () => {
-      const captured = recordDebugResponse(await clickAndCapture('后退一步', isActions));
+      const captured = recordDebugResponse(await clickAndCapture(await menuButton('后退一步'), isActions));
       const body = captured.body as { projection: Projection; history: { undo: number; stepBack: number } };
       // 走 2 条再退 1 条：还剩 1 条可退（history.stepBack 是「还能退几条」）。
       expect(body.projection.steps).toBe(before.steps + 1);
@@ -439,14 +522,14 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     });
 
     await test.step('「撤销」回退上一次提交；「重置」回到初态', async () => {
-      const undone = recordDebugResponse(await clickAndCapture('撤销', isActions));
+      const undone = recordDebugResponse(await clickAndCapture(await menuButton('撤销'), isActions));
       const undoBody = undone.body as { projection: Projection; history: { undo: number; stepBack: number } };
       expect(undoBody.projection.steps, '撤销回退到 step(count=2) 这一批之前').toBe(before.steps);
       expect(shape(undoBody.projection), '撤销后与题目初态逐字段相等').toBe(shape(before));
       expect(undoBody.history.undo, '撤销完就没有可撤销的提交了').toBe(0);
       expect(undoBody.history.stepBack, '没有已执行的指令可退').toBe(0);
 
-      const reset = recordDebugResponse(await clickAndCapture('重置', isActions));
+      const reset = recordDebugResponse(await clickAndCapture(await menuButton('重置'), isActions));
       const resetBody = reset.body as { projection: Projection; history: { undo: number; stepBack: number } };
       expect(shape(resetBody.projection), '重置回到题目初态').toBe(shape(initialProjection as Projection));
       expect(resetBody.history.stepBack, '重置后没有已执行的指令可退').toBe(0);
@@ -462,7 +545,7 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
   });
 
   // -------------------------------------------------------------------------
-  test('第 5 步：在积木窗口里用真实鼠标拼出 payload（填充 + 小端地址），试运行看效果', async () => {
+  test('第 5 步：在积木窗口里用真实鼠标拼出 payload（填充 + 小端地址），点「运行」看效果', async () => {
     const solution = loadSolution();
     const first = solution.actions[0];
     expect(first?.type, '参考解法的第一条动作应当是出题人积木').toBe('block');
@@ -478,6 +561,8 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     expect(stepAction?.type, '参考解法的第二条动作应当是 step').toBe('step');
     if (stepAction?.type !== 'step') throw new Error('参考解法第二条动作不是 step');
 
+    // 第 4 步留下的展开菜单会盖住页面左上部分，拖积木之前先收起。
+    await closeRunMenu();
     const host = await page.locator('pwn2block-payload-panel #blockly-host').boundingBox();
     expect(host, '积木画布应当可见').not.toBeNull();
     const origin = { x: (host?.x ?? 0) + 300, y: (host?.y ?? 0) + 40 };
@@ -545,6 +630,10 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
       expect(addr, 'addr(v) 应当接进 concat 的 item1').toBeDefined();
       if (addr === undefined) return;
 
+      // 画布改为与视图区等宽后，从 +300 搭起的积木栈右缘会伸进画布的竖向滚动条，
+      // 点 addr 字段会点到滚动条上。用真手势拖空白画布把工作区整体左移，再改字段。
+      await panWorkspaceLeft(160);
+
       // 字段也是真手势改的：点开字段 → 键入 → 回车。
       await editBlockField(page, raw.id, 0, padHex);
       await editBlockField(page, addr.id, 0, addrValue.toString());
@@ -566,23 +655,22 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
       );
     });
 
-    await test.step('编译不报错，程序区给出 2 个动作', async () => {
-      await runButton('编译').click();
-      await page.waitForTimeout(500);
-      const output = await waitComponentText('pwn2block-output-view');
+    await test.step('改完积木自动编译：输出区没有编译错误，状态栏给出 2 个动作', async () => {
+      // 编译随积木改动自动进行，没有「编译」按钮；动作条数显示在状态栏的「动作 n/m」里。
+      await expect(statusBar(), '自动编译后状态栏应当显示 0/2').toContainText('动作 0/2');
+      const output = await componentText('pwn2block-output-view');
       expect(output, '编译不应当报错').not.toContain('编译错误');
-      const program = await waitComponentText('pwn2block-program-view');
-      expect(program, '程序区应当显示编译出的动作条数').toContain('2 个动作');
-      expect(program).toContain('block');
-      expect(program).toContain('step');
+      await expect(payloadButton('运行'), '有了产物之后「运行」可用').toBeEnabled();
     });
 
-    await test.step('「单步」提交程序区的下一个动作（05 §3：单步是程序区语义）', async () => {
-      await expect(runButton('单步'), '编译之后单步就可用了').toBeEnabled();
-      const captured = recordDebugResponse(await clickAndCapture('单步', isActions));
+    await test.step('「单步」提交产物的下一个动作，状态栏游标前进到 1/2', async () => {
+      const single = await menuButton('单步');
+      await expect(single, '编译出产物之后单步就可用了').toBeEnabled();
+      const captured = recordDebugResponse(await clickAndCapture(single, isActions));
       expect(captured.status).toBe(200);
       const sent = JSON.parse(captured.requestText) as { actions: Action[] };
-      expect(sent.actions, '单步只提交程序区的下一个动作，不是整段').toEqual([solution.actions[0]]);
+      expect(sent.actions, '单步只提交下一个动作，不是整段').toEqual([solution.actions[0]]);
+      await expect(statusBar()).toContainText('动作 1/2');
       const body = captured.body as {
         results: { ok: boolean }[];
         executed: number;
@@ -597,20 +685,30 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
       ).toContain(padHex.toLowerCase());
     });
 
-    await test.step('「重置」把实例送回初态，程序区光标也回到开头', async () => {
-      const captured = recordDebugResponse(await clickAndCapture('重置', isActions));
+    await test.step('「重置」把实例送回初态，状态栏游标也回到开头', async () => {
+      const captured = recordDebugResponse(await clickAndCapture(await menuButton('重置'), isActions));
       const body = captured.body as { projection: Projection };
       expect(shape(body.projection), '重置后与题目初态逐字段相等').toBe(shape(initialProjection as Projection));
+      await expect(statusBar()).toContainText('动作 0/2');
     });
 
-    await test.step('「试运行」提交程序区剩余动作，请求与参考解法逐字相等', async () => {
-      const captured = recordDebugResponse(await clickAndCapture('试运行', isActions));
-      expect(captured.status, '试运行应当 200').toBe(200);
-      // 请求体就是编译产物：与 solution.md 的机器可读块逐字比。
+    await test.step('「运行」先 reset 再发完整序列，请求与参考解法逐字相等', async () => {
+      // 先单步一次：游标不在开头时，「运行」仍要从头执行（开头那发 reset 负责回到初态）。
+      recordDebugResponse(await clickAndCapture(await menuButton('单步'), isActions));
+      await expect(statusBar()).toContainText('动作 1/2');
+      const { reset, run: captured } = await runAllAndCapture();
+      expect(reset.status, '运行开头的 reset 应当 200').toBe(200);
+      expect(shape((reset.body as { projection: Projection }).projection), 'reset 之后回到初态').toBe(
+        shape(initialProjection as Projection),
+      );
+      expect(captured.status, '运行应当 200').toBe(200);
+      // 请求体就是编译产物：与 solution.md 的机器可读块逐字比；末尾不补 run。
       const sent = JSON.parse(captured.requestText) as { actions: Action[] };
-      expect(sent.actions, '试运行发的动作序列必须与参考解法逐字相等').toEqual(solution.actions);
+      expect(sent.actions, '运行发的动作序列必须与参考解法逐字相等').toEqual(solution.actions);
       const body = captured.body as { results: unknown[]; projection: Projection };
       expect(body.results.length, '两个动作都要有执行结果').toBe(2);
+      await expect(statusBar(), '跑完之后游标在末尾').toContainText('动作 2/2');
+      await expect(payloadButton('终止'), '运行结束后「终止」回到禁用').toBeDisabled();
 
       // 调试实例命中成功条件时**只提示「已满足」**，不发 flag（G3 附加断言）。
       expect(body.projection.status, '正确 payload 在调试实例上应当满足成功条件').toBe('satisfied');
@@ -633,33 +731,19 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     expect(addrBlock, '第 5 步拼出来的 addr 积木还在画布上').toBeDefined();
     if (addrBlock === undefined) return;
 
-    await test.step('把地址改成错的值，试运行给出中文错误解释', async () => {
-      // 第 5 步的「试运行」把程序跑到底了，调试实例现在是**终态**：05 §3 的表里
-      // 终态只禁用执行类按钮，回退类按钮仍然可用，所以先「重置」回 ready 再改地址。
+    await test.step('把地址改成错的值，「运行」给出中文错误解释', async () => {
+      // 第 5 步的「运行」把程序跑到底了，调试实例现在是**终态**：终态只禁用单步类按钮，
+      // 「运行」自己会先 reset，所以不用手动重置，改完地址直接再点「运行」。
       const entered = await fetchProjection();
-      expect(['satisfied', 'exited'], '试运行跑完之后应当是终态').toContain(entered.status);
-      const reset = runButton('重置');
-      await expect(reset, '终态下「重置」必须仍然可用（05 §3）').toBeEnabled();
-      await reset.click();
-      await expect
-        .poll(async () => (await fetchProjection()).status, { message: '重置之后回到 ready' })
-        .toBe('ready');
+      expect(['satisfied', 'exited'], '运行跑完之后应当是终态').toContain(entered.status);
+      await expect(await menuButton('重置'), '终态下「重置」必须仍然可用（05 §3）').toBeEnabled();
 
+      await closeRunMenu();
       await editBlockField(page, addrBlock.id, 0, wrongValue.toString());
-      await runButton('编译').click();
-      // 改字段会让编译产物变旧（05 §3）：必须先重新编译，「试运行」才重新可用。
-      const program = await waitComponentText('pwn2block-program-view');
-      expect(program, `改地址后重新编译应当照旧得到 2 个动作，程序区实际显示：${program}`).toContain('2 个动作');
-      const gateReason = await page
-        .locator('pwn2block-payload-panel pwn2block-run-menu details.reasons')
-        .first()
-        .innerText()
-        .catch(() => '（读不到 run-menu 的 reasons）');
-      await expect(
-        runButton('试运行'),
-        `重新编译之后「试运行」必须可用；run-menu 给的理由是：${gateReason}`,
-      ).toBeEnabled();
-      const captured = recordDebugResponse(await clickAndCapture('试运行', isActions));
+      // 改字段会自动重新编译：动作条数不变，游标回到开头。
+      await expect(statusBar(), '改地址后重新编译应当照旧得到 2 个动作').toContainText('动作 0/2');
+      await expect(payloadButton('运行'), `重新编译之后「运行」必须可用（title：${await payloadButton('运行').getAttribute('title')}）`).toBeEnabled();
+      const { run: captured } = await runAllAndCapture();
       expect(captured.status).toBe(200);
       const body = captured.body as {
         results: { ok: boolean; action: string; error?: { code: string; message: string; note?: string } }[];
@@ -700,16 +784,11 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
         `受门槛保护的提示是否已揭示，应当与失败次数自洽（已失败 ${beforeLoop.failures} / 门槛 ${threshold}）`,
       ).toBe(beforeLoop.failures >= threshold);
 
-      // 失败之后实例是 failed，运行类按钮会被禁用，所以要「重置 → 再试运行」；
+      // 失败之后实例是 failed；「运行」自带开头的 reset，所以直接再点「运行」即可。
       // failures 是单调递增的（04 §3），重置不会把它清零。上限 8 次防止死循环。
       let projection = await fetchProjection();
       for (let i = 0; i < 8 && projection.failures < threshold; i += 1) {
-        const reset = page.getByRole('button', { name: '重置', exact: true });
-        if (await reset.isEnabled()) {
-          await reset.click();
-          await page.waitForTimeout(300);
-        }
-        recordDebugResponse(await clickAndCapture('试运行', isActions));
+        await runAllAndCapture();
         projection = await fetchProjection();
       }
       expect(projection.failures, `失败次数应当达到解锁门槛 ${threshold}`).toBeGreaterThanOrEqual(threshold);
@@ -739,19 +818,18 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     });
 
     await test.step('回退后按钮状态与 history 深度一致（05 §6）', async () => {
-      await runButton('重置').click();
-      await page.waitForTimeout(400);
+      recordDebugResponse(await clickAndCapture(await menuButton('重置'), isActions));
       let projection = await fetchProjection();
       expect(projection.status).toBe('ready');
 
       // 先走两步，history.stepBack > 0 → 「后退一步」必须可用。
+      await openRunMenu();
       const stepInput = page.getByRole('spinbutton', { name: '运行步数' });
       await stepInput.fill('2');
-      await runButton('运行 N 步').click();
-      await page.waitForTimeout(400);
+      recordDebugResponse(await clickAndCapture(await menuButton('运行 N 步'), isActions));
       projection = await fetchProjection();
       expect(projection.steps, '运行 2 步之后应当有 2 条指令').toBeGreaterThan(0);
-      const stepBack = page.getByRole('button', { name: '后退一步', exact: true });
+      const stepBack = await menuButton('后退一步');
       if (projection.steps > 0) {
         await expect(stepBack, 'history 里有可回退的指令时按钮必须可用').toBeEnabled();
       }
@@ -773,16 +851,15 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
   // -------------------------------------------------------------------------
   test('第 7 步：点「提交判题」，判题实例重置到初态并回放 payload', async () => {
     // 先让调试实例真的走几步：否则「录像首帧=初态」这条断言在 == 当前状态 时恒真，等于没测。
+    await openRunMenu();
     const stepInput = page.getByRole('spinbutton', { name: '运行步数' });
     await stepInput.fill('2');
-    if (await runButton('运行 N 步').isEnabled()) {
-      await runButton('运行 N 步').click();
-      await page.waitForTimeout(400);
-    }
+    const runN = await menuButton('运行 N 步');
+    if (await runN.isEnabled()) recordDebugResponse(await clickAndCapture(runN, isActions));
     const beforeSubmit = await fetchProjection();
     expect(beforeSubmit.steps, '提交前调试实例应当有进度（否则这条断言没有意义）').toBeGreaterThan(0);
 
-    const captured = recordDebugResponse(await clickAndCapture('提交判题', isSubmit));
+    const captured = recordDebugResponse(await clickAndCapture(await menuButton('提交判题'), isSubmit));
     expect(captured.status, 'POST /submit 应当 200').toBe(200);
     const body = captured.body as {
       verdict: string;
@@ -861,6 +938,7 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
       const panel = await waitComponentText('pwn2block-verdict-panel');
       expect(panel).toMatch(/[\u4e00-\u9fa5]/);
       expect(panel).toContain('回放时间线');
+      await closeRunMenu();
       const range = page.locator('#replay-range');
       await expect(range).toBeVisible();
       const max = Number(await range.getAttribute('max'));
@@ -892,13 +970,14 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     if (addrBlock === undefined) return;
 
     await test.step('把地址改回参考解法的值，提交判胜并下发 flag', async () => {
+      await closeRunMenu();
       await runButton('回到调试').click();
       await page.waitForTimeout(300);
       await editBlockField(page, addrBlock.id, 0, addrValue.toString());
-      await runButton('编译').click();
-      await page.waitForTimeout(400);
+      // 改字段自动重新编译；状态栏游标回到 0/2 说明新产物已经就位。
+      await expect(statusBar()).toContainText('动作 0/2');
 
-      const captured = recordDebugResponse(await clickAndCapture('提交判题', isSubmit));
+      const captured = recordDebugResponse(await clickAndCapture(await menuButton('提交判题'), isSubmit));
       expect(captured.status).toBe(200);
       const body = captured.body as { verdict: string; flag?: string; executed: number };
       expect(body.verdict, '参考解法必须判胜').toBe(solution.expectedVerdict);
@@ -913,7 +992,7 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
 
     await test.step('重复提交互不影响：仍然 won、flag 相同、调试实例不动', async () => {
       const debugBefore = await fetchProjection();
-      const captured = recordDebugResponse(await clickAndCapture('提交判题', isSubmit));
+      const captured = recordDebugResponse(await clickAndCapture(await menuButton('提交判题'), isSubmit));
       const body = captured.body as { verdict: string; flag?: string };
       expect(body.verdict).toBe('won');
       expect(body.flag).toBe(EXPECTED_FLAG);
@@ -934,15 +1013,11 @@ test.describe('01 §3 八步闭环 · 真实后端 + 真实首题（G3 · D5）'
     });
 
     await test.step('调试实例满足成功条件时只提示「已满足」，不发 flag', async () => {
+      await closeRunMenu();
       await runButton('回到调试').click();
       await page.waitForTimeout(300);
-      // 从初态再试一次：调试实例满足成功条件，但响应里既没有 flag 键也没有 flag 真值。
-      const reset = page.getByRole('button', { name: '重置', exact: true });
-      if (await reset.isEnabled()) {
-        await reset.click();
-        await page.waitForTimeout(300);
-      }
-      const captured = recordDebugResponse(await clickAndCapture('试运行', isActions));
+      // 「运行」从初态再跑一次：调试实例满足成功条件，但响应里既没有 flag 键也没有 flag 真值。
+      const { run: captured } = await runAllAndCapture();
       const body = captured.body as { projection: Projection };
       expect(body.projection.status, '正确 payload 在调试实例上应当满足成功条件').toBe('satisfied');
       expect(collectKeys(body).has('flag'), '调试实例响应里不允许出现 flag 键').toBe(false);
@@ -1064,7 +1139,9 @@ test.describe('刷新恢复（真浏览器 · localStorage 跨刷新）', () => 
       // 刷新后回到题目列表——真实用户也是再点一次同一道题，恢复就发生在这一步。
       await expect(runButton(CHALLENGE_TITLE)).toBeVisible();
       await runButton(CHALLENGE_TITLE).click();
-      await expect(runButton('编译'), '会话应当接回来了（编译按钮可用）').toBeEnabled();
+      // 会话接回来、画布装回并自动编译之后，「运行」可用，状态栏给出 1 个动作。
+      await expect(payloadButton('运行'), '会话应当接回来了（「运行」可用）').toBeEnabled({ timeout: 20_000 });
+      await expect(statusBar()).toContainText('动作 0/1');
 
       await expect
         .poll(() => canvasText(page), { timeout: 20_000, message: '刷新后画布上的积木应当还在' })

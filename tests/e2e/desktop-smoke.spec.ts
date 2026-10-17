@@ -20,7 +20,7 @@ async function reachable(locator: Locator, borderTolerance = 0): Promise<void> {
   await expect(locator).toBeVisible();
   const box = await locator.boundingBox();
   if (box === null) throw new Error('控件没有实际尺寸');
-  // 带边框画布在 720 高度下有不足 1 CSS px 的舍入裁切；按钮仍要求完整可见。
+  // 带边框画布滚入视口后底边有 1–2 CSS px 的舍入裁切（scrollY 取整、画布顶边是小数）；按钮仍要求完整可见。
   await expect(locator).toBeInViewport({ ratio: 1 - borderTolerance / Math.min(box.width, box.height) });
   const isButton = await locator.evaluate<boolean, void>('element => element.matches("button, [role=button]")');
   if (isButton && await locator.isEnabled()) await locator.click({ trial: true });
@@ -33,22 +33,41 @@ async function canvasStructure(page: Page) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** 从用户可见的编译结果核对唯一动作及参数：{ type: 'step', count: 1 }。 */
-async function expectCompiledStep(page: Page): Promise<void> {
-  const rows = page.locator('pwn2block-program-view li');
-  await expect(rows).toHaveCount(1);
-  await expect(rows.locator('.type')).toHaveText('step');
-  await expect(rows.locator('.label')).toHaveText('执行 1 条指令');
+/** 改积木自动编译：状态栏给出唯一一个动作，「运行」可用（动作内容在提交请求里逐字核对）。 */
+async function expectCompiledStep(page: Page, pointer = '动作 0/1'): Promise<void> {
+  await expect(page.locator('pwn2block-app .status')).toContainText(pointer);
+  await expect(page.locator('pwn2block-payload-panel').getByRole('button', { name: '运行', exact: true })).toBeEnabled();
+  await expect(page.locator('pwn2block-output-view')).not.toContainText('编译错误');
+}
+
+/** 顶栏「运行」菜单默认收起：展开后菜单里的按钮才可点击。 */
+async function openRunMenu(page: Page): Promise<void> {
+  const menu = page.locator('pwn2block-top-bar details.menu');
+  if (await menu.getAttribute('open') === null) {
+    await page.locator('pwn2block-top-bar summary').filter({ hasText: /^运行$/ }).click();
+  }
+  await expect(menu).toHaveAttribute('open', '');
+}
+
+async function closeRunMenu(page: Page): Promise<void> {
+  const menu = page.locator('pwn2block-top-bar details.menu');
+  if (await menu.getAttribute('open') === null) return;
+  await page.keyboard.press('Escape');
+  await expect(menu).not.toHaveAttribute('open', '');
 }
 
 async function layout(page: Page): Promise<void> {
   const left = page.getByRole('region', { name: '视图管理器', exact: true });
   const right = page.getByRole('region', { name: 'payload 窗口', exact: true });
-  await expect(left).toBeInViewport({ ratio: 1 });
-  await expect(right).toBeInViewport({ ratio: 1 });
+  // 页面改为整页纵向滚动：两栏可以比视口高，只要求露出来且横向完整落在视口内。
+  await expect(left).toBeInViewport();
+  await expect(right).toBeInViewport();
   const a = await left.boundingBox();
   const b = await right.boundingBox();
   if (a === null || b === null) throw new Error('左右面板必须有实际尺寸');
+  const width = await page.evaluate<number>('innerWidth');
+  expect(a.x).toBeGreaterThanOrEqual(0);
+  expect(b.x + b.width, '右栏不越出视口右缘').toBeLessThanOrEqual(width);
   expect(a.height).toBeGreaterThan(100);
   expect(Math.abs(a.width - b.width), '左右保持等宽').toBeLessThanOrEqual(2);
   expect(a.x + a.width).toBeLessThanOrEqual(b.x);
@@ -75,8 +94,10 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
     contentType: 'application/json',
   });
   const button = (name: string) => page.getByRole('button', { name, exact: true });
-  const toolbar = page.locator('pwn2block-payload-panel pwn2block-run-menu');
+  const toolbar = page.locator('pwn2block-top-bar pwn2block-run-menu');
+  const payload = page.locator('pwn2block-payload-panel');
   const action = async (name: string): Promise<Projection> => {
+    await openRunMenu(page);
     const [response] = await Promise.all([
       page.waitForResponse(res => res.url().endsWith('/actions') && res.request().method() === 'POST'),
       toolbar.getByRole('button', { name, exact: true }).click(),
@@ -115,31 +136,54 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       sessions.add(sessionId);
       initial = body.projection;
       expect(initial.status).toBe('ready');
-      await expect(button('编译')).toBeEnabled();
+      await expect(page.locator('pwn2block-app .status')).toContainText('动作 0/0');
       await capture(page, info, '02-briefing-expanded');
     });
 
-    await test.step('键盘折叠题面、等宽布局与工具栏可达', async () => {
+    await test.step('键盘折叠题面、等宽布局、视图标签与工具栏可达', async () => {
       const summary = page.locator('pwn2block-briefing-panel summary');
       await summary.focus();
       await expect(summary).toBeFocused();
       await page.keyboard.press('Enter');
       await expect(page.locator('pwn2block-briefing-panel details')).not.toHaveAttribute('open');
       await layout(page);
-      for (const name of ['编译', '试运行', '单步', '运行 N 步', '后退一步', '撤销', '重置', '提交判题']) {
+      for (const name of ['运行', '终止']) {
+        await reachable(payload.getByRole('button', { name, exact: true }));
+      }
+      // 视图标签只靠键盘就能逐个切换：→ / End / Home，Ctrl+↓ 在页面任何位置循环。
+      const tabs = page.getByRole('tablist', { name: '视图', exact: true }).getByRole('tab');
+      const count = await tabs.count();
+      expect(count, '至少有栈 / 指令 / 寄存器 / 内存四个标签').toBeGreaterThanOrEqual(4);
+      await tabs.first().click();
+      await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+      for (let i = 1; i < count; i++) {
+        await page.keyboard.press('ArrowRight');
+        await expect(tabs.nth(i)).toHaveAttribute('aria-selected', 'true');
+        await expect(tabs.nth(i)).toBeFocused();
+      }
+      await page.keyboard.press('Home');
+      await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('Control+ArrowDown');
+      await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('Control+ArrowUp');
+      await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+      // 顶栏「运行」菜单：键盘展开后六个按钮全部可达，Esc 收起并把焦点还给菜单标题。
+      const runSummary = page.locator('pwn2block-top-bar summary').filter({ hasText: /^运行$/ });
+      await runSummary.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('pwn2block-top-bar details.menu')).toHaveAttribute('open', '');
+      for (const name of ['单步', '运行 N 步', '后退一步', '撤销', '重置', '提交判题']) {
         await reachable(toolbar.getByRole('button', { name, exact: true }));
       }
-      const menu = page.locator('pwn2block-top-bar summary').filter({ hasText: /^视图$/ });
-      await menu.focus();
-      await page.keyboard.press('Enter');
-      await expect(page.getByRole('checkbox').first()).toBeVisible();
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('pwn2block-top-bar details.menu')).not.toHaveAttribute('open', '');
+      await expect(runSummary).toBeFocused();
       await capture(page, info, '03-desktop-layout');
     });
 
-    await test.step('真实鼠标拖出开始与单步积木，并编译', async () => {
+    await test.step('真实鼠标拖出开始与单步积木，自动编译出一个动作', async () => {
       const canvas = page.locator('pwn2block-payload-panel #blockly-host');
-      await reachable(canvas, 1);
+      await reachable(canvas, 2);
       const host = await canvas.boundingBox();
       if (host === null) throw new Error('画布没有实际尺寸');
       await openToolboxCategory(page, '开始', 'start');
@@ -154,11 +198,9 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       });
       if (step === undefined) throw new Error('单步积木未连接');
       await editBlockField(page, step.id, 0, '1');
-      await button('编译').click();
-      const program = page.locator('pwn2block-program-view');
       await expectCompiledStep(page);
-      await reachable(program);
-      await capture(page, info, '04-compiled-program');
+      await reachable(page.getByRole('region', { name: '输出区', exact: true }));
+      await capture(page, info, '04-compiled-payload');
     });
 
     await test.step('单步、回退、判题回放与调试隔离', async () => {
@@ -166,13 +208,14 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       expect((await action('后退一步')).steps).toBe(0);
       const [submitted] = await Promise.all([
         page.waitForResponse(res => res.url().endsWith('/submit') && res.request().method() === 'POST'),
-        button('提交判题').click(),
+        toolbar.getByRole('button', { name: '提交判题', exact: true }).click(),
       ]);
       expect(submitted.status()).toBe(200);
       expect(submitted.request().postDataJSON()).toMatchObject({ actions: [{ type: 'step', count: 1 }] });
       const verdict = await submitted.json() as { verdict: string };
       expect(verdict.verdict).toBe('incomplete');
       await expect(button('判题结果')).toHaveAttribute('aria-pressed', 'true');
+      await closeRunMenu(page);
       const timeline = page.getByRole('slider', { name: '回放时间线' });
       await reachable(timeline);
       await timeline.focus();
@@ -192,7 +235,7 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       await capture(page, info, '06-debug-output');
     });
 
-    await test.step('刷新接回原会话，保留积木连接与字段并重新编译', async () => {
+    await test.step('刷新接回原会话，保留积木连接与字段并自动重新编译', async () => {
       const before = await canvasStructure(page);
       const start = before.find(block => block.cls.split(' ').includes('start'));
       const step = before.find(block => block.cls.split(' ').includes('action_step'));
@@ -208,6 +251,9 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       expect(step.childClasses).toEqual([count.cls]);
       const fields = await blockFieldTexts(page, step.id);
       expect(fields, '单步参数应明确为 1').toEqual(['1']);
+      // 程序指针随会话记录一起恢复：单步后再后退一步，指令回退但动作指针仍停在 1/1。
+      const pointer = (await page.locator('pwn2block-app .status').textContent())?.match(/动作 \d+\/\d+/)?.[0];
+      expect(pointer, '刷新前状态栏应有动作指针').toBeDefined();
       await page.reload();
       const [restored] = await Promise.all([
         page.waitForResponse(res => new URL(res.url()).pathname === `/api/sessions/${sessionId}`),
@@ -218,10 +264,8 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
         message: '刷新必须恢复原积木 id、类型、父子连接，不能只恢复孤立块',
       }).toEqual(before);
       await expect.poll(() => blockFieldTexts(page, step.id)).toEqual(fields);
-      await reachable(button('编译'));
-      await button('编译').click();
-      await expectCompiledStep(page);
-      await reachable(page.locator('pwn2block-program-view'));
+      await expectCompiledStep(page, pointer);
+      await reachable(payload.getByRole('button', { name: '运行', exact: true }));
       expect(creates).toBe(1);
       await capture(page, info, '07-restored');
       expect(errors).toEqual([]);
