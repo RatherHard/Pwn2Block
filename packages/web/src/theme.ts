@@ -82,16 +82,18 @@ export const sharedStyles = css`
     content: ' ]' / '';
   }
 
-  button:hover:not(:disabled),
+  button:hover:not(:disabled):not([aria-disabled='true']),
   button[aria-selected='true'],
   button[aria-pressed='true'],
   button.on,
-  button:active:not(:disabled) {
+  button:active:not(:disabled):not([aria-disabled='true']) {
     color: var(--p2b-bg);
     background: var(--p2b-fg);
   }
 
-  button:disabled {
+  /* aria-disabled 的按钮保持可聚焦（禁用原因要能被键盘和读屏拿到），外观与 :disabled 一致。 */
+  button:disabled,
+  button[aria-disabled='true'] {
     color: var(--p2b-dim);
     background: var(--p2b-bg);
     cursor: not-allowed;

@@ -13,7 +13,7 @@
  * - 用户手势改动积木 → `p2b-edit`（产物过期）+ 立即重编译；**程序化装载/生成程序不会派发事件**，
  *   所以那样做之后必须自己调 `recompile()`（05 §3.1 实现备忘）。
  */
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import type { PublicChallenge } from '@pwn2block/shared';
 import type * as Blockly from 'blockly';
 import { mountBlockly, type BlocklyBridge } from '../blocks/mount';
@@ -62,9 +62,32 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         top: -0.7em;
         right: 0.6rem;
         display: flex;
+        align-items: center;
         gap: 0.6rem;
         padding: 0 0.3rem;
         background: var(--p2b-bg);
+      }
+      /*
+       * 禁用原因：平时视觉隐藏（仍在无障碍树里，供 aria-describedby 引用）；对应按钮获得键盘焦点时
+       * 排到两个按钮左侧显示一行。按钮在 DOM 里在前，这里用 order 把原因挪到左边，
+       * 右对齐的按钮位置因此不动。
+       */
+      .controls .reason {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+      .controls button:focus-visible + .reason {
+        position: static;
+        order: -1;
+        width: auto;
+        height: auto;
+        overflow: visible;
+        clip-path: none;
+        color: var(--p2b-dim);
       }
       #blockly-host {
         position: absolute;
@@ -180,16 +203,29 @@ export class Pwn2BlockPayloadPanel extends LitElement {
     `;
   }
 
-  /** 手工渲染「运行 / 终止」按钮：禁用原因只做 `title`，不像 `run-menu.ts` 那样拼进文案。 */
+  /**
+   * 手工渲染「运行 / 终止」按钮。不可用时用 `aria-disabled` 而不是 `disabled`：按钮保持可聚焦，
+   * 禁用原因经 `aria-describedby` 交给读屏，键盘聚焦时在标题栏里显示一行（鼠标悬停仍看 `title`）。
+   * 也正因为保持可聚焦，运行结束、点了「终止」之后焦点不会掉回 `body`。
+   */
   private renderButton(button: RunButtonModel, command: RunCommand) {
+    const reasonId = `reason-${button.id}`;
+    const reason = button.enabled ? undefined : button.disabledReason ?? '';
     return html`<button
-      type="button"
-      title=${button.enabled ? button.hint : button.disabledReason ?? ''}
-      ?disabled=${!button.enabled}
-      @click=${() => this.emitRun(command)}
-    >
-      ${button.label}
-    </button>`;
+        type="button"
+        title=${reason ?? button.hint}
+        aria-disabled=${button.enabled ? 'false' : 'true'}
+        aria-describedby=${reason === undefined ? nothing : reasonId}
+        @click=${() => this.onRunClick(button, command)}
+      >
+        ${button.label}
+      </button>${reason === undefined ? nothing : html`<span class="reason" id=${reasonId}>${reason}</span>`}`;
+  }
+
+  /** 不可用时点击（含键盘回车 / 空格）什么也不做：`aria-disabled` 不会替我们拦截事件。 */
+  private onRunClick(button: RunButtonModel, command: RunCommand): void {
+    if (!button.enabled) return;
+    this.emitRun(command);
   }
 
   private emitRun(command: RunCommand): void {

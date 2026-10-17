@@ -2,9 +2,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type * as Blockly from 'blockly';
 import { ret2winPublic } from '@pwn2block/shared';
-// 副作用导入：注册自定义元素（只在类型位置用到类名时，编译期会把 import 整条删掉）。
-import '../src/components/payload-panel';
-import type { Pwn2BlockPayloadPanel } from '../src/components/payload-panel';
+// 值导入同时注册自定义元素（样式断言要读类上的静态 styles）。
+import { Pwn2BlockPayloadPanel } from '../src/components/payload-panel';
 import { BLOCK_TYPES } from '../src/compiler/types';
 import { mountBlockly } from '../src/blocks/mount';
 import { readCanvas, readSession, writeCanvas, type KeyValueStore } from '../src/viewmodel/storage';
@@ -177,15 +176,16 @@ describe('payload 窗口：标题栏（本批任务第 6 条）', () => {
     panel.controls = payloadControls(input);
     await panel.updateComplete;
 
-    const buttons = [...panel.renderRoot.querySelectorAll('button')];
-    const run = buttons.find((b) => b.textContent?.trim() === '运行');
-    const abort = buttons.find((b) => b.textContent?.trim() === '终止');
-    // 「运行」被会话门禁拦住：禁用原因只做 title，不置灰之外还要可读。
-    expect(run?.disabled).toBe(true);
+    const run = buttonOf(panel, '运行');
+    const abort = buttonOf(panel, '终止');
+    // 「运行」被会话门禁拦住：aria-disabled 置灰，原因既做 title，也经 aria-describedby 可读。
+    expect(run?.getAttribute('aria-disabled')).toBe('true');
     expect(run?.title).toBe('会话还没准备好：先在上面选一道题');
+    expect(describedBy(panel, run)).toBe('会话还没准备好：先在上面选一道题');
 
     // 「终止」在 running 为真时可用：点击派发 p2b-run，detail 为 abort。
-    expect(abort?.disabled).toBe(false);
+    expect(abort?.getAttribute('aria-disabled')).toBe('false');
+    expect(abort?.hasAttribute('aria-describedby')).toBe(false);
     let detail: unknown;
     panel.addEventListener('p2b-run', (event) => {
       detail = (event as CustomEvent).detail;
@@ -193,7 +193,86 @@ describe('payload 窗口：标题栏（本批任务第 6 条）', () => {
     abort?.click();
     expect(detail).toEqual({ kind: 'abort' });
   });
+
+  it('不可用的按钮保持可聚焦：原因经 aria-describedby 可读，点击不派发 p2b-run', async () => {
+    const panel = await mountPanel();
+    panel.controls = payloadControls({ ...READY_INPUT, running: false });
+    await panel.updateComplete;
+    const abort = buttonOf(panel, '终止');
+    expect(abort?.disabled).toBe(false);
+    expect(abort?.getAttribute('aria-disabled')).toBe('true');
+    expect(abort?.title).toBe('没有正在进行的运行');
+    expect(describedBy(panel, abort)).toBe('没有正在进行的运行');
+
+    const emitted: unknown[] = [];
+    panel.addEventListener('p2b-run', (event) => emitted.push((event as CustomEvent).detail));
+    abort?.click();
+    expect(emitted).toEqual([]);
+    // 「运行」此时可用，照常派发：说明拦截只针对不可用的按钮。
+    buttonOf(panel, '运行')?.click();
+    expect(emitted).toEqual([{ kind: 'run-all' }]);
+  });
+
+  it('两个按钮的原因元素 id 互不相同', async () => {
+    const panel = await mountPanel();
+    panel.controls = payloadControls({ ...READY_INPUT, hasSession: false, running: false });
+    await panel.updateComplete;
+    const ids = [...panel.renderRoot.querySelectorAll('button')].map((b) => b.getAttribute('aria-describedby'));
+    expect(ids).toEqual(['reason-run-all', 'reason-abort']);
+    expect(describedBy(panel, buttonOf(panel, '运行'))).toBe('会话还没准备好：先在上面选一道题');
+    expect(describedBy(panel, buttonOf(panel, '终止'))).toBe('没有正在进行的运行');
+  });
+
+  it('运行结束（终止变为不可用）时焦点仍留在「终止」上，不掉回 body', async () => {
+    const panel = await mountPanel();
+    panel.controls = payloadControls({ ...READY_INPUT, running: true });
+    await panel.updateComplete;
+    const abort = buttonOf(panel, '终止');
+    abort?.focus();
+    expect(panel.shadowRoot?.activeElement).toBe(abort);
+
+    panel.controls = payloadControls({ ...READY_INPUT, running: false });
+    await panel.updateComplete;
+    expect(buttonOf(panel, '终止')).toBe(abort);
+    expect(abort?.getAttribute('aria-disabled')).toBe('true');
+    expect(panel.shadowRoot?.activeElement).toBe(abort);
+    expect(document.activeElement).toBe(panel);
+  });
+
+  it('样式：原因平时视觉隐藏，按钮键盘聚焦时才显示；aria-disabled 沿用禁用外观', () => {
+    const own = Pwn2BlockPayloadPanel.styles as readonly { readonly cssText: string }[];
+    const text = own.map((sheet) => sheet.cssText).join('\n');
+    expect(text).toMatch(/\.controls \.reason \{[^}]*clip-path: inset\(50%\)/);
+    expect(text).toMatch(/\.controls button:focus-visible \+ \.reason \{[^}]*clip-path: none/);
+    expect(text).toMatch(/button:disabled,\s*button\[aria-disabled='true'\] \{[^}]*color: var\(--p2b-dim\)/);
+    expect(text).toMatch(/button:hover:not\(:disabled\):not\(\[aria-disabled='true'\]\)/);
+  });
 });
+
+/** 会话就绪、产物可用的基础输入：只用来覆盖个别字段。 */
+const READY_INPUT: PayloadControlsInput = {
+  mode: 'debug',
+  hasSession: true,
+  sessionExpired: false,
+  artifact: { actions: [{ type: 'run' }] } as unknown as PayloadControlsInput['artifact'],
+  stale: false,
+  compileErrorCount: 0,
+  history: { undo: 0, stepBack: 0 },
+  cursor: 0,
+  allowedActions: ['run'],
+  running: false,
+};
+
+function buttonOf(panel: Pwn2BlockPayloadPanel, label: string): HTMLButtonElement | undefined {
+  return [...panel.renderRoot.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
+}
+
+/** 顺着 aria-describedby 找到原因元素，返回它的文字；没有关联时返回 `undefined`。 */
+function describedBy(panel: Pwn2BlockPayloadPanel, button: HTMLButtonElement | undefined): string | undefined {
+  const id = button?.getAttribute('aria-describedby');
+  if (id === null || id === undefined) return undefined;
+  return panel.renderRoot.querySelector(`#${id}`)?.textContent ?? undefined;
+}
 
 describe('payload 窗口：画布本地保存与恢复（D5 批次 2，05 §3.1）', () => {
   /** 内存存储：面板只认注入进来的 store，不传就等于这台环境不保存。 */
