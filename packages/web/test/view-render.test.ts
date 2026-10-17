@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LitElement } from 'lit';
 import type { Projection, PublicChallenge } from '@pwn2block/shared';
 import '../src/components/stack-view';
-import '../src/components/disasm-view';
+import { Pwn2BlockDisasmView } from '../src/components/disasm-view';
 import '../src/components/registers-view';
 import '../src/components/memory-view';
 import '../src/components/io-view';
@@ -284,5 +284,21 @@ describe('行样式层叠（设计 §2：值着色不能被按钮基础样式盖
       expect(cssText.indexOf(region)).toBeGreaterThan(-1);
       expect(cssText.lastIndexOf(region)).toBeLessThan(changed);
     }
+  });
+
+  it('指令视图：ip 行的 .text 盖过 .row.changed .text（同特异性且排在后面）', () => {
+    const own = (Pwn2BlockDisasmView.styles as readonly { readonly cssText: string }[])
+      .map((sheet) => sheet.cssText)
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...own.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => ({
+      selectors: selector!.split(',').map((item) => item.trim()),
+      body: body!,
+    }));
+    const changedAt = rules.findIndex((rule) => rule.selectors.includes('.row.changed .text'));
+    const ipAt = rules.findIndex((rule) => rule.selectors.includes('.row.ip .text'));
+    expect(changedAt).toBeGreaterThan(-1);
+    expect(ipAt).toBeGreaterThan(changedAt);
+    expect(rules[ipAt]?.body).toContain('color: var(--p2b-ip)');
   });
 });

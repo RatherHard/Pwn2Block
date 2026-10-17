@@ -45,12 +45,14 @@ export class Pwn2BlockDisasmView extends LitElement {
         color: var(--p2b-code);
       }
       /*
-       * 当前指令整行用 --p2b-ip（设计 §3.3），盖过 .addr / .sym / .dim 与跳转目标的颜色；
-       * 必须排在 .row.changed .text 之后（同为 (0,2,0)），ip 行以 ► 与 ip 色为准。
+       * 当前指令整行用 --p2b-ip（设计 §3.3），盖过 .addr / .sym / .dim 与跳转目标的颜色。
+       * .row.changed .text 是 (0,3,0)，比 .row.ip > *（(0,2,0)）高，所以另写同为 (0,3,0) 的
+       * .row.ip .text 并排在它之后：同一行既变化又是 ip 时，以 ► 与 ip 色为准。
        * 跳转目标用 :where 压到与 button.target 相同的 (0,1,1)：盖过代码色，但不盖过共享样式的悬停反显。
        */
       .row.ip,
       .row.ip > *,
+      .row.ip .text,
       :where(.row.ip) button.target {
         color: var(--p2b-ip);
       }

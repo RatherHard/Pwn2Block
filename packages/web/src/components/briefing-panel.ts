@@ -179,9 +179,8 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         <ol>
           ${model.items.map(
             (item) => html`<li>
-              ${item.auto ? html`<span class="tag">按失败次数解锁</span>` : ''}<span class="text md"
-                >${renderMarkdown(parseMarkdown(item.text))}</span
-              >
+              ${item.auto ? html`<span class="tag">按失败次数解锁</span>` : ''}
+              <div class="text md">${renderMarkdown(parseMarkdown(item.text))}</div>
             </li>`,
           )}
         </ol>

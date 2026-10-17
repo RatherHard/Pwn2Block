@@ -154,4 +154,17 @@ describe('题面与提示面板（05 §5）', () => {
     const hintItem = root.querySelector('.hints li');
     expect(hintItem?.querySelector('code')?.textContent).toBe('ret');
   });
+
+  it('提示的 Markdown 容器是块级 div：段落和列表不会落进 span 里', async () => {
+    const panel = await mount({ hints: [{ text: '第一段\n\n- 甲\n- 乙' }] });
+    revealButton(panel).click();
+    await panel.updateComplete;
+    const container = panel.renderRoot.querySelector('.hints li .text.md');
+    expect(container?.tagName).toBe('DIV');
+    // 直接子元素：段落和列表都挂在 div 下，而不是被 span 包着（jsdom 的 :scope 在 shadow root 里不可靠）。
+    const children = [...(container?.children ?? [])];
+    expect(children.map((child) => child.tagName)).toEqual(['P', 'UL']);
+    expect(children[0]?.textContent).toBe('第一段');
+    expect([...(children[1]?.children ?? [])].map((li) => li.textContent)).toEqual(['甲', '乙']);
+  });
 });
