@@ -55,17 +55,24 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         flex-direction: column;
         flex: 1;
         min-height: 0;
-        padding: 0.9rem 0.75rem 0.75rem;
+        /* 上内边距要盖住按钮压在边框下方的那一半，否则画布会挡住按钮底边。 */
+        padding: 1.4rem 0.75rem 0.75rem;
       }
+      /* 按钮组垂直居中压在上边框上，和左侧标题嵌在边框里的写法一致。 */
       .controls {
         position: absolute;
-        top: -0.7em;
+        top: calc(var(--p2b-border) / -2);
         right: 0.6rem;
         display: flex;
         align-items: center;
         gap: 0.6rem;
         padding: 0 0.3rem;
         background: var(--p2b-bg);
+        transform: translateY(-50%);
+      }
+      .controls button {
+        min-height: 1.7rem;
+        padding-block: 0;
       }
       /*
        * 禁用原因：平时视觉隐藏（仍在无障碍树里，供 aria-describedby 引用）；对应按钮获得键盘焦点时

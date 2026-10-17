@@ -125,13 +125,12 @@ export class Pwn2BlockApp extends LitElement {
         padding: 0.8rem;
         overflow: hidden;
       }
+      /* 两栏不画边框：视图管理器和 payload 窗口各自的 .box 已经带框。 */
       .left,
       .right {
         min-width: 0;
         min-height: 0;
         overflow: hidden;
-        border: var(--p2b-border) solid var(--p2b-line);
-        border-radius: 0;
       }
       .left {
         display: flex;
