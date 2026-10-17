@@ -4,6 +4,7 @@
  * 条目由 `viewmodel/output.ts` 算好（纯函数，可单测），这里只负责排版与事件：
  * 点带积木的条目 → `p2b-block-select`，由 payload 面板高亮那块积木。
  * 整块是一个 `aria-live` 区域：满足条件、失败、错误与判题结论都会播报（05 §7）。
+ * 这里不再自带标题：页面壳的 `<section aria-label="输出区">` 与它的框标题已经给区域命名。
  */
 import { LitElement, css, html } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
@@ -79,8 +80,7 @@ export class Pwn2BlockOutputView extends LitElement {
 
   override render() {
     return html`
-      <h3>输出区</h3>
-      <ul role="status" aria-live="polite">
+      <ul role="status" aria-live="polite" aria-label="输出条目">
         ${repeat(
           this.entries,
           (entry) => entry.key,

@@ -264,6 +264,20 @@ describe('单页骨架：输出区改为通栏（本批任务第 6 条）', () =
     expect(outputOf(app)).toBe(output?.querySelector('pwn2block-output-view') ?? null);
   });
 
+  it('输出区只有一个标题：名字来自页面壳的 section，输出组件里不再重复 h3', async () => {
+    const { app } = await mountApp(createFakeApi());
+    const output = app.renderRoot.querySelector('section.output');
+    expect(output?.getAttribute('aria-label')).toBe('输出区');
+    const title = [...(output?.children ?? [])].find((child) => child.classList.contains('box-title'));
+    expect(title?.textContent?.trim()).toBe('输出');
+    const root = outputOf(app)?.shadowRoot;
+    expect(root).toBeInstanceOf(ShadowRoot);
+    expect(root?.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
+    const live = root?.querySelector('[role="status"]');
+    expect(live?.getAttribute('aria-live')).toBe('polite');
+    expect(live?.getAttribute('aria-label')).toBe('输出条目');
+  });
+
   it('判题结果模式下输出区顶部有提示：这是调试实例的历史结果', async () => {
     const replay = makeReplay([{ kind: 'action', label: 'step' }]);
     const api = createFakeApi({
