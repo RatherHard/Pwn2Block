@@ -50,7 +50,7 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         max-width: 75rem;
         margin: 0.75rem 0 0;
         padding: 0.75rem 0.85rem;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
         color: var(--p2b-dim);
         background: var(--p2b-bg);
@@ -59,7 +59,7 @@ export class Pwn2BlockBriefingPanel extends LitElement {
       .hints {
         margin-top: 0.75rem;
         padding-top: 0.75rem;
-        border-top: 1px solid var(--p2b-line);
+        border-top: var(--p2b-border) solid var(--p2b-line);
       }
       .hints h3 {
         margin: 0 0 0.4rem;
@@ -76,7 +76,7 @@ export class Pwn2BlockBriefingPanel extends LitElement {
         display: inline-block;
         margin-right: 0.45rem;
         padding: 0.1rem 0.4rem;
-        border: 1px solid var(--p2b-hidden);
+        border: var(--p2b-border) solid var(--p2b-hidden);
         border-radius: 0;
         color: var(--p2b-hidden);
         background: var(--p2b-bg);

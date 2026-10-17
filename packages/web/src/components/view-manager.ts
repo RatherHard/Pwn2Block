@@ -59,7 +59,7 @@ export class Pwn2BlockViewManager extends LitElement {
         flex: none;
         gap: 0.4rem;
         padding-bottom: 0.5rem;
-        border-bottom: 1px solid var(--p2b-line);
+        border-bottom: var(--p2b-border) solid var(--p2b-line);
       }
       [role='tab'] {
         min-height: 1.8rem;
@@ -87,7 +87,7 @@ export class Pwn2BlockViewManager extends LitElement {
         gap: 1rem;
         margin: 0;
         padding-top: 0.4rem;
-        border-top: 1px solid var(--p2b-line);
+        border-top: var(--p2b-border) solid var(--p2b-line);
         color: var(--p2b-dim);
       }
       .legend .code {

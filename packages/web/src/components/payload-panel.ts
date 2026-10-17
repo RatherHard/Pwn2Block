@@ -93,7 +93,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         position: absolute;
         inset: 0;
         overflow: hidden;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
         background: var(--p2b-bg);
       }
@@ -102,7 +102,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
       }
       #blockly-host .blocklyToolboxDiv,
       #blockly-host .blocklyFlyout {
-        border-right: 1px solid var(--p2b-line);
+        border-right: var(--p2b-border) solid var(--p2b-line);
         background: var(--p2b-bg);
       }
       #blockly-host .blocklyTreeRow {
@@ -127,7 +127,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         flex: 1;
         min-height: 0;
         overflow: hidden;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
       }
       .placeholder {
@@ -136,7 +136,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         display: grid;
         place-items: center;
         padding: 1.5rem;
-        border: 1px dashed var(--p2b-line);
+        border: var(--p2b-border) dashed var(--p2b-line);
         border-radius: 0;
         color: var(--p2b-dim);
         background: var(--p2b-bg);

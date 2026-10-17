@@ -22,8 +22,8 @@ export class Pwn2BlockVerdictPanel extends LitElement {
       :host {
         display: block;
         padding: 0.85rem 1rem;
-        border-top: 1px solid var(--p2b-line);
-        border-bottom: 1px solid var(--p2b-line);
+        border-top: var(--p2b-border) solid var(--p2b-line);
+        border-bottom: var(--p2b-border) solid var(--p2b-line);
         background: var(--p2b-bg);
       }
       .banner {
@@ -72,7 +72,7 @@ export class Pwn2BlockVerdictPanel extends LitElement {
       }
       .flag code {
         padding: 0.35rem 0.65rem;
-        border: 1px solid var(--p2b-ip);
+        border: var(--p2b-border) solid var(--p2b-ip);
         border-radius: 0;
         color: var(--p2b-ip);
         background: var(--p2b-bg);
@@ -92,7 +92,7 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         flex-wrap: wrap;
         margin-top: 0.7rem;
         padding-top: 0.7rem;
-        border-top: 1px solid var(--p2b-line);
+        border-top: var(--p2b-border) solid var(--p2b-line);
       }
       input[type='range'] {
         flex: 1;

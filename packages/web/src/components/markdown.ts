@@ -121,7 +121,7 @@ export const markdownStyles: CSSResult = css`
     margin: 0.65rem 0;
     padding: 0.6rem 0.7rem;
     overflow-x: auto;
-    border: 1px solid var(--p2b-line);
+    border: var(--p2b-border) solid var(--p2b-line);
     color: var(--p2b-fg);
   }
   .md pre code {
@@ -136,7 +136,7 @@ export const markdownStyles: CSSResult = css`
   .md hr {
     margin: 0.75rem 0;
     border: none;
-    border-top: 1px solid var(--p2b-line);
+    border-top: var(--p2b-border) solid var(--p2b-line);
   }
   .md .md-link {
     color: var(--p2b-fg);

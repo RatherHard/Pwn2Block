@@ -47,7 +47,7 @@ export class Pwn2BlockMemoryView extends LitElement {
         margin-top: 0.5rem;
       }
       .dump .cmd {
-        border-top: 1px solid var(--p2b-line);
+        border-top: var(--p2b-border) solid var(--p2b-line);
         padding-top: 0.3rem;
       }
       /* hexdump 每行是一段定宽原文，列间距就是文本里的空格，不走 grid。 */

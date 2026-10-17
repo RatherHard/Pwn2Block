@@ -9,9 +9,11 @@ import { css } from 'lit';
 export const terminalTheme = css`
   :host {
     --p2b-bg: #0c0c0c;
-    --p2b-fg: #c8c8c8;
-    --p2b-dim: #7a7a7a;
-    --p2b-line: #3a3a3a;
+    --p2b-fg: #e0e0e0;
+    --p2b-dim: #a0a0a0;
+    --p2b-line: #6a6a6a;
+    /* 面板与控件的边框宽度；表格、列表的行分隔线保持 1px，避免密集行显得太重。 */
+    --p2b-border: 2px;
     --p2b-addr: #8fa1b3;
     --p2b-changed: #e5c07b;
     --p2b-error: #e06c75;
@@ -20,7 +22,7 @@ export const terminalTheme = css`
     --p2b-code: #d19a66;
     --p2b-stack: #56b6c2;
     --p2b-data: #61afef;
-    --p2b-focus: #e8e8e8;
+    --p2b-focus: #ffffff;
     --p2b-font: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace;
     --p2b-size: 14px;
     --p2b-topbar-h: 2.5rem;
@@ -60,7 +62,7 @@ export const sharedStyles = css`
   button {
     min-height: 2rem;
     padding: 0.34rem 0.4rem;
-    border: 1px solid var(--p2b-line);
+    border: var(--p2b-border) solid var(--p2b-line);
     border-radius: 0;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
@@ -104,7 +106,7 @@ export const sharedStyles = css`
     width: 11rem;
     min-height: 2rem;
     padding: 0.3rem 0.55rem;
-    border: 1px solid var(--p2b-line);
+    border: var(--p2b-border) solid var(--p2b-line);
     border-radius: 0;
     color: var(--p2b-fg);
     background: var(--p2b-bg);
@@ -143,7 +145,7 @@ export const sharedStyles = css`
   table {
     width: 100%;
     border-collapse: collapse;
-    border: 1px solid var(--p2b-line);
+    border: var(--p2b-border) solid var(--p2b-line);
     background: var(--p2b-bg);
   }
 
@@ -187,7 +189,7 @@ export const sharedStyles = css`
   }
 
   .panel {
-    border: 1px solid var(--p2b-line);
+    border: var(--p2b-border) solid var(--p2b-line);
     border-radius: 0;
     background: var(--p2b-bg);
   }
@@ -199,7 +201,7 @@ export const sharedStyles = css`
   /* .box 容器：实线边框，标题嵌在上边框里（┌─ 标题 ──┐）。 */
   .box {
     position: relative;
-    border: 1px solid var(--p2b-line);
+    border: var(--p2b-border) solid var(--p2b-line);
     border-radius: 0;
     background: var(--p2b-bg);
   }

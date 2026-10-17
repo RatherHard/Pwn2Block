@@ -75,7 +75,7 @@ export class Pwn2BlockApp extends LitElement {
       .briefing {
         flex: none;
         margin: 0 1rem;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-top: 0;
         border-radius: 0;
         background: var(--p2b-bg);
@@ -86,7 +86,7 @@ export class Pwn2BlockApp extends LitElement {
         gap: 0.6rem;
         margin: 0.7rem 1rem 0;
         padding: 0.65rem 0.85rem;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
         background: var(--p2b-bg);
       }
@@ -130,7 +130,7 @@ export class Pwn2BlockApp extends LitElement {
         min-width: 0;
         min-height: 0;
         overflow: hidden;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
       }
       .left {
@@ -175,7 +175,7 @@ export class Pwn2BlockApp extends LitElement {
         justify-content: space-between;
         gap: 1rem;
         padding: 0.9rem 1rem;
-        border: 1px solid var(--p2b-line);
+        border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
         background: var(--p2b-bg);
       }
