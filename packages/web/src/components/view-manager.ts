@@ -44,7 +44,8 @@ export class Pwn2BlockViewManager extends LitElement {
         flex-direction: column;
         height: 100%;
         min-height: 0;
-        padding: 0.85rem;
+        /* 左右下不留白，框直接贴齐所在一栏；上方只留出嵌在边框上的标题。 */
+        padding: 0.85rem 0 0;
       }
       .box {
         display: flex;

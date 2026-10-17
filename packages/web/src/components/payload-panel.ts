@@ -46,7 +46,8 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         min-height: 0;
         gap: 0.75rem;
         overflow: auto;
-        padding: 0.85rem;
+        /* 与视图管理器一致：框贴齐所在一栏，上方只留出压在边框上的标题和按钮。 */
+        padding: 0.85rem 0 0;
         scroll-padding-block: 0.85rem;
         scrollbar-color: var(--p2b-line) transparent;
       }
@@ -100,8 +101,7 @@ export class Pwn2BlockPayloadPanel extends LitElement {
         position: absolute;
         inset: 0;
         overflow: hidden;
-        border: var(--p2b-border) solid var(--p2b-line);
-        border-radius: 0;
+        /* 不画边框：外面的 .canvas-wrap 已经有一圈，再画就是双线。 */
         background: var(--p2b-bg);
       }
       #blockly-host .blocklySvg {

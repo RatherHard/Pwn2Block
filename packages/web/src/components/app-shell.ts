@@ -72,9 +72,10 @@ export class Pwn2BlockApp extends LitElement {
         min-height: 0;
         background: var(--p2b-bg);
       }
+      /* 题面、提示、两栏和输出区左右都缩进 0.8rem，边框上下对齐。 */
       .briefing {
         flex: none;
-        margin: 0 1rem;
+        margin: 0 0.8rem;
         border: var(--p2b-border) solid var(--p2b-line);
         border-top: 0;
         border-radius: 0;
@@ -84,7 +85,7 @@ export class Pwn2BlockApp extends LitElement {
         display: flex;
         align-items: center;
         gap: 0.6rem;
-        margin: 0.7rem 1rem 0;
+        margin: 0.7rem 0.8rem 0;
         padding: 0.65rem 0.85rem;
         border: var(--p2b-border) solid var(--p2b-line);
         border-radius: 0;
@@ -201,7 +202,7 @@ export class Pwn2BlockApp extends LitElement {
         }
         main {
           gap: 0.7rem;
-          padding: 0.7rem;
+          padding: 0.7rem 0.6rem;
         }
       }
     `,
