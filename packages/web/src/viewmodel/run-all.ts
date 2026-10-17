@@ -27,6 +27,13 @@ export interface RunAllDeps {
   readonly applyActions: (command: RunCommand, response: ActionsResponse) => void;
   /** 记下「已终止：执行到动作 n/m」。 */
   readonly markAborted: (aborted: { readonly executed: number; readonly total: number }) => void;
+  /** 走控制器的提示通道（输出区上方的 notice）报一条警告。 */
+  readonly warn: (text: string) => void;
+}
+
+/** 运行途中积木被改动而停下时的提示；n/m 与「已终止」同口径（游标 / 这轮产物的动作总数）。 */
+export function messageArtifactChanged(executed: number, total: number): string {
+  return `积木已修改，运行在动作 ${executed}/${total} 处停止`;
 }
 
 /**
@@ -85,10 +92,13 @@ async function sendRunRequest(
 
 /**
  * 运行途中积木被改动（产物过期，或自动重编译换了一份产物）：旧产物的后续分片已经不是
- * 画布上的程序，不能再发。这不是用户的「终止」，所以不记 `aborted`。
+ * 画布上的程序，不能再发。这不是用户的「终止」，所以不记 `aborted`，只报一条提示说明停在哪儿。
  */
-function artifactChanged(tracker: ArtifactTracker, artifact: PayloadArtifact): boolean {
-  return tracker.state.artifact !== artifact || tracker.state.stale;
+function artifactChanged(deps: RunAllDeps, artifact: PayloadArtifact): boolean {
+  const state = deps.tracker.state;
+  if (state.artifact === artifact && !state.stale) return false;
+  deps.warn(messageArtifactChanged(deps.cursor(), artifact.actions.length));
+  return true;
 }
 
 /**
@@ -105,7 +115,7 @@ export async function runAll(deps: RunAllDeps, id: string, round: RunRound): Pro
   const reset = await sendRunRequest(deps, id, { kind: 'reset' }, [{ type: 'reset' }]);
   if (abortedBy(deps, round, total) || stopped(reset, 1)) return;
   for (const chunk of runChunks(artifact.actions)) {
-    if (artifactChanged(deps.tracker, artifact)) return;
+    if (artifactChanged(deps, artifact)) return;
     const response = await sendRunRequest(deps, id, { kind: 'run-all' }, chunk);
     if (abortedBy(deps, round, total) || stopped(response, chunk.length)) return;
   }

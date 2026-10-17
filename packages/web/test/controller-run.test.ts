@@ -430,6 +430,7 @@ describe('会话控制器：运行途中改动积木', () => {
     expect(actionsCalls(api).map((call) => call.actions?.length)).toEqual([1, 512]);
     expect(controller.state.running).toBe(false);
     expect(controller.state.aborted).toBeUndefined();
+    expect(controller.state.notice).toEqual({ tone: 'warn', text: '积木已修改，运行在动作 512/600 处停止' });
   });
 
   it('自动重编译换了产物后不再发旧产物的分片', async () => {
@@ -443,5 +444,15 @@ describe('会话控制器：运行途中改动积木', () => {
     expect(actionsCalls(api).map((call) => call.actions?.length)).toEqual([1, 512]);
     expect(controller.state.running).toBe(false);
     expect(controller.state.aborted).toBeUndefined();
+    // m 是这一轮发出时那份产物的动作数，不是重编译后的 700。
+    expect(controller.state.notice).toEqual({ tone: 'warn', text: '积木已修改，运行在动作 512/600 处停止' });
+  });
+
+  it('一轮正常跑完（没有改动积木）不报「积木已修改」', async () => {
+    const { tracker, controller } = await open();
+    compileInto(tracker, controller, repeatedActions(600));
+    controller.run({ kind: 'run-all' });
+    await until(() => controller.state.cursor === 600 && !controller.state.running, '跑完');
+    expect(controller.state.notice).toBeUndefined();
   });
 });

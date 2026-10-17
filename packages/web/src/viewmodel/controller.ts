@@ -458,6 +458,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     pushCursor,
     applyActions,
     markAborted: (aborted) => patch({ aborted }),
+    warn: (text) => notify('warn', text),
   };
 
   async function debugNow(id: string, command: RunCommand, round: RunRound | undefined): Promise<void> {
