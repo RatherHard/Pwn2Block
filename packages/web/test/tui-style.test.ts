@@ -12,6 +12,18 @@ import { describe, expect, it } from 'vitest';
 const THEME_PATH = fileURLToPath(new URL('../src/theme.ts', import.meta.url));
 const MOUNT_PATH = fileURLToPath(new URL('../src/blocks/mount.ts', import.meta.url));
 
+/** 引号字符串：值里不含同种引号，否则 `'x' / ''` 整段会被当成一个值。 */
+const QUOTED = String.raw`(?:'([^']+)'|"([^"]+)")`;
+/** 一条只有字符串值的 `content` 声明；单双引号、冒号与分号两侧的空白都算。 */
+const CONTENT_DECL = new RegExp(String.raw`^\s*content\s*:\s*${QUOTED}\s*;\s*$`);
+/** 同一条声明的空替代文本版本：`content: 'x' / '';`，同样容许引号与空白的写法差异。 */
+const CONTENT_ALT_DECL = new RegExp(String.raw`^\s*content\s*:\s*${QUOTED}\s*\/\s*(?:''|"")\s*;\s*$`);
+
+/** 声明里的字符串值（单引号或双引号那一组）。 */
+function quotedValue(match: RegExpExecArray | null): string | undefined {
+  return match === null ? undefined : match[1] ?? match[2];
+}
+
 /**
  * 每条装饰性 `content` 后面紧跟同值的空替代文本版本：`content: 'x'; content: 'x' / '';`。
  * 否则 Chromium 把「[ 」「 ]」「⌄」算进按钮 / 菜单的无障碍名称，读屏会念出来。
@@ -21,9 +33,9 @@ export function contentWithoutAltText(source: string): readonly string[] {
   const lines = source.split('\n');
   const bad: string[] = [];
   for (const [index, line] of lines.entries()) {
-    const match = /^(\s*)content: ('[^']+');$/.exec(line);
-    if (match === null) continue;
-    if (lines[index + 1] !== `${match[1]}content: ${match[2]} / '';`) bad.push(line.trim());
+    const value = quotedValue(CONTENT_DECL.exec(line));
+    if (value === undefined) continue;
+    if (quotedValue(CONTENT_ALT_DECL.exec(lines[index + 1] ?? '')) !== value) bad.push(line.trim());
   }
   return bad;
 }
@@ -40,10 +52,14 @@ async function componentSources(): Promise<readonly (readonly [string, string])[
   return files.map((name) => [name, readSource(fileURLToPath(new URL(`../src/components/${name}`, import.meta.url)))] as const);
 }
 
+const BOX_SHADOW = /box-shadow:(?!\s*none)/;
+const BORDER_RADIUS = /border-radius:(?!\s*0[;\s])/;
+const FONT_SIZE = /font-size:(?!\s*(?:inherit|var\(--p2b-size\)))/;
+
 export const BANNED_PATTERNS: readonly RegExp[] = [
   /gradient\(/,
-  /box-shadow:(?!\s*none)/,
-  /border-radius:(?!\s*0[;\s])/,
+  BOX_SHADOW,
+  BORDER_RADIUS,
   /rgba?\([^)]*\/\s*\d/,
   /rgba\(/,
   /backdrop-filter/,
@@ -54,14 +70,7 @@ export const BANNED_PATTERNS: readonly RegExp[] = [
   /◈/,
   /innerHTML/,
   /unsafeHTML/,
-  /font-size:(?!\s*(?:inherit|var\(--p2b-size\)))/,
-];
-
-
-const [BOX_SHADOW, BORDER_RADIUS, FONT_SIZE] = [
-  BANNED_PATTERNS[1]!,
-  BANNED_PATTERNS[2]!,
-  BANNED_PATTERNS[BANNED_PATTERNS.length - 1]!,
+  FONT_SIZE,
 ];
 
 describe('TUI 样式清扫（设计 §1）', () => {
@@ -75,11 +84,22 @@ describe('TUI 样式清扫（设计 §1）', () => {
     expect('font-size: 12px;').toMatch(FONT_SIZE);
   });
 
-
   it('装饰性 content 检查能识别缺少替代文本的写法', () => {
     expect(contentWithoutAltText("  content: '[ ';\n  content: '[ ' / '';")).toEqual([]);
     expect(contentWithoutAltText("  content: '[ ';")).toEqual(["content: '[ ';"]);
     expect(contentWithoutAltText("  content: '⌄';\n  content: '⌃' / '';")).toEqual(["content: '⌄';"]);
+  });
+
+  it('装饰性 content 检查覆盖双引号与空白的写法差异', () => {
+    // 缺替代文本：双引号、无空格、冒号前后与分号前带空格都要被抓到。
+    expect(contentWithoutAltText('  content:"x";')).toEqual(['content:"x";']);
+    expect(contentWithoutAltText("  content : 'x' ;")).toEqual(["content : 'x' ;"]);
+    expect(contentWithoutAltText('  content: "x";\n  content: "y" / "";')).toEqual(['content: "x";']);
+    // 合规：替代文本版本同样容许这些写法差异。
+    expect(contentWithoutAltText('  content:"x";\n  content:"x"/"";')).toEqual([]);
+    expect(contentWithoutAltText("  content : 'x' ;\n  content : 'x' / '' ;")).toEqual([]);
+    // 非字符串值与别的属性不算装饰性 content。
+    expect(contentWithoutAltText('  content: none;\n  justify-content: center;')).toEqual([]);
   });
 
   it('theme.ts 与组件里的装饰性 content 都带空替代文本，不计入无障碍名称', async () => {
