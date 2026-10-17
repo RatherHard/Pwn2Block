@@ -155,6 +155,16 @@ export interface StatusBarInput {
 }
 
 /**
+ * 四段拼接的公共逻辑：`<标签> │ <文案> │ ip=… │ 动作 n/m`。`statusBar` 与
+ * `preSessionStatusBar` 共用，分隔符和标签只在这一处写。
+ */
+function joinStatusBar(mode: PageMode, text: string, ip: bigint | undefined, cursor: number, total: number): string {
+  const tag = STATUS_MODE_TAGS[mode];
+  const ipText = ip === undefined ? '—' : formatAddrShort(ip);
+  return `${tag} │ ${text} │ ip=${ipText} │ 动作 ${cursor}/${total}`;
+}
+
+/**
  * 底部状态栏文案（09 §2）：`DEBUG │ <状态文案> │ ip=0x… │ 动作 n/m`。
  *
  * `aborted` 置位时文案段换成「已终止：执行到动作 n/m」——终止落在最后一个分片
@@ -162,11 +172,18 @@ export interface StatusBarInput {
  * `cursor/total`，与是否终止无关（终止态同样可以继续单步、撤销）。
  */
 export function statusBar(input: StatusBarInput): string {
-  const tag = STATUS_MODE_TAGS[input.mode];
   const text =
     input.aborted === undefined
       ? statusTextOf(input.projection, input.mode).text
       : `已终止：执行到动作 ${input.aborted.executed}/${input.aborted.total}`;
-  const ip = input.ip === undefined ? '—' : formatAddrShort(input.ip);
-  return `${tag} │ ${text} │ ip=${ip} │ 动作 ${input.cursor}/${input.total}`;
+  return joinStatusBar(input.mode, text, input.ip, input.cursor, input.total);
+}
+
+/**
+ * 第一相位（题面已拿到、还没有投影，05 §3.1）的状态栏文案：这一相位没有 `Projection`，
+ * `ip` 和「动作 n/m」都没有意义，但播报区本身必须常驻（09 §2），否则屏幕阅读器在
+ * 这一相位结束、第一份投影到达时听不到任何播报——因为它没有订阅一个本来不存在的节点。
+ */
+export function preSessionStatusBar(mode: PageMode, text: string): string {
+  return joinStatusBar(mode, text, undefined, 0, 0);
 }

@@ -28,6 +28,7 @@ import { viewTabDelta } from '../viewmodel/keymap';
 import { displayedView, type FrameProjection } from '../viewmodel/replay';
 import { roleValue } from '../viewmodel/roles';
 import {
+  preSessionStatusBar,
   statusBar,
   statusMarker,
   terminalReasonOf,
@@ -318,13 +319,17 @@ export class Pwn2BlockApp extends LitElement {
     if (challenge === undefined) return this.renderBoot(state);
     if (view === undefined) {
       // 第一相位（只有题面、还没有投影，05 §3.1）：画布必须在这一相位就挂上，
-      // 所以左侧空着说明原因、右侧照常渲染 payload 窗口。失败原因已经由上方的
-      // notice 覆盖，这一相位还没有投影，底部状态栏（09 §2）暂不渲染。
+      // 所以左侧空着说明原因、右侧照常渲染 payload 窗口。这一相位没有 `Projection`，
+      // `ip`/「动作 n/m」都没有意义，但播报区必须从首次渲染就常驻（09 §2）——否则屏幕
+      // 阅读器在这一相位结束、第一份投影到达时听不到任何播报，因为它没订阅一个
+      // 本来不存在的节点。文案复用上方 notice 已经展示的那句话，没有 notice 时给一句
+      // 「正在准备会话…」兜底。
       //
       // **两个相位必须走同一个模板**：Lit 按模板缓存复用 DOM，换成另一个模板会把
       // payload 窗口整个重建——画布跟着被销毁，「先装回画布、再接会话」就白做了。
       const failure = state.notice;
       const known = failure !== undefined && failure.action !== undefined;
+      const mode = state.page?.mode ?? 'debug';
       return this.renderLayout(
         state,
         challenge,
@@ -332,7 +337,7 @@ export class Pwn2BlockApp extends LitElement {
           ? html`<h2>暂时开不了新会话</h2>
               <p class="lead">${failure.text}</p>`
           : html`<p class="lead">左侧视图读的是服务端投影：调试实例接回来之后才显示。</p>`,
-        undefined,
+        preSessionStatusBar(mode, failure?.text ?? '正在准备会话…'),
       );
     }
     const mode = state.page?.mode ?? 'debug';
@@ -345,7 +350,7 @@ export class Pwn2BlockApp extends LitElement {
         .available=${availableViewsOf(view.projection, challenge)}
         @p2b-view-select=${(event: CustomEvent<{ kind: ViewKind }>) => this.controller?.selectView(event.detail.kind)}
       ></pwn2block-view-manager>`,
-      this.statusBarInput(state, view.projection, mode),
+      statusBar(this.statusBarInput(state, view.projection, mode)),
     );
   }
 
@@ -362,21 +367,14 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   /** 三区骨架：左（视图管理器）+ 右（payload 窗口）+ 输出区 + 底部状态栏。两种相位共用同一份模板。 */
-  private renderLayout(
-    state: ControllerState,
-    challenge: PublicChallenge,
-    left: unknown,
-    statusInput: StatusBarInput | undefined,
-  ) {
+  private renderLayout(state: ControllerState, challenge: PublicChallenge, left: unknown, statusText: string) {
     return html`
       <main>
         <section class="left" aria-label="视图管理器">${left}</section>
         <section class="right" aria-label="payload 窗口">${this.renderPayloadPanel(state, challenge)}</section>
       </main>
       ${this.renderOutput(state)}
-      ${statusInput === undefined
-        ? ''
-        : html`<p class="status" role="status" aria-live="polite">${statusBar(statusInput)}</p>`}
+      <p class="status" role="status" aria-live="polite">${statusText}</p>
     `;
   }
 

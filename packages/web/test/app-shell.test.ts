@@ -160,7 +160,46 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
     const status = app.renderRoot.querySelector('p.status');
     expect(status?.getAttribute('role')).toBe('status');
     expect(status?.getAttribute('aria-live')).toBe('polite');
-    expect(status?.textContent?.trim().startsWith('DEBUG │')).toBe(true);
+    const text = status?.textContent?.trim() ?? '';
+    expect(text.startsWith('DEBUG │')).toBe(true);
+    // 第二段（状态文案）不能是空的——它才是播报的主要内容。
+    const segments = text.split('│').map((segment) => segment.trim());
+    expect(segments[1]?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('第一相位（题面已到、会话还没建好）就渲染状态栏，播报区从首次渲染起常驻（09 §2）', async () => {
+    // 第一相位没有 Projection：`ip`/「动作 n/m」都没有意义，但状态栏必须已经在 DOM 里，
+    // 否则屏幕阅读器在这一相位结束、第一份投影到达时听不到任何播报（它没订阅一个
+    // 本来不存在的节点）。用扣住 `createSession` 的方式把应用冻在第一相位上观察。
+    const api = createFakeApi();
+    const app = document.createElement('pwn2block-app') as Pwn2BlockApp;
+    app.api = api.client;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalCreate = api.client.createSession;
+    api.client.createSession = (challengeId) => gate.then(() => originalCreate(challengeId));
+    document.body.append(app);
+    apps.push(app);
+
+    await until(() => app.renderRoot.querySelector('p.status') !== null, '第一相位状态栏出现');
+    await settle(app);
+
+    // 此刻还没建会话，视图管理器不应该出现——确认真的停在第一相位，不是提前跑完了。
+    expect(app.renderRoot.querySelector('pwn2block-view-manager')).toBeNull();
+
+    const status = app.renderRoot.querySelector('p.status');
+    expect(status).not.toBeNull();
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.getAttribute('aria-live')).toBe('polite');
+    const text = status?.textContent?.trim() ?? '';
+    expect(text.startsWith('DEBUG │')).toBe(true);
+    expect(text.endsWith('动作 0/0')).toBe(true);
+
+    release();
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '视图管理器出现');
+    await settle(app);
   });
 
   it('区块按顺序排列：顶栏 → 题面 → main → 输出区 → 状态栏；状态栏在最底部', async () => {
