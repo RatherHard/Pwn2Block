@@ -72,6 +72,11 @@ async function layout(page: Page): Promise<void> {
   expect(Math.abs(a.width - b.width), '左右保持等宽').toBeLessThanOrEqual(2);
   expect(a.x + a.width).toBeLessThanOrEqual(b.x);
   expect(await page.evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  // scrollIntoViewIfNeeded 在 overflow: hidden 下也能滚动，所以要单独确认用户能用滚动条和滚轮滚整页。
+  const overflowY = await page.evaluate<string[]>(
+    '[document.documentElement, document.body].map(element => getComputedStyle(element).overflowY)',
+  );
+  expect(overflowY, '整页不得禁止纵向滚动').not.toContain('hidden');
 }
 
 test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async ({ page, browser }, info) => {
