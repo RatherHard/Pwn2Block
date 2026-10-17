@@ -3,7 +3,7 @@ import {
   applyProjection,
   createPageState,
   setMode,
-  statusLine,
+  statusBar,
   statusMarker,
   statusTextOf,
 } from '../src/viewmodel/session';
@@ -63,9 +63,49 @@ describe('页面状态与状态栏文案（05 §1、§6）', () => {
   });
 
   it('状态栏同时给出符号与模式名（05 §7：颜色不是唯一信息载体）', () => {
-    expect(statusLine(SAMPLE_PROJECTION_START, 'debug')).toBe('调试模式 · 可继续执行');
-    expect(statusLine(SAMPLE_PROJECTION_START, 'verdict')).toBe('判题结果 · 可继续执行');
     expect(statusMarker('ok')).not.toBe(statusMarker('error'));
     expect(statusMarker('error').length).toBeGreaterThan(0);
+  });
+
+  describe('statusBar：整行反显的状态栏（09 §2）', () => {
+    const running = makeProjection({ status: 'ready', steps: 3 });
+
+    it('常规格式：模式标签 │ 状态文案 │ ip │ 动作 cursor/total', () => {
+      expect(statusBar({ mode: 'debug', projection: running, ip: 0x400000n, cursor: 3, total: 10 })).toBe(
+        `DEBUG │ ${statusTextOf(running, 'debug').text} │ ip=0x400000 │ 动作 3/10`,
+      );
+    });
+
+    it('终止后：文案段换成「已终止：执行到动作 n/m」，游标段仍是 动作 cursor/total', () => {
+      expect(
+        statusBar({
+          mode: 'debug',
+          projection: running,
+          cursor: 512,
+          total: 600,
+          aborted: { executed: 512, total: 600 },
+        }),
+      ).toBe('DEBUG │ 已终止：执行到动作 512/600 │ ip=— │ 动作 512/600');
+    });
+
+    it('终止落在最后一个分片（m/m）：仍按「已终止」显示，不当成「没终止」', () => {
+      expect(
+        statusBar({
+          mode: 'debug',
+          projection: running,
+          cursor: 600,
+          total: 600,
+          aborted: { executed: 600, total: 600 },
+        }),
+      ).toBe('DEBUG │ 已终止：执行到动作 600/600 │ ip=— │ 动作 600/600');
+    });
+
+    it('没有 ip 时显示 ip=—', () => {
+      expect(statusBar({ mode: 'debug', projection: running, cursor: 0, total: 0 })).toContain('ip=— │');
+    });
+
+    it('判题结果模式用 VERDICT 标签', () => {
+      expect(statusBar({ mode: 'verdict', projection: running, cursor: 0, total: 0 })).toMatch(/^VERDICT │/);
+    });
   });
 });

@@ -5,6 +5,7 @@
  * 高亮由两份投影差分得到（04 §4），两种模式共用同一套视图，只是数据源不同。
  */
 import type { InstanceStatus, Projection } from '@pwn2block/shared';
+import { formatAddrShort } from './format';
 import { createViewManagerState, type ViewManagerState } from './views';
 
 export type PageMode = 'debug' | 'verdict';
@@ -137,8 +138,35 @@ export function statusTextOf(projection: Projection, mode: PageMode): StatusText
   return debugText(projection);
 }
 
-/** 状态栏前缀：`调试模式 · 可继续执行`（05 §7：屏幕阅读器能分辨当前模式）。 */
-export function statusLine(projection: Projection, mode: PageMode): string {
-  const status = STATUS_NAMES[projection.status];
-  return `${MODE_NAMES[mode]} · ${status}`;
+/** 状态栏左侧的模式标签（09 §2）：`DEBUG │ … │ ip=… │ 动作 n/m` 的第一段。 */
+export const STATUS_MODE_TAGS: Readonly<Record<PageMode, string>> = {
+  debug: 'DEBUG',
+  verdict: 'VERDICT',
+};
+
+export interface StatusBarInput {
+  readonly mode: PageMode;
+  readonly projection: Projection;
+  readonly ip?: bigint;
+  readonly cursor: number;
+  readonly total: number;
+  /** 上一轮「运行」被终止时执行到的位置（Task 5 的 `ControllerState.aborted`）。 */
+  readonly aborted?: { readonly executed: number; readonly total: number };
+}
+
+/**
+ * 底部状态栏文案（09 §2）：`DEBUG │ <状态文案> │ ip=0x… │ 动作 n/m`。
+ *
+ * `aborted` 置位时文案段换成「已终止：执行到动作 n/m」——终止落在最后一个分片
+ * （`executed === total`）也算终止，不会被误判成「正常跑完」；游标段始终读
+ * `cursor/total`，与是否终止无关（终止态同样可以继续单步、撤销）。
+ */
+export function statusBar(input: StatusBarInput): string {
+  const tag = STATUS_MODE_TAGS[input.mode];
+  const text =
+    input.aborted === undefined
+      ? statusTextOf(input.projection, input.mode).text
+      : `已终止：执行到动作 ${input.aborted.executed}/${input.aborted.total}`;
+  const ip = input.ip === undefined ? '—' : formatAddrShort(input.ip);
+  return `${tag} │ ${text} │ ip=${ip} │ 动作 ${input.cursor}/${input.total}`;
 }

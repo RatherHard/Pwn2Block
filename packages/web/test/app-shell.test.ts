@@ -156,10 +156,33 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
     // 样例切换条已经删除：生产路径不再使用 fixtures/sample（本批任务第 7 条）。
     expect(app.renderRoot.querySelector('.sample-bar')).toBeNull();
     expect(app.renderRoot.querySelector('.sample')).toBeNull();
-    // 状态行说明当前模式，且带符号与文字（05 §7：颜色不是唯一信息载体）。
-    const status = app.renderRoot.querySelector('.status');
-    expect(status?.textContent).toContain('调试模式');
+    // 状态栏移到页面最底部、整行反显，带 role=status 与 aria-live=polite（09 §2）。
+    const status = app.renderRoot.querySelector('p.status');
+    expect(status?.getAttribute('role')).toBe('status');
     expect(status?.getAttribute('aria-live')).toBe('polite');
+    expect(status?.textContent?.trim().startsWith('DEBUG │')).toBe(true);
+  });
+
+  it('区块按顺序排列：顶栏 → 题面 → main → 输出区 → 状态栏；状态栏在最底部', async () => {
+    const { app } = await mountApp(createFakeApi());
+    // Lit 把 static styles 注入的 <style> 标签排在最前面，不属于页面骨架本身。
+    const children = [...app.renderRoot.children].filter((child) => child.tagName.toLowerCase() !== 'style');
+    const tagNames = children.map((child) => child.tagName.toLowerCase());
+    expect(tagNames).toEqual([
+      'pwn2block-top-bar',
+      'div', // .briefing
+      'main',
+      'section', // .output
+      'p', // .status
+    ]);
+    const status = children[children.length - 1];
+    expect(status?.classList.contains('status')).toBe(true);
+  });
+
+  it('没有产物时状态栏以「动作 0/0」结尾', async () => {
+    const { app } = await mountApp(createFakeApi());
+    const status = app.renderRoot.querySelector('p.status');
+    expect(status?.textContent?.trim().endsWith('动作 0/0')).toBe(true);
   });
 
   it('多道题时停在选题界面，点题目才创建会话', async () => {
@@ -413,7 +436,7 @@ describe('单页骨架：提交判题与「回到调试」（05 §6）', () => {
     await settle(app);
 
     const status = app.renderRoot.querySelector('.status');
-    expect(status?.textContent).toContain('调试模式');
+    expect(status?.textContent?.trim().startsWith('DEBUG │')).toBe(true);
     expect(textOf(disasmOf(app))).not.toContain(MESSAGE_REPLAY_DISASM_STALE);
   });
   it('判题结果模式下调试按钮禁用并说明原因，提交仍然可用（提交不限次数）', async () => {

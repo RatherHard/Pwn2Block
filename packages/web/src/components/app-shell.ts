@@ -14,7 +14,7 @@
  * 它自己负责把事件接对、把 `aria-live` 播报区放对。
  */
 import { LitElement, css, html } from 'lit';
-import type { Hint, PublicChallenge } from '@pwn2block/shared';
+import type { Hint, Projection, PublicChallenge } from '@pwn2block/shared';
 import { createApiClient, type ApiClient } from '../api';
 import { createViewContext } from '../viewmodel/context';
 import {
@@ -26,7 +26,14 @@ import { diffProjections } from '../viewmodel/diff';
 import { highlightBlockId } from '../viewmodel/highlight';
 import { viewTabDelta } from '../viewmodel/keymap';
 import { displayedView, type FrameProjection } from '../viewmodel/replay';
-import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
+import { roleValue } from '../viewmodel/roles';
+import {
+  statusBar,
+  statusMarker,
+  terminalReasonOf,
+  type PageMode,
+  type StatusBarInput,
+} from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import { outputEntries } from '../viewmodel/output';
 import { payloadControls, runMenuModel, type RunMenuInput } from '../viewmodel/toolbar';
@@ -61,9 +68,7 @@ export class Pwn2BlockApp extends LitElement {
       :host {
         display: flex;
         flex-direction: column;
-        height: 100dvh;
         min-height: 0;
-        overflow: hidden;
         background: var(--p2b-bg);
       }
       .briefing {
@@ -100,40 +105,18 @@ export class Pwn2BlockApp extends LitElement {
         color: var(--p2b-dim);
       }
       .status {
-        display: flex;
-        align-items: center;
-        min-height: 2.7rem;
-        margin: 0.7rem 1rem 0;
-        padding: 0.65rem 0.85rem;
-        border: 1px solid var(--p2b-line);
+        flex: none;
+        display: block;
+        margin: 0;
+        padding: 0.5rem 1rem;
+        border: 0;
         border-radius: 0;
-        background: var(--p2b-bg);
-      }
-      .status.ok {
-        border-color: var(--p2b-ip);
-        color: var(--p2b-ip);
-      }
-      .status.warn {
-        border-color: var(--p2b-changed);
-        color: var(--p2b-changed);
-      }
-      .status.error {
-        border-color: var(--p2b-error);
-        color: var(--p2b-error);
-      }
-      .status.info {
-        color: var(--p2b-fg);
-      }
-      .status .mode {
-        color: var(--p2b-fg);
-        font-weight: 700;
-      }
-      .status .marker {
-        margin-right: 0.3rem;
-        font-size: inherit;
+        color: var(--p2b-bg);
+        background: var(--p2b-fg);
       }
       main {
-        flex: 1;
+        flex: none;
+        height: max(28rem, calc(100dvh - var(--p2b-topbar-h)));
         min-height: 0;
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -199,10 +182,8 @@ export class Pwn2BlockApp extends LitElement {
         color: var(--p2b-dim);
       }
       @media (max-width: 980px) {
-        :host {
-          overflow: auto;
-        }
         main {
+          height: auto;
           grid-template-columns: 1fr;
           overflow: visible;
         }
@@ -214,7 +195,6 @@ export class Pwn2BlockApp extends LitElement {
       @media (max-width: 620px) {
         .briefing,
         .notice,
-        .status,
         .output {
           margin-left: 0.6rem;
           margin-right: 0.6rem;
@@ -336,10 +316,10 @@ export class Pwn2BlockApp extends LitElement {
     // 相位只决定无题面时的启动页；已有题面时即使 unavailable 也保留工作台与画布。
     // 失败原因和重试出口来自 notice，避免建会话失败时销毁已恢复的程序。
     if (challenge === undefined) return this.renderBoot(state);
-    const mode = state.page?.mode ?? 'debug';
     if (view === undefined) {
       // 第一相位（只有题面、还没有投影，05 §3.1）：画布必须在这一相位就挂上，
-      // 所以左侧空着说明原因、右侧照常渲染 payload 窗口。
+      // 所以左侧空着说明原因、右侧照常渲染 payload 窗口。失败原因已经由上方的
+      // notice 覆盖，这一相位还没有投影，底部状态栏（09 §2）暂不渲染。
       //
       // **两个相位必须走同一个模板**：Lit 按模板缓存复用 DOM，换成另一个模板会把
       // payload 窗口整个重建——画布跟着被销毁，「先装回画布、再接会话」就白做了。
@@ -348,50 +328,55 @@ export class Pwn2BlockApp extends LitElement {
       return this.renderLayout(
         state,
         challenge,
-        known ? failure.tone : 'info',
-        known
-          ? html`<span class="marker" aria-hidden="true">${statusMarker(failure.tone)}</span>
-              <span>${failure.text}</span>`
-          : html`<span class="marker" aria-hidden="true">${statusMarker('info')}</span>
-              <span>正在恢复本地保存的程序并接回调试实例…</span>`,
         known
           ? html`<h2>暂时开不了新会话</h2>
               <p class="lead">${failure.text}</p>`
           : html`<p class="lead">左侧视图读的是服务端投影：调试实例接回来之后才显示。</p>`,
+        undefined,
       );
     }
-    const status = statusTextOf(view.projection, mode);
+    const mode = state.page?.mode ?? 'debug';
     return this.renderLayout(
       state,
       challenge,
-      status.tone,
-      html`<span class="marker" aria-hidden="true">${statusMarker(status.tone)}</span>
-        <span class="mode">${statusLine(view.projection, mode)}</span>
-        <span> — ${status.text}</span>`,
       html`<pwn2block-view-manager
         .context=${this.viewContext(view, challenge)}
         .views=${state.page?.views ?? this.fallbackViews}
         .available=${availableViewsOf(view.projection, challenge)}
         @p2b-view-select=${(event: CustomEvent<{ kind: ViewKind }>) => this.controller?.selectView(event.detail.kind)}
       ></pwn2block-view-manager>`,
+      this.statusBarInput(state, view.projection, mode),
     );
   }
 
-  /** 三区骨架：状态行 + 左（视图管理器）+ 右（payload 窗口）。两种相位共用同一份模板。 */
+  /** 底部状态栏（09 §2）的输入：`ip` 读 `roles.ip`，`total` 是编译产物的动作数。 */
+  private statusBarInput(state: ControllerState, projection: Projection, mode: PageMode): StatusBarInput {
+    return {
+      mode,
+      projection,
+      ip: roleValue(projection, projection.roles, 'ip'),
+      cursor: state.cursor,
+      total: state.artifact.artifact?.actions.length ?? 0,
+      ...(state.aborted === undefined ? {} : { aborted: state.aborted }),
+    };
+  }
+
+  /** 三区骨架：左（视图管理器）+ 右（payload 窗口）+ 输出区 + 底部状态栏。两种相位共用同一份模板。 */
   private renderLayout(
     state: ControllerState,
     challenge: PublicChallenge,
-    tone: StatusTone,
-    status: unknown,
     left: unknown,
+    statusInput: StatusBarInput | undefined,
   ) {
     return html`
-      <p class="status ${tone}" role="status" aria-live="polite">${status}</p>
       <main>
         <section class="left" aria-label="视图管理器">${left}</section>
         <section class="right" aria-label="payload 窗口">${this.renderPayloadPanel(state, challenge)}</section>
       </main>
       ${this.renderOutput(state)}
+      ${statusInput === undefined
+        ? ''
+        : html`<p class="status" role="status" aria-live="polite">${statusBar(statusInput)}</p>`}
     `;
   }
 
