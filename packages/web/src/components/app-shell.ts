@@ -1,6 +1,6 @@
 /**
- * 单页骨架（05 §1）：整页左右 1:1（无间隙、无边框），顶部两组菜单 + 模式切换，
- * 题面面板可折叠，左半是视图管理器，右半是 payload 窗口。
+ * 单页骨架（05 §1）：整页左右 1:1（无间隙、无边框），顶部运行菜单 + 模式切换，
+ * 题面面板可折叠，左半是标签式视图面板，右半是 payload 窗口。
  *
  * 数据来源是真实后端：首屏走 `GET /api/challenges` 拿题目列表（`viewmodel/controller.ts`），
  * 选定题目后创建会话，之后每个响应都把完整投影交给 `applyProjection`。
@@ -24,14 +24,13 @@ import {
 } from '../viewmodel/controller';
 import { diffProjections } from '../viewmodel/diff';
 import { highlightBlockId } from '../viewmodel/highlight';
-import { viewScrollDelta } from '../viewmodel/keymap';
+import { viewTabDelta } from '../viewmodel/keymap';
 import { frameProjection } from '../viewmodel/replay';
 import { statusLine, statusMarker, statusTextOf, terminalReasonOf, type PageMode, type StatusTone } from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import { outputEntries } from '../viewmodel/output';
 import { payloadControls, runMenuModel, type RunMenuInput } from '../viewmodel/toolbar';
 import {
-  VIEW_KINDS,
   availableViews as availableViewsOf,
   createViewManagerState,
   type ViewKind,
@@ -260,7 +259,7 @@ export class Pwn2BlockApp extends LitElement {
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     // 嵌套影子根会把 event.target 重定向为组件宿主，真实输入框在 composedPath 首项。
     const target = event.composedPath()[0] as { tagName?: string; isContentEditable?: boolean } | undefined;
-    const delta = viewScrollDelta({
+    const delta = viewTabDelta({
       key: event.key,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
@@ -269,7 +268,7 @@ export class Pwn2BlockApp extends LitElement {
     });
     if (delta === 0) return;
     event.preventDefault();
-    this.controller?.scrollViews(delta);
+    this.controller?.cycleView(delta);
   };
 
   override connectedCallback(): void {
@@ -313,14 +312,10 @@ export class Pwn2BlockApp extends LitElement {
         .mode=${mode}
         .canChoose=${challenge !== undefined}
         @p2b-choose-challenge=${this.onChooseChallenge}
-        .views=${state.page?.views ?? this.fallbackViews}
-        .available=${this.viewsFor(state)}
         .runModel=${this.runModel(state)}
         .busy=${state.busy}
         .pending=${state.queued}
         @p2b-mode-change=${this.onModeChange}
-        @p2b-view-toggle=${this.onViewToggle}
-        @p2b-view-move=${this.onViewMove}
         @p2b-run=${this.onRun}
       ></pwn2block-top-bar>
       ${challenge === undefined
@@ -381,7 +376,7 @@ export class Pwn2BlockApp extends LitElement {
         .context=${this.viewContext(view, challenge)}
         .views=${state.page?.views ?? this.fallbackViews}
         .available=${availableViewsOf(view.projection, challenge)}
-        @p2b-view-scroll=${(event: CustomEvent<{ offset: number }>) => this.controller?.setViewOffset(event.detail.offset)}
+        @p2b-view-select=${(event: CustomEvent<{ kind: ViewKind }>) => this.controller?.selectView(event.detail.kind)}
       ></pwn2block-view-manager>`,
     );
   }
@@ -570,13 +565,6 @@ export class Pwn2BlockApp extends LitElement {
     });
   }
 
-  private viewsFor(state: ControllerState): readonly ViewKind[] {
-    const view = this.activeView(state);
-    const challenge = state.challenge;
-    if (view === undefined) return VIEW_KINDS;
-    return availableViewsOf(view.projection, challenge);
-  }
-
   /** `runMenuModel` 与 `payloadControls` 共用的输入：只在这一处拼，不让两份模型漂移。 */
   private menuInputOf(state: ControllerState): RunMenuInput {
     const page = state.page;
@@ -673,16 +661,6 @@ export class Pwn2BlockApp extends LitElement {
   private onModeChange = (event: Event): void => {
     const { mode } = (event as CustomEvent<{ mode: PageMode }>).detail;
     this.controller?.setMode(mode);
-  };
-
-  private onViewToggle = (event: Event): void => {
-    const { kind, shown } = (event as CustomEvent<{ kind: ViewKind; shown: boolean }>).detail;
-    this.controller?.setViewShown(kind, shown);
-  };
-
-  private onViewMove = (event: Event): void => {
-    const { kind, delta } = (event as CustomEvent<{ kind: ViewKind; delta: number }>).detail;
-    this.controller?.moveView(kind, delta);
   };
 }
 

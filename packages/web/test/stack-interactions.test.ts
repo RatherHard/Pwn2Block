@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import '../src/components/stack-view';
 import { createViewContext } from '../src/viewmodel/context';
 import { EMPTY_DIFF } from '../src/viewmodel/diff';
+import { SAMPLE_PROJECTION_START, SAMPLE_PUBLIC_CHALLENGE } from '../src/fixtures/sample';
 import { makeChallenge, makeProjection, makeVma } from './helpers';
 
 const projection = makeProjection({ vmas: [
@@ -54,5 +55,26 @@ describe('栈搜索实际组件', () => {
     await view.updateComplete;
     expect(view.renderRoot.querySelector('[role="alert"]')?.textContent).toContain('ASCII');
     expect(view.renderRoot.querySelector('tbody th')?.textContent).toBe(before);
+  });
+});
+
+describe('栈视图对齐偏移', () => {
+  it('跟随 sp 时调整对齐偏移，行首地址也随之变化', async () => {
+    const view = document.createElement('pwn2block-stack-view');
+    view.context = createViewContext({
+      projection: SAMPLE_PROJECTION_START, challenge: SAMPLE_PUBLIC_CHALLENGE,
+      archBits: 64, diff: EMPTY_DIFF,
+    });
+    document.body.append(view);
+    await view.updateComplete;
+    const first = () => BigInt(view.renderRoot.querySelector('tbody th')?.textContent?.trim() ?? '0');
+    const before = first();
+    const field = view.renderRoot.querySelector<HTMLInputElement>('[aria-label="行首对齐偏移"]');
+    if (!field) throw new Error('缺少对齐输入');
+    field.value = '3';
+    field.dispatchEvent(new Event('change'));
+    await view.updateComplete;
+    expect(first()).toBe(before + 3n);
+    expect(view.renderRoot.textContent).toContain('跟随 sp');
   });
 });

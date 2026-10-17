@@ -22,7 +22,7 @@ import {
   makeSubmitResponse,
   repeatedActions,
 } from './fake-api';
-import { makeProjection } from './helpers';
+import { makeChallenge, makeProjection } from './helpers';
 
 describe('会话控制器：首屏与选题（04 §1、§5）', () => {
   it('只有一道题时直接开局：列表 → 题目 → 会话，投影进页面状态', async () => {
@@ -958,22 +958,58 @@ describe('会话控制器：启动路径的失败出口（A 的巡检缺陷，04
   });
 });
 
-describe('会话控制器：视图状态（05 §2.1）', () => {
-  it('显隐、排序与滚动都经过控制器写进 PageState', async () => {
-    const { controller } = await open();
-    const before = controller.state.page?.views;
-    controller.setViewShown('memory', false);
-    expect(controller.state.page?.views).not.toBe(before);
-    expect(controller.state.page?.views.shown).not.toContain('memory');
+describe('会话控制器：视图标签（设计 §3.1）', () => {
+  function tabStore(initial?: string): KeyValueStore {
+    const data = new Map<string, string>(initial === undefined ? [] : [['p2b:view-tab', initial]]);
+    return {
+      getItem: (key) => data.get(key) ?? null,
+      setItem: (key, value) => {
+        data.set(key, value);
+      },
+    };
+  }
 
-    controller.moveView('registers', -1);
-    const moved = controller.state.page?.views;
-    controller.moveView('registers', 0);
-    expect(controller.state.page?.views).toBe(moved);
+  async function openTabs(store: KeyValueStore) {
+    // 无 syscalls / fds 的题目：没有 I/O 标签。
+    const api = createFakeApi({ challenge: makeChallenge() });
+    const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker, store });
+    controller.start();
+    await until(() => controller.state.phase === 'ready', '会话就绪');
+    return controller;
+  }
 
-    controller.scrollViews(1);
-    expect(controller.state.page?.views.offset).toBe(1);
-    controller.scrollViews(-1);
-    expect(controller.state.page?.views.offset).toBe(0);
+  it('selectView 写进 PageState 并记到 p2b:view-tab；cycleView 在可用标签里循环', async () => {
+    const store = tabStore();
+    const controller = await openTabs(store);
+    expect(controller.state.page?.views).toEqual({ active: 'stack' });
+    controller.selectView('memory');
+    expect(controller.state.page?.views).toEqual({ active: 'memory' });
+    expect(store.getItem('p2b:view-tab')).toBe('memory');
+    controller.cycleView(1);
+    expect(controller.state.page?.views).toEqual({ active: 'stack' });
+    expect(store.getItem('p2b:view-tab')).toBe('stack');
+    const before = controller.state.page;
+    controller.selectView('io');
+    expect(controller.state.page).toBe(before);
+  });
+
+  it('新会话的当前标签来自本地存储', async () => {
+    const controller = await openTabs(tabStore('registers'));
+    expect(controller.state.page?.views.active).toBe('registers');
+  });
+
+  it('存储抛错时开局仍为栈', async () => {
+    const throwing: KeyValueStore = {
+      getItem: () => {
+        throw new Error('禁用');
+      },
+      setItem: () => {
+        throw new Error('禁用');
+      },
+    };
+    const controller = await openTabs(throwing);
+    expect(controller.state.page?.views.active).toBe('stack');
+    expect(() => controller.selectView('disasm')).not.toThrow();
+    expect(controller.state.page?.views.active).toBe('disasm');
   });
 });

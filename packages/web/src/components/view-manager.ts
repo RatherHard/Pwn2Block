@@ -1,19 +1,19 @@
 /**
- * View manager (P2B 2.1).
+ * 视图面板（设计 §3.2）：一个 `.box`，顶部一行标签，同一时刻只显示一个视图。
  *
- * 同时显示 2 个槽位（上下排列），勾选显示的视图按顺序纵向排列，
- * Vertical smooth scrolling switches windows; Ctrl+Up / Ctrl+Down is managed by the page shell.
- * All views consume the same latest snapshot (ViewContext).
+ * 五个视图常驻 DOM，非当前标签用 `hidden` 隐藏，切换时保留各视图的内部状态（跳转、对齐、搜索）。
+ * 标签栏遵循 WAI-ARIA tablist：← → Home End 切换并移动焦点；Ctrl+↑ / Ctrl+↓ 由页面壳处理。
+ * 切换只派发 `p2b-view-select`，当前标签由控制器写进 PageState 并持久化。
  */
 import { LitElement, css, html } from 'lit';
-import type { PropertyValues } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import {
-  SLOT_COUNT,
+  VIEW_KINDS,
+  VIEW_TAB_LABELS,
   VIEW_TITLES,
-  hasMoreAbove,
-  hasMoreBelow,
-  slotKinds,
+  createViewManagerState,
+  cycleView,
+  normalizeActive,
   type ViewKind,
   type ViewManagerState,
 } from '../viewmodel/views';
@@ -25,6 +25,15 @@ import './registers-view';
 import './stack-view';
 import type { ViewContext } from './view-context';
 
+/** 图例：各区域颜色与栈、指令、内存视图里的着色一致。 */
+const LEGEND: readonly { readonly word: string; readonly tone: string }[] = [
+  { word: '代码', tone: 'code' },
+  { word: '栈', tone: 'stack' },
+  { word: '数据', tone: 'data' },
+  { word: '隐藏', tone: 'hidden' },
+  { word: '未映射', tone: 'unmapped' },
+];
+
 export class Pwn2BlockViewManager extends LitElement {
   static override styles = [
     terminalTheme,
@@ -35,94 +44,66 @@ export class Pwn2BlockViewManager extends LitElement {
         flex-direction: column;
         height: 100%;
         min-height: 0;
+        padding: 0.85rem;
       }
-      .head {
-        display: flex;
-        align-items: center;
-        gap: 0.65rem;
-        min-height: 3.3rem;
-        padding: 0.6rem 0.8rem;
-        border-bottom: 1px solid var(--p2b-line);
-        background: var(--p2b-bg);
-      }
-      .head-title {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        margin-right: auto;
-      }
-      .head h2 {
-        margin: 0;
-      }
-      .window-title {
-        color: var(--p2b-fg);
-      }
-      .pager {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3rem;
-      }
-      .pager button {
-        min-width: 1.8rem;
-        min-height: 1.8rem;
-        padding: 0.15rem 0.35rem;
-      }
-      .spacer {
-        display: none;
-      }
-      .viewport {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        scroll-behavior: smooth;
-        scrollbar-color: var(--p2b-line) transparent;
-      }
-      .slot {
-        height: calc(50% - 1px);
-        min-height: 13rem;
-        overflow: hidden;
-        border-bottom: 1px solid var(--p2b-line);
-        background: var(--p2b-bg);
-      }
-      .terminal-window {
+      .box {
         display: flex;
         flex-direction: column;
-        height: 100%;
+        flex: 1;
         min-height: 0;
+        padding: 0.9rem 0.75rem 0.5rem;
       }
-      .window-bar {
+      [role='tablist'] {
         display: flex;
-        align-items: center;
-        gap: 0.55rem;
+        flex-wrap: wrap;
         flex: none;
-        min-height: 2rem;
-        padding: 0.35rem 0.65rem;
+        gap: 0.4rem;
+        padding-bottom: 0.5rem;
         border-bottom: 1px solid var(--p2b-line);
-        color: var(--p2b-dim);
-        background: var(--p2b-bg);
-        font-size: inherit;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
       }
-      .window-body {
+      [role='tab'] {
+        min-height: 1.8rem;
+        padding: 0.1rem 0.4rem;
+        border-color: transparent;
+      }
+      /* 标签自带方括号（只给当前标签），不用共享按钮样式里的 [ ] 伪元素。 */
+      [role='tab']::before,
+      [role='tab']::after {
+        content: none;
+      }
+      .body {
         flex: 1;
         min-height: 0;
         overflow: auto;
         scrollbar-color: var(--p2b-line) transparent;
       }
-      .slot-empty {
-        display: grid;
-        height: 100%;
-        place-items: center;
-        margin: 0;
-        padding: 1.5rem;
-        color: var(--p2b-dim);
-        text-align: center;
+      .body[hidden] {
+        display: none;
       }
-      @media (max-width: 980px) {
-        .slot {
-          height: 28rem;
-        }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        flex: none;
+        gap: 1rem;
+        margin: 0;
+        padding-top: 0.4rem;
+        border-top: 1px solid var(--p2b-line);
+        color: var(--p2b-dim);
+      }
+      .legend .code {
+        color: var(--p2b-code);
+      }
+      .legend .stack {
+        color: var(--p2b-stack);
+      }
+      .legend .data {
+        color: var(--p2b-data);
+      }
+      .legend .hidden {
+        color: var(--p2b-hidden);
+      }
+      .legend .unmapped {
+        color: var(--p2b-fg);
       }
     `,
   ];
@@ -133,80 +114,64 @@ export class Pwn2BlockViewManager extends LitElement {
     available: { attribute: false },
   };
 
-  /** Responsive properties use `declare`; see app-shell.ts for the project convention. */
+  /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）。 */
   declare context: ViewContext;
   declare views: ViewManagerState;
   declare available: readonly ViewKind[];
 
-  private observedOffset = 0;
-  private scrollTarget?: number;
-
   constructor() {
     super();
-    this.available = [];
+    this.views = createViewManagerState();
+    this.available = VIEW_KINDS;
   }
 
   override render() {
-    const shown = this.views?.shown ?? [];
-    if (shown.length === 0) {
-      return html`
-        <div class="head"><h2>视图</h2></div>
-        <p class="slot-empty">\u6240\u6709\u89c6\u56fe\u90fd\u88ab\u9690\u85cf\u4e86\u3002\u5728\u9876\u90e8\u300c\u89c6\u56fe\u300d\u83dc\u5355\u91cc\u52fe\u9009\u8981\u663e\u793a\u7684\u89c6\u56fe\u3002</p>
-      `;
-    }
-    const slots = slotKinds(this.views);
+    const tabs = this.tabs();
+    const active = this.activeKind();
     return html`
-      <div class="head">
-        <div class="head-title"><h2>\u89c6\u56fe</h2></div>
-        <span class="note">${this.views.offset + 1}\u2013${Math.min(this.views.offset + SLOT_COUNT, shown.length)} / ${shown.length}</span>
-        <span class="note">Ctrl+\u2191 / Ctrl+\u2193</span>
-        <div class="pager" aria-label="view pager">
-          <button type="button" aria-label="previous view group" ?disabled=${!hasMoreAbove(this.views)} @click=${() => this.moveOffset(-1)}>\u2191</button>
-          <button type="button" aria-label="next view group" ?disabled=${!hasMoreBelow(this.views)} @click=${() => this.moveOffset(1)}>\u2193</button>
+      <div class="box">
+        <h2 class="box-title">视图</h2>
+        <div role="tablist" aria-label="视图" @keydown=${this.onTabKey}>
+          ${tabs.map((kind, index) => this.renderTab(kind, index, kind === active))}
         </div>
-        <span class="spacer"></span>
-        <span class="note">
-          ${hasMoreAbove(this.views) ? '\u25b2 \u4e0a\u65b9\u8fd8\u6709\u89c6\u56fe ' : ''}${hasMoreBelow(this.views) ? '\u25bc \u4e0b\u65b9\u8fd8\u6709\u89c6\u56fe' : ''}
-        </span>
-      </div>
-      <div
-        class="viewport"
-        @scroll=${this.onScroll}
-        @scrollend=${this.onScrollEnd}
-        @wheel=${this.onManualScroll}
-        @pointerdown=${this.onManualScroll}
-        @touchstart=${this.onManualScroll}
-      >
-        ${repeat(
-          shown,
-          (kind) => kind,
-          (kind, index) => html`
-            <div class="slot" data-slot=${slots.indexOf(kind)} data-index=${index}>
-              ${this.renderViewWindow(kind)}
-            </div>
-          `,
-        )}
+        ${repeat(tabs, (kind) => kind, (kind) => html`
+          <div
+            role="tabpanel"
+            class="body"
+            id=${`panel-${kind}`}
+            aria-labelledby=${`tab-${kind}`}
+            ?hidden=${kind !== active}
+          >${this.renderView(kind, kind === active)}</div>
+        `)}
+        <p class="legend">
+          ${LEGEND.map(({ word, tone }) => html`<span class=${tone}>${word}</span>`)}
+        </p>
       </div>
     `;
   }
 
-  private renderViewWindow(kind: ViewKind) {
+  private renderTab(kind: ViewKind, index: number, selected: boolean) {
+    const text = `${index + 1} ${VIEW_TAB_LABELS[kind]}`;
     return html`
-      <div class="terminal-window" aria-label=${`${VIEW_TITLES[kind]}\u7ec8\u7aef\u7a97\u53e3`}>
-        <div class="window-bar">
-          <span class="window-title">${VIEW_TITLES[kind]}</span>
-        </div>
-        <div class="window-body">${this.renderView(kind)}</div>
-      </div>
+      <button
+        type="button"
+        role="tab"
+        id=${`tab-${kind}`}
+        title=${VIEW_TITLES[kind]}
+        aria-selected=${selected ? 'true' : 'false'}
+        aria-controls=${`panel-${kind}`}
+        tabindex=${selected ? 0 : -1}
+        @click=${() => this.select(kind)}
+      >${selected ? `[${text}]` : text}</button>
     `;
   }
 
-  private renderView(kind: ViewKind) {
+  private renderView(kind: ViewKind, active: boolean) {
     switch (kind) {
       case 'stack':
-        return html`<pwn2block-stack-view .context=${this.context}></pwn2block-stack-view>`;
+        return html`<pwn2block-stack-view .context=${this.context} .active=${active}></pwn2block-stack-view>`;
       case 'disasm':
-        return html`<pwn2block-disasm-view .context=${this.context}></pwn2block-disasm-view>`;
+        return html`<pwn2block-disasm-view .context=${this.context} .active=${active}></pwn2block-disasm-view>`;
       case 'registers':
         return html`<pwn2block-registers-view .context=${this.context}></pwn2block-registers-view>`;
       case 'memory':
@@ -216,67 +181,44 @@ export class Pwn2BlockViewManager extends LitElement {
     }
   }
 
-  override updated(changed: PropertyValues): void {
-    if (!changed.has('views')) return;
-    const previous = changed.get('views') as ViewManagerState | undefined;
-    const retargeting = this.scrollTarget !== undefined && previous?.offset !== this.views?.offset;
-    if (previous?.shown !== this.views?.shown || this.views?.offset !== this.observedOffset || retargeting) this.syncScroll();
+  /** 按固定顺序列出本题可用的视图；I/O 不可用时不出现。 */
+  private tabs(): readonly ViewKind[] {
+    return VIEW_KINDS.filter((kind) => this.available.includes(kind));
   }
 
-  private moveOffset(delta: number): void {
-    const shown = this.views?.shown ?? [];
-    const max = Math.max(0, shown.length - SLOT_COUNT);
-    const offset = Math.min(max, Math.max(0, (this.views?.offset ?? 0) + delta));
-    if (offset === this.views?.offset) return;
-    this.dispatchEvent(new CustomEvent('p2b-view-scroll', {
-      detail: { offset }, bubbles: true, composed: true,
+  /** 存的标签本题不可用（例如 io）时退回栈，不报错。 */
+  private activeKind(): ViewKind {
+    return normalizeActive(this.views, this.available).active;
+  }
+
+  private select(kind: ViewKind): void {
+    this.dispatchEvent(new CustomEvent('p2b-view-select', {
+      detail: { kind }, bubbles: true, composed: true,
     }));
   }
 
-  private readonly onManualScroll = (): void => {
-    if (this.scrollTarget === undefined) return;
-    const viewport = this.renderRoot.querySelector<HTMLElement>('.viewport');
-    this.scrollTarget = undefined;
-    viewport?.scrollTo({ top: viewport.scrollTop, behavior: 'instant' });
-    this.onScroll();
+  private readonly onTabKey = (event: KeyboardEvent): void => {
+    const target = this.keyTarget(event.key);
+    if (target === undefined) return;
+    event.preventDefault();
+    if (target !== this.activeKind()) this.select(target);
+    this.renderRoot.querySelector<HTMLButtonElement>(`#tab-${target}`)?.focus();
   };
 
-  private readonly onScrollEnd = (): void => {
-    this.scrollTarget = undefined;
-    this.onScroll();
-  };
-
-  private readonly onScroll = (): void => {
-    const viewport = this.renderRoot.querySelector<HTMLElement>('.viewport');
-    if (viewport === null || this.views === undefined) return;
-    // Ignore intermediate smooth-scroll frames so they cannot override a keyboard target.
-    if (this.scrollTarget !== undefined && Math.abs(viewport.scrollTop - this.scrollTarget) > 1) return;
-    this.scrollTarget = undefined;
-    const top = viewport.getBoundingClientRect().top;
-    const slots = [...viewport.querySelectorAll<HTMLElement>('.slot')];
-    let closest = 0;
-    for (let index = 1; index < slots.length; index++) {
-      if (Math.abs(slots[index]!.getBoundingClientRect().top - top) < Math.abs(slots[closest]!.getBoundingClientRect().top - top)) closest = index;
-    }
-    this.observedOffset = Math.min(closest, Math.max(0, slots.length - SLOT_COUNT));
-    if (this.observedOffset === this.views.offset) return;
-    this.dispatchEvent(new CustomEvent('p2b-view-scroll', {
-      detail: { offset: this.observedOffset }, bubbles: true, composed: true,
-    }));
-  };
-
-  /** Scroll to the actual slot position; responsive layout can change the half-screen height. */
-  private syncScroll(): void {
-    const element = this.renderRoot.querySelector<HTMLElement>('.viewport');
-    const slot = this.renderRoot.querySelector<HTMLElement>(`[data-index="${this.views?.offset}"]`);
-    if (element === null || slot === null || typeof element.scrollTo !== 'function') return;
-    const target = slot.getBoundingClientRect().top - element.getBoundingClientRect().top + element.scrollTop;
-    const clamped = Math.max(0, Math.min(target, element.scrollHeight - element.clientHeight));
-    if (Math.abs(element.scrollTop - clamped) > 1 || this.scrollTarget !== undefined) {
-      this.scrollTarget = clamped;
-      element.scrollTo({ top: clamped, behavior: 'smooth' });
-    } else {
-      this.onScrollEnd();
+  private keyTarget(key: string): ViewKind | undefined {
+    const tabs = this.tabs();
+    const state = { active: this.activeKind() };
+    switch (key) {
+      case 'ArrowLeft':
+        return cycleView(state, -1, this.available).active;
+      case 'ArrowRight':
+        return cycleView(state, 1, this.available).active;
+      case 'Home':
+        return tabs[0];
+      case 'End':
+        return tabs[tabs.length - 1];
+      default:
+        return undefined;
     }
   }
 }

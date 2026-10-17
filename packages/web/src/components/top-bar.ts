@@ -1,26 +1,16 @@
 /**
  * 顶部菜单与模式切换（05 §1）。
  *
- * - **视图**：勾选显示 / 隐藏各视图，可上下移动列表顺序（拖动排序见 D03）；
  * - **运行**：与 payload 工具栏**等价**——两处渲染的是同一个 `pwn2block-run-menu` 组件
  *   和同一份 `RunButtonModel[]`（`viewmodel/toolbar.ts`），所以可用性与禁用原因不会漂移；
  * - **模式切换**：调试模式（默认）/ 判题结果，对应 04 §1 的两个实例。
  *
- * 组件不持有状态：勾选、切模式与运行命令都派发事件，由页面壳改 `PageState` / 调控制器。
+ * 组件不持有状态：切模式与运行命令都派发事件，由页面壳改 `PageState` / 调控制器。
  * 模式切换对读屏可见（05 §7）：按钮带 `aria-pressed`，状态栏另有一行「调试模式 / 判题结果」。
  */
 import { LitElement, css, html } from 'lit';
 import { MODE_NAMES, type PageMode } from '../viewmodel/session';
 import type { RunButtonModel } from '../viewmodel/toolbar';
-import {
-  VIEW_DESCRIPTIONS,
-  VIEW_KINDS,
-  VIEW_TITLES,
-  createViewManagerState,
-  isShown,
-  type ViewKind,
-  type ViewManagerState,
-} from '../viewmodel/views';
 import { sharedStyles, terminalTheme } from '../theme';
 import './run-menu';
 
@@ -98,46 +88,6 @@ export class Pwn2BlockTopBar extends LitElement {
         border-radius: 0;
         background: var(--p2b-bg);
       }
-      ul {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-      li {
-        display: grid;
-        grid-template-columns: auto 12rem minmax(12rem, 1fr) auto;
-        align-items: center;
-        gap: 0.65rem;
-        padding: 0.45rem 0.35rem;
-        border-radius: 0;
-      }
-      li:hover {
-        color: var(--p2b-bg);
-        background: var(--p2b-fg);
-      }
-      li + li {
-        margin-top: 0.2rem;
-      }
-      .drag-handle {
-        padding: 0.25rem;
-        cursor: grab;
-        user-select: none;
-      }
-      .drag-handle:active {
-        cursor: grabbing;
-      }
-      .desc {
-        color: var(--p2b-dim);
-        font-size: inherit;
-      }
-      .order {
-        display: flex;
-        gap: 0.25rem;
-      }
-      .order button {
-        min-width: 2rem;
-        padding-inline: 0.35rem;
-      }
       .modes {
         display: flex;
         gap: 0.35rem;
@@ -156,14 +106,6 @@ export class Pwn2BlockTopBar extends LitElement {
         color: var(--p2b-bg);
         background: var(--p2b-fg);
       }
-      kbd {
-        padding: 0.1rem 0.35rem;
-        border: 1px solid var(--p2b-line);
-        border-radius: 0;
-        color: var(--p2b-fg);
-        background: var(--p2b-bg);
-        font-size: inherit;
-      }
       @media (max-width: 620px) {
         .bar {
           flex-wrap: wrap;
@@ -181,25 +123,12 @@ export class Pwn2BlockTopBar extends LitElement {
         .menu-body {
           min-width: min(36rem, calc(100vw - 1.4rem));
         }
-        li {
-          grid-template-columns: auto 1fr auto;
-        }
-        li .desc {
-          grid-column: 1 / -1;
-          grid-row: 2;
-        }
-        li .order {
-          grid-column: 3;
-          grid-row: 1;
-        }
       }
     `,
   ];
 
   static override properties = {
     mode: { attribute: false },
-    views: { attribute: false },
-    available: { attribute: false },
     runModel: { attribute: false },
     busy: { type: Boolean },
     pending: { type: Number },
@@ -208,8 +137,6 @@ export class Pwn2BlockTopBar extends LitElement {
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）；默认值在构造函数里赋。 */
   declare mode: PageMode;
-  declare views: ViewManagerState;
-  declare available: readonly ViewKind[];
   declare runModel: readonly RunButtonModel[];
   declare busy: boolean;
   declare pending: number;
@@ -218,15 +145,11 @@ export class Pwn2BlockTopBar extends LitElement {
   constructor() {
     super();
     this.mode = 'debug';
-    this.views = createViewManagerState();
-    this.available = VIEW_KINDS;
     this.runModel = [];
     this.busy = false;
     this.pending = 0;
     this.canChoose = false;
   }
-
-  private draggedView?: ViewKind;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -272,17 +195,6 @@ export class Pwn2BlockTopBar extends LitElement {
           @click=${() => { this.closeMenus(); this.dispatchEvent(new CustomEvent('p2b-choose-challenge', { bubbles: true, composed: true })); }}>返回题目列表</button>` : ''}
         <nav aria-label="主菜单">
           <details class="menu">
-            <summary @click=${this.onMenuClick}>视图</summary>
-            <div class="menu-body">
-              <ul>
-                ${this.views.order.map((kind) => this.renderViewItem(kind))}
-              </ul>
-              <p class="note">
-                同时显示 2 个槽位，用 <kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>Ctrl</kbd>+<kbd>↓</kbd> 或纵向滚动切换。
-              </p>
-            </div>
-          </details>
-          <details class="menu">
             <summary @click=${this.onMenuClick}>运行</summary>
             <div class="menu-body">
               <pwn2block-run-menu
@@ -312,78 +224,10 @@ export class Pwn2BlockTopBar extends LitElement {
     `;
   }
 
-  private renderViewItem(kind: ViewKind) {
-    const enabled = this.available.includes(kind);
-    const shown = enabled && isShown(this.views, kind);
-    return html`
-      <li data-kind=${kind}
-        @dragover=${(event: DragEvent) => {
-          if (this.draggedView !== undefined) event.preventDefault();
-        }}
-        @drop=${(event: DragEvent) => this.dropView(event, kind)}
-      >
-        <span class="drag-handle" draggable="true" title="拖动排序" aria-hidden="true"
-          @dragstart=${(event: DragEvent) => {
-            this.draggedView = kind;
-            event.dataTransfer?.setData('text/plain', kind);
-            if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-          }}
-          @dragend=${() => { this.draggedView = undefined; }}
-        >⠿</span>
-        <label>
-          <input
-            type="checkbox"
-            .checked=${shown}
-            ?disabled=${!enabled}
-            @change=${(event: Event) => this.toggle(kind, (event.target as HTMLInputElement).checked)}
-          />
-          <span class="title">${VIEW_TITLES[kind]}</span>
-        </label>
-        <span class="desc">${enabled ? VIEW_DESCRIPTIONS[kind] : `${VIEW_DESCRIPTIONS[kind]}（本题未声明）`}</span>
-        <span class="order">
-          <button type="button" title="上移" aria-label=${`上移${VIEW_TITLES[kind]}`} @click=${() => this.move(kind, -1)}>
-            ↑
-          </button>
-          <button type="button" title="下移" aria-label=${`下移${VIEW_TITLES[kind]}`} @click=${() => this.move(kind, 1)}>
-            ↓
-          </button>
-        </span>
-      </li>
-    `;
-  }
-
-  private dropView(event: DragEvent, target: ViewKind): void {
-    const source = this.draggedView;
-    this.draggedView = undefined;
-    if (source === undefined) return;
-    event.preventDefault();
-    this.move(source, this.views.order.indexOf(target) - this.views.order.indexOf(source));
-  }
-
   private switchMode(mode: PageMode): void {
     this.dispatchEvent(
       new CustomEvent<{ mode: PageMode }>('p2b-mode-change', {
         detail: { mode },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-  }
-
-  private toggle(kind: ViewKind, shown: boolean): void {
-    this.dispatchEvent(
-      new CustomEvent<{ kind: ViewKind; shown: boolean }>('p2b-view-toggle', {
-        detail: { kind, shown },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-  }
-
-  private move(kind: ViewKind, delta: number): void {
-    this.dispatchEvent(
-      new CustomEvent<{ kind: ViewKind; delta: number }>('p2b-view-move', {
-        detail: { kind, delta },
         bubbles: true,
         composed: true,
       }),

@@ -12,7 +12,7 @@ import { formatAddrShort } from '../viewmodel/format';
 import { funcLabels } from '../viewmodel/labels';
 import { roleValue } from '../viewmodel/roles';
 import { sharedStyles, terminalTheme } from '../theme';
-import { scrollRowInSlot } from './view-scroll';
+import { scrollRowInBody } from './view-scroll';
 import type { ViewContext } from './view-context';
 
 export class Pwn2BlockDisasmView extends LitElement {
@@ -73,13 +73,21 @@ export class Pwn2BlockDisasmView extends LitElement {
 
   static override properties = {
     context: { attribute: false },
+    active: { type: Boolean },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）。 */
   declare context: ViewContext;
+  /** 是否为当前标签；隐藏时不滚动，切回时补做一次跟随。 */
+  declare active: boolean;
 
   private focusedAddr?: bigint;
   private focusMiss = '';
+
+  constructor() {
+    super();
+    this.active = true;
+  }
 
   override render() {
     const notice = this.context?.disasmNotice;
@@ -200,12 +208,14 @@ export class Pwn2BlockDisasmView extends LitElement {
     this.focusMiss = '';
   }
 
-  /** 在所属槽位内显示 ip 或刚点过的目标行（05 §2.3）。 */
+  /** 在标签主体区内显示 ip 或刚点过的目标行（05 §2.3）；切回本标签时也跟随一次。 */
   override updated(changed: Map<PropertyKey, unknown>): void {
+    if (!this.active) return;
     const previous = changed.get('context') as ViewContext | undefined;
-    if (changed.has('context') && previous?.projection === this.context?.projection) return;
+    const reactivated = changed.get('active') === false;
+    if (!reactivated && changed.has('context') && previous?.projection === this.context?.projection) return;
     const selector = this.focusedAddr === undefined ? 'tr.ip' : 'tr.focused';
-    scrollRowInSlot(this, this.renderRoot.querySelector(selector));
+    scrollRowInBody(this, this.renderRoot.querySelector(selector));
   }
 }
 

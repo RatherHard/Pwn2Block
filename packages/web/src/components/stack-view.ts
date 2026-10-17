@@ -14,7 +14,7 @@ import { searchVisibleBytes, type ByteSearchMode } from '../viewmodel/search';
 import { roleValue } from '../viewmodel/roles';
 import { buildStackRows, findRowIndex, refollowBase, type StackRowModel } from '../viewmodel/stack';
 import { sharedStyles, terminalTheme } from '../theme';
-import { scrollRowInSlot } from './view-scroll';
+import { scrollRowInBody } from './view-scroll';
 import type { ViewContext } from './view-context';
 
 export class Pwn2BlockStackView extends LitElement {
@@ -94,10 +94,13 @@ export class Pwn2BlockStackView extends LitElement {
 
   static override properties = {
     context: { attribute: false },
+    active: { type: Boolean },
   };
 
   /** 响应式属性用 `declare`（原因与写法见 app-shell.ts）。 */
   declare context: ViewContext;
+  /** 是否为当前标签；非当前时只记下待跟随，不在隐藏状态下滚动。 */
+  declare active: boolean;
 
   /** 手动跳转后的窗口起点；undefined 表示跟随 `sp`。 */
   private jumpBase?: bigint;
@@ -110,6 +113,13 @@ export class Pwn2BlockStackView extends LitElement {
   private searchMessage = '';
   private searchInvalid = false;
   private scrollAddr?: bigint;
+  /** 有新投影或刚切回标签，下次可见时要把 sp 行滚进主体区。 */
+  private followPending = false;
+
+  constructor() {
+    super();
+    this.active = true;
+  }
 
   override render() {
     const rows = this.rows();
@@ -263,12 +273,16 @@ export class Pwn2BlockStackView extends LitElement {
 
   override updated(changed: Map<PropertyKey, unknown>): void {
     const previous = changed.get('context') as ViewContext | undefined;
-    const newProjection = changed.has('context') && previous?.projection !== this.context?.projection;
-    const addr = this.scrollAddr ?? (newProjection ? this.spValue() : undefined);
+    if (changed.has('context') && previous?.projection !== this.context?.projection) this.followPending = true;
+    // active 由 false 变 true：切回本标签，补做一次跟随。
+    if (changed.get('active') === false) this.followPending = true;
+    if (!this.active) return;
+    const addr = this.scrollAddr ?? (this.followPending ? this.spValue() : undefined);
     this.scrollAddr = undefined;
+    this.followPending = false;
     if (addr === undefined) return;
     const index = findRowIndex(this.rows(), addr);
-    if (index !== undefined) scrollRowInSlot(this, this.renderRoot.querySelector(`[data-row="${index}"]`));
+    if (index !== undefined) scrollRowInBody(this, this.renderRoot.querySelector(`[data-row="${index}"]`));
   }
 
   // 内部状态（跳转起点、对齐偏移、错误文案）不是响应式属性，改完要显式请求重绘。

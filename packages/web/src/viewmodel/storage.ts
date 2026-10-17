@@ -13,8 +13,12 @@
  * 下一次试运行会把已经执行过的动作再提交一遍。
  */
 import type { ActionResultView } from '@pwn2block/shared';
+import { isViewKind, type ViewKind } from './views';
 
 export const STORAGE_VERSION = 1;
+
+/** 当前视图标签的键名（设计 §3.1）：所有题目共用一个值，不按题目 id 区分。 */
+export const VIEW_TAB_KEY = 'p2b:view-tab';
 
 /** 会话记录的形状：读的时候逐字段校验，任何一项不像就整条丢弃（不猜）。 */
 export interface StoredSession {
@@ -206,4 +210,18 @@ export function writeSession(
 
 export function clearSession(store: KeyValueStore | undefined, challengeId: string): boolean {
   return remove(store, sessionStorageKey(challengeId));
+}
+
+/**
+ * 读上次的视图标签。读失败（存储被禁、`getItem` 抛错）或读到非法值时回退到栈：
+ * 记住标签只是便利功能，不该让一份坏数据挡住开局。
+ */
+export function readViewTab(store: KeyValueStore | undefined): ViewKind {
+  const raw = read(store, VIEW_TAB_KEY);
+  return isViewKind(raw) ? raw : 'stack';
+}
+
+/** 记下当前视图标签。写失败不提示（`write` 已吞掉异常）：丢的只是下次开局的默认标签。 */
+export function writeViewTab(store: KeyValueStore | undefined, kind: ViewKind): void {
+  write(store, VIEW_TAB_KEY, kind);
 }

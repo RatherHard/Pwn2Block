@@ -37,7 +37,7 @@ import type { ActionOrigin, NormalizedWorkspace } from '../compiler/types';
 import { runAction, stepAction } from './program';
 import { createSerialQueue } from './queue';
 import { defaultPosition } from './replay';
-import { clearSession, readSession, writeSession, type KeyValueStore } from './storage';
+import { clearSession, readSession, readViewTab, writeSession, writeViewTab, type KeyValueStore } from './storage';
 import {
   applyProjection,
   createPageState,
@@ -56,10 +56,10 @@ import {
   type RunMenuInput,
 } from './toolbar';
 import {
-  moveView as moveViewIn,
-  scrollViews as scrollViewsIn,
-  setViewShown as setViewShownIn,
-  setViewOffset as setViewOffsetIn,
+  availableViews,
+  createViewManagerState,
+  cycleView as cycleViewIn,
+  selectView as selectViewIn,
   type ViewKind,
   type ViewManagerState,
 } from './views';
@@ -176,11 +176,9 @@ export interface SessionController {
   /** 重试上一次失败的操作（列表加载 / 打开题目 / 上一条命令）。 */
   retry(): void;
   setMode(mode: PageMode): void;
-  /** 视图管理器状态存在 `PageState.views` 里（05 §2.1），所以改它也要经过控制器。 */
-  setViewShown(kind: ViewKind, shown: boolean): void;
-  moveView(kind: ViewKind, delta: number): void;
-  scrollViews(delta: number): void;
-  setViewOffset(offset: number): void;
+  /** 当前标签存在 `PageState.views` 里，改动经控制器并写进本地存储（设计 §3.1）。 */
+  selectView(kind: ViewKind): void;
+  cycleView(delta: -1 | 1): void;
   compile(program: NormalizedWorkspace): void;
   /** 积木被改动：产物过期，运行、单步与提交被禁用（05 §3）。 */
   noteEdit(): void;
@@ -250,11 +248,15 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     return sessionId !== undefined && state.challenge !== undefined;
   }
 
-  function patchViews(update: (views: ViewManagerState) => ViewManagerState): void {
+  /** 只在本题可用的标签里切换；没变化就不重绘、不写存储。 */
+  function patchViews(
+    update: (views: ViewManagerState, available: readonly ViewKind[]) => ViewManagerState,
+  ): void {
     const page = state.page;
     if (page === undefined) return;
-    const views = update(page.views);
+    const views = update(page.views, availableViews(page.projection, state.challenge));
     if (views === page.views) return;
+    writeViewTab(deps.store, views.active);
     patch({ page: { ...page, views } });
   }
 
@@ -756,7 +758,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       challengeId: id,
       challenge,
       sessionId: resumed.sessionId,
-      page: createPageState(resumed.projection),
+      page: createPageState(resumed.projection, createViewManagerState(readViewTab(deps.store))),
       history: resumed.history,
       artifact: tracker.state,
       cursor: 0,
@@ -979,20 +981,12 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       patch({ page: setMode(page, mode) });
     },
 
-    setViewShown(kind: ViewKind, shown: boolean): void {
-      patchViews((views) => setViewShownIn(views, kind, shown));
+    selectView(kind: ViewKind): void {
+      patchViews((views, available) => selectViewIn(views, kind, available));
     },
 
-    moveView(kind: ViewKind, delta: number): void {
-      patchViews((views) => moveViewIn(views, kind, delta));
-    },
-
-    scrollViews(delta: number): void {
-      patchViews((views) => scrollViewsIn(views, delta));
-    },
-
-    setViewOffset(offset: number): void {
-      patchViews((views) => setViewOffsetIn(views, offset));
+    cycleView(delta: -1 | 1): void {
+      patchViews((views, available) => cycleViewIn(views, delta, available));
     },
 
     compile(program: NormalizedWorkspace): void {
@@ -1027,7 +1021,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       }
       cursorStack = snapshot.cursorStack;
       patch({
-        // 视图的显隐 / 排序是用户在判题模式里也可能改的，恢复时保留当前的视图状态。
+        // 当前标签是用户在判题模式里也可能改的，恢复时保留当前的视图状态。
         page: { ...snapshot.page, mode: 'debug', views: page?.views ?? snapshot.page.views },
         history: snapshot.history,
         cursor: snapshot.cursor,

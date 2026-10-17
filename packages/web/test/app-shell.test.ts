@@ -260,7 +260,7 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     expect(textOf(outputOf(app))).not.toContain('编译失败');
   });
 
-  it('Ctrl+方向键在视图内切换，但不抢走影子根内输入框的按键', async () => {
+  it('Ctrl+↓ 切到下一个标签；焦点在影子根内输入框时不切', async () => {
     const { app } = await mountApp(createFakeApi());
     const manager = app.renderRoot.querySelector('pwn2block-view-manager');
     const stack = manager?.renderRoot.querySelector('pwn2block-stack-view');
@@ -273,10 +273,12 @@ describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
     input.dispatchEvent(typing);
     await settle(app);
     expect(typing.defaultPrevented).toBe(false);
-    expect(manager.views.offset).toBe(0);
-    manager.dispatchEvent(key());
+    expect(manager.views.active).toBe('stack');
+    const cycle = key();
+    manager.dispatchEvent(cycle);
     await settle(app);
-    expect(manager.views.offset).toBe(1);
+    expect(cycle.defaultPrevented).toBe(true);
+    expect(manager.views.active).toBe('disasm');
   });
 
   it('调试实例已退出（satisfied + lastStop exit）：执行类按钮禁用并写出原因，提交与回退仍可用', async () => {

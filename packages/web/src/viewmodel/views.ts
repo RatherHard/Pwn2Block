@@ -1,18 +1,17 @@
 /**
- * 视图管理器状态（05 §2.1）。纯函数：勾选显示/隐藏、列表排序、2 个槽位的滚动窗口。
+ * 视图面板状态（设计 §3.1）。纯函数：单面板 + 标签切换。
  *
- * - 同时显示 `SLOT_COUNT` 个槽位，上下排列；`offset` 决定窗口落在 `shown` 的哪一段，
- *   组件按它做纵向滚动，`Ctrl+↑ / Ctrl+↓` 改的也是它；
- * - 「视图」菜单勾选改的是 `shown`（顺序仍按 `order`）；
- * - 所有函数返回新对象，不改动入参。
+ * - 状态只有「当前标签」一项；哪些标签可用由题目决定（`availableViews`），不存进状态；
+ * - 当前标签不可用时（例如本地存着 `io`，而本题没有 I/O）一律显示栈；
+ * - 所有函数返回新对象，结果不变时返回原对象，不改动入参。
  */
 import type { Projection, PublicChallenge } from '@pwn2block/shared';
 
 export const VIEW_KINDS = ['stack', 'disasm', 'registers', 'memory', 'io'] as const;
 export type ViewKind = (typeof VIEW_KINDS)[number];
 
-/** 槽位数量：05 §2.1 要求同时显示两个。 */
-export const SLOT_COUNT = 2;
+/** 当前标签不可用、或存储里读不出合法值时的回退标签。 */
+const DEFAULT_VIEW: ViewKind = 'stack';
 
 export const VIEW_TITLES: Readonly<Record<ViewKind, string>> = {
   stack: '栈视图',
@@ -22,23 +21,22 @@ export const VIEW_TITLES: Readonly<Record<ViewKind, string>> = {
   io: 'I/O 视图',
 };
 
-export const VIEW_DESCRIPTIONS: Readonly<Record<ViewKind, string>> = {
-  stack: '按 W 字节一行浏览栈，带 sp / bp 锚点与跳转链附注',
-  disasm: '服务端反汇编的地址 / 机器码 / 伪汇编，目标可点击',
-  registers: '寄存器与 ZF / CF / SF，点击复制',
-  memory: '全部 VMA 布局；非隐藏区域可 hex dump',
-  io: 'stdin / stdout 与 syscall 速查（题目声明后出现）',
+/** 标签栏上的短名（设计 §3.2：`[1 栈] 2 指令 3 寄存器 4 内存 5 I/O`）。 */
+export const VIEW_TAB_LABELS: Readonly<Record<ViewKind, string>> = {
+  stack: '栈',
+  disasm: '指令',
+  registers: '寄存器',
+  memory: '内存',
+  io: 'I/O',
 };
 
 export interface ViewManagerState {
-  /** 视图列表顺序（列表排序的结果）。 */
-  readonly order: readonly ViewKind[];
-  /** 勾选显示的视图，按 `order` 排列。 */
-  readonly shown: readonly ViewKind[];
-  /** 槽位窗口起点在 `shown` 上的下标。 */
-  readonly offset: number;
-  /** 键盘焦点所在槽位。 */
-  readonly activeSlot: number;
+  readonly active: ViewKind;
+}
+
+/** 判断任意字符串是不是合法的视图种类（读存储时用）。 */
+export function isViewKind(value: unknown): value is ViewKind {
+  return typeof value === 'string' && (VIEW_KINDS as readonly string[]).includes(value);
 }
 
 /**
@@ -59,86 +57,41 @@ export function availableViews(projection: Projection, challenge?: PublicChallen
   return kinds;
 }
 
-export function createViewManagerState(shown: readonly ViewKind[] = ['stack', 'disasm', 'registers', 'memory']): ViewManagerState {
-  return {
-    order: [...VIEW_KINDS],
-    shown: sortByOrder(VIEW_KINDS, shown),
-    offset: 0,
-    activeSlot: 0,
-  };
+export function createViewManagerState(active: ViewKind = DEFAULT_VIEW): ViewManagerState {
+  return { active };
 }
 
-function sortByOrder(order: readonly ViewKind[], kinds: readonly ViewKind[]): readonly ViewKind[] {
-  return order.filter((kind) => kinds.includes(kind));
+function withActive(state: ViewManagerState, active: ViewKind): ViewManagerState {
+  return active === state.active ? state : { ...state, active };
 }
 
-export function maxOffset(state: ViewManagerState): number {
-  return Math.max(0, state.shown.length - SLOT_COUNT);
+/** 切到指定标签；本题不可用的标签不接受。 */
+export function selectView(
+  state: ViewManagerState,
+  kind: ViewKind,
+  available: readonly ViewKind[],
+): ViewManagerState {
+  return available.includes(kind) ? withActive(state, kind) : state;
 }
 
-export function hasMoreAbove(state: ViewManagerState): boolean {
-  return state.offset > 0;
+/** 当前标签不可用时回到栈。 */
+export function normalizeActive(state: ViewManagerState, available: readonly ViewKind[]): ViewManagerState {
+  return available.includes(state.active) ? state : withActive(state, DEFAULT_VIEW);
 }
 
-export function hasMoreBelow(state: ViewManagerState): boolean {
-  return state.offset < maxOffset(state);
-}
-
-/** 两个槽位当前显示的视图；不足两个时补 undefined。 */
-export function slotKinds(state: ViewManagerState): readonly (ViewKind | undefined)[] {
-  const slots: (ViewKind | undefined)[] = [];
-  for (let slot = 0; slot < SLOT_COUNT; slot += 1) slots.push(state.shown[state.offset + slot]);
-  return slots;
-}
-
-export function activeView(state: ViewManagerState): ViewKind | undefined {
-  return state.shown[state.offset + state.activeSlot];
-}
-
-export function isShown(state: ViewManagerState, kind: ViewKind): boolean {
-  return state.shown.includes(kind);
-}
-
-function withOffset(state: ViewManagerState, offset: number): ViewManagerState {
-  const clamped = Math.min(Math.max(0, offset), maxOffset(state));
-  return clamped === state.offset ? state : { ...state, offset: clamped };
-}
-
-/** 手动滚动按绝对位置同步，拒绝无效的浏览器事件数据。 */
-export function setViewOffset(state: ViewManagerState, offset: number): ViewManagerState {
-  return Number.isInteger(offset) ? withOffset(state, offset) : state;
-}
-
-/** `Ctrl+↑` 传 -1（往前一个视图），`Ctrl+↓` 传 +1（往后一个视图）。 */
-export function scrollViews(state: ViewManagerState, delta: number): ViewManagerState {
-  if (delta === 0) return state;
-  return withOffset(state, state.offset + (delta > 0 ? 1 : -1));
-}
-
-export function setViewShown(state: ViewManagerState, kind: ViewKind, shown: boolean): ViewManagerState {
-  const already = isShown(state, kind);
-  if (already === shown) return state;
-  const next = shown ? sortByOrder(state.order, [...state.shown, kind]) : state.shown.filter((item) => item !== kind);
-  return withOffset({ ...state, shown: next }, state.offset);
-}
-
-export function toggleView(state: ViewManagerState, kind: ViewKind): ViewManagerState {
-  return setViewShown(state, kind, !isShown(state, kind));
-}
-
-/** 列表排序：按钮移动一位，拖动按源与目标的位置差移动；两者使用同一入口。 */
-export function moveView(state: ViewManagerState, kind: ViewKind, delta: number): ViewManagerState {
-  const index = state.order.indexOf(kind);
-  if (index < 0 || delta === 0) return state;
-  const target = index + delta;
-  if (!Number.isInteger(target) || target < 0 || target >= state.order.length) return state;
-  const order = [...state.order];
-  order.splice(index, 1);
-  order.splice(target, 0, kind);
-  return { ...state, order, shown: sortByOrder(order, state.shown) };
-}
-
-export function focusSlot(state: ViewManagerState, slot: number): ViewManagerState {
-  const clamped = Math.min(Math.max(0, Math.floor(slot)), SLOT_COUNT - 1);
-  return clamped === state.activeSlot ? state : { ...state, activeSlot: clamped };
+/**
+ * `Ctrl+↑` 传 -1、`Ctrl+↓` 传 +1：在可用标签里首尾循环。
+ * 起点按「界面上实际显示的那个标签」算（先 `normalizeActive`），与用户看到的一致。
+ */
+export function cycleView(
+  state: ViewManagerState,
+  delta: -1 | 1,
+  available: readonly ViewKind[],
+): ViewManagerState {
+  const kinds = VIEW_KINDS.filter((kind) => available.includes(kind));
+  if (kinds.length === 0) return state;
+  const current = normalizeActive(state, kinds).active;
+  const index = kinds.indexOf(current);
+  const next = kinds[(index + delta + kinds.length) % kinds.length] ?? DEFAULT_VIEW;
+  return withActive(state, next);
 }
