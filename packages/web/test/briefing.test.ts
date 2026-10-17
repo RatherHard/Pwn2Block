@@ -157,6 +157,50 @@ describe('parseInline 行内', () => {
     expect(parseInline('**a `b [c](')).toEqual([{ kind: 'text', text: '**a `b [c](' }]);
   });
 
+  it('标识符里的下划线是字面量（词内 _ 不开强调）', () => {
+    expect(parseInline('read_flag and print_flag')).toEqual([{ kind: 'text', text: 'read_flag and print_flag' }]);
+    expect(parseInline('FLAG_X_Y')).toEqual([{ kind: 'text', text: 'FLAG_X_Y' }]);
+    expect(parseInline('__init__')).toEqual([{ kind: 'text', text: '__init__' }]);
+  });
+
+  it('C 指针声明与乘法里的星号是字面量（贴着空白的 * 不开也不闭）', () => {
+    expect(parseInline('char *buf, int *len')).toEqual([{ kind: 'text', text: 'char *buf, int *len' }]);
+    expect(parseInline('a * b * c')).toEqual([{ kind: 'text', text: 'a * b * c' }]);
+    expect(parseInline('a ** b ** c')).toEqual([{ kind: 'text', text: 'a ** b ** c' }]);
+  });
+
+  it('正常的强调不受影响', () => {
+    expect(parseInline('_ok_')).toEqual([{ kind: 'em', children: [{ kind: 'text', text: 'ok' }] }]);
+    expect(parseInline('*ok*')).toEqual([{ kind: 'em', children: [{ kind: 'text', text: 'ok' }] }]);
+    expect(parseInline('**ok**')).toEqual([{ kind: 'strong', children: [{ kind: 'text', text: 'ok' }] }]);
+    expect(parseInline('调用_这个_函数')).toEqual([
+      { kind: 'text', text: '调用' },
+      { kind: 'em', children: [{ kind: 'text', text: '这个' }] },
+      { kind: 'text', text: '函数' },
+    ]);
+  });
+
+  it('词内的 * 可以强调：foo*bar* 是 foo + 斜体 bar（与 CommonMark 一致，_ 则不行）', () => {
+    expect(parseInline('foo*bar*')).toEqual([
+      { kind: 'text', text: 'foo' },
+      { kind: 'em', children: [{ kind: 'text', text: 'bar' }] },
+    ]);
+    expect(parseInline('foo_bar_')).toEqual([{ kind: 'text', text: 'foo_bar_' }]);
+  });
+
+  it('斜体里嵌粗体：单个 * 不拿 ** 的半边当闭标记', () => {
+    expect(parseInline('*a **b** c*')).toEqual([
+      {
+        kind: 'em',
+        children: [
+          { kind: 'text', text: 'a ' },
+          { kind: 'strong', children: [{ kind: 'text', text: 'b' }] },
+          { kind: 'text', text: ' c' },
+        ],
+      },
+    ]);
+  });
+
   it('<script> 与 <img onerror> 只是文本', () => {
     expect(parseInline('<script>x</script><img src=x onerror=y>')).toEqual([
       { kind: 'text', text: '<script>x</script><img src=x onerror=y>' },

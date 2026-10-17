@@ -246,26 +246,67 @@ interface MarkResult {
 }
 
 function parseMark(text: string, start: number, mark: InlineMark): MarkResult | undefined {
-  if (mark === '`') return parseDelimited(text, start, '`', '`', (inner) => ({ kind: 'code', text: inner }));
-  if (mark === '**') {
-    return parseDelimited(text, start, '**', '**', (inner) => ({ kind: 'strong', children: parseInline(inner) }));
-  }
-  if (mark === '*') return parseDelimited(text, start, '*', '*', (inner) => ({ kind: 'em', children: parseInline(inner) }));
-  if (mark === '_') return parseDelimited(text, start, '_', '_', (inner) => ({ kind: 'em', children: parseInline(inner) }));
-  return parseLink(text, start);
+  if (mark === '`') return parseDelimited(text, start, '`', (inner) => ({ kind: 'code', text: inner }));
+  if (mark === '[') return parseLink(text, start);
+  return parseEmphasis(text, start, mark);
 }
 
+/** 代码片段：找下一个同种标记，里面原样保留，不再解析行内语法。 */
 function parseDelimited(
   text: string,
   start: number,
-  open: string,
-  close: string,
+  mark: string,
   build: (inner: string) => MdInline,
 ): MarkResult | undefined {
-  const contentStart = start + open.length;
-  const closeAt = text.indexOf(close, contentStart);
+  const contentStart = start + mark.length;
+  const closeAt = text.indexOf(mark, contentStart);
   if (closeAt === -1 || closeAt === contentStart) return undefined;
-  return { node: build(text.slice(contentStart, closeAt)), next: closeAt + close.length };
+  return { node: build(text.slice(contentStart, closeAt)), next: closeAt + mark.length };
+}
+
+/**
+ * 强调的边界规则（CommonMark 的简化版），为了不误伤题面里常见的标识符和 C 声明：
+ * - `*` / `**`：开标记后面不能是空白，闭标记前面不能是空白。所以 `char *buf, int *len`、
+ *   `a * b * c` 保持原文；词内的 `*` 可以强调，`foo*bar*` 是 `foo` + 斜体 `bar`（与 CommonMark 一致）。
+ * - `_`：额外要求开标记前面不是单词字符、闭标记后面不是单词字符，所以 `read_flag`、`FLAG_X_Y`
+ *   里的 `_` 都是字面量；`_` 后紧跟 `_` 也不开强调（`__init__` 保持原文，本解析器不支持 `__` 粗体）。
+ * 单词字符只认 ASCII 字母、数字和 `_`：中文紧挨着 `_强调_` 仍然生效。
+ */
+function parseEmphasis(text: string, start: number, mark: '**' | '*' | '_'): MarkResult | undefined {
+  const contentStart = start + mark.length;
+  if (!canOpen(text, start, mark)) return undefined;
+  for (let at = text.indexOf(mark, contentStart); at !== -1; at = text.indexOf(mark, at + 1)) {
+    if (at === contentStart || !canClose(text, at, mark)) continue;
+    const children = parseInline(text.slice(contentStart, at));
+    return { node: { kind: mark === '**' ? 'strong' : 'em', children }, next: at + mark.length };
+  }
+  return undefined;
+}
+
+const WORD_CHAR = /[A-Za-z0-9_]/;
+const SPACE_CHAR = /\s/;
+
+function isWord(char: string | undefined): boolean {
+  return char !== undefined && WORD_CHAR.test(char);
+}
+
+/** 行首 / 行尾按空白算。 */
+function isSpace(char: string | undefined): boolean {
+  return char === undefined || SPACE_CHAR.test(char);
+}
+
+function canOpen(text: string, at: number, mark: string): boolean {
+  const after = text[at + mark.length];
+  if (isSpace(after)) return false;
+  if (mark !== '_') return true;
+  return !isWord(text[at - 1]) && after !== '_';
+}
+
+function canClose(text: string, at: number, mark: string): boolean {
+  if (isSpace(text[at - 1])) return false;
+  // `*a **b** c*`：单个 `*` 不能拿 `**` 的半边当闭标记。
+  if (mark === '*' && (text[at + 1] === '*' || text[at - 1] === '*')) return false;
+  return mark !== '_' || !isWord(text[at + mark.length]);
 }
 
 /** `[文字](url)`：只保留文字，不生成 `<a>`，不放出 url。url 里允许嵌套圆括号，按配平扫描收尾。 */
