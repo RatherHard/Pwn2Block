@@ -15,7 +15,6 @@
  * 产物与过期状态**全部**来自 H 的 `ArtifactTracker`（09 §3.2），这里不维护第二份。
  */
 import {
-  MAX_ACTIONS_PER_REQUEST,
   MAX_SNAPSHOTS,
   MAX_STEP_COUNT,
   type Action,
@@ -27,16 +26,12 @@ import {
   type SubmitResponse,
 } from '@pwn2block/shared';
 import { ApiClientError, isSessionExpired, type ApiClient } from '../api';
-import {
-  createArtifactTracker,
-  type ArtifactTracker,
-  type PayloadArtifact,
-  type PayloadCompileState,
-} from '../compiler/artifact';
+import { createArtifactTracker, type ArtifactTracker, type PayloadCompileState } from '../compiler/artifact';
 import type { ActionOrigin, NormalizedWorkspace } from '../compiler/types';
-import { runAction, stepAction } from './program';
+import { stepAction } from './program';
 import { createSerialQueue } from './queue';
 import { defaultPosition, displayedView } from './replay';
+import { createRunRounds, runAll, type RunAllDeps, type RunRound } from './run-all';
 import { clearSession, readSession, readViewTab, writeSession, writeViewTab, type KeyValueStore } from './storage';
 import {
   applyProjection,
@@ -110,11 +105,6 @@ export interface ControllerState {
   readonly running: boolean;
   /** 上一轮「运行」被终止时执行到的位置；任何其他命令开始执行、或新一轮运行开始时清掉。 */
   readonly aborted?: { readonly executed: number; readonly total: number };
-}
-
-/** 一轮「运行」的取消令牌：每轮新建一个，终止只作用于当前这一轮，不会泄漏到下一轮。 */
-interface RunRound {
-  cancelled: boolean;
 }
 
 /** 提交前保存的调试状态：`backToDebug()` 用它恢复，保证提交不改动调试实例（05 §6）。 */
@@ -208,8 +198,6 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
    * 硬套一个旧指针会让下一次单步把已经执行过的动作再提交一遍。
    */
   let pendingResume: StoredResume | undefined;
-  /** 当前这一轮「运行」的取消令牌；没有在运行时为 `undefined`。 */
-  let currentRound: RunRound | undefined;
 
   let state: ControllerState = {
     phase: 'loading',
@@ -225,6 +213,11 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   };
 
   const queue = createSerialQueue({ onChange: sync });
+  const rounds = createRunRounds({
+    // 同步置位：同一 tick 的第二次「运行」在点击时就被 MESSAGE_RUNNING 挡下。
+    started: () => patch({ running: true, aborted: undefined }),
+    finished: () => patch({ running: false }),
+  });
 
   function publish(next: ControllerState): void {
     state = next;
@@ -417,24 +410,6 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     }
   }
 
-  /**
-   * 批量停止条件（04 §5、09 §3.4）：服务端「遇到第一个被拒绝的动作就停」的语义要在客户端
-   * **跨分片保持**——某片出现被拒绝、该片实际生效数少于提交数、或实例已经是终止态
-   * （`failed` / 已退出），就不再发后续分片。`executed` 与 `results.length` 是两个口径（09 §8），
-   * 两个都要看。
-   *
-   * 终止态用 `terminalReasonOf`（与引擎 `isTerminal()` 同源）：退出恰好落在 512 分片边界时该片
-   * 全部成功、`status` 仍是 `satisfied`，只看 `status` 会多发一片，整片撞 `not_executable`
-   * 并白记 `failures`（09 §8 第 10 条）。
-   * 反过来不许用「`satisfied` 就停」代替：`satisfied` 本身不限制动作（04 §1.1）。
-   */
-  function stopped(response: ActionsResponse, submitted: number): boolean {
-    if (response.results.length < submitted) return true;
-    if (response.results.some((result) => !result.ok)) return true;
-    if (response.executed < submitted) return true;
-    return terminalReasonOf(response.projection) !== undefined;
-  }
-
   function nextCursor(command: RunCommand, response: ActionsResponse): number {
     switch (command.kind) {
       case 'run-all':
@@ -475,72 +450,19 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     applyActions(command, await api.actions(id, actions));
   }
 
-  /** 「运行」要发的分片：完整序列按 512 上限切开；空程序退化成一个 `[run]`。 */
-  function runChunks(actions: readonly Action[]): readonly (readonly Action[])[] {
-    if (actions.length === 0) return [[runAction()]];
-    const chunks: (readonly Action[])[] = [];
-    for (let start = 0; start < actions.length; start += MAX_ACTIONS_PER_REQUEST) {
-      chunks.push(actions.slice(start, start + MAX_ACTIONS_PER_REQUEST));
-    }
-    return chunks;
-  }
-
-  /** 本轮已被终止就记下执行到哪儿并返回 `true`：调用方据此不再发下一片。 */
-  function abortedBy(round: RunRound, total: number): boolean {
-    if (!round.cancelled) return false;
-    patch({ aborted: { executed: state.cursor, total } });
-    return true;
-  }
-
-  /**
-   * 发运行里的一个请求，并按服务端的口径记游标历史（04 §3）：引擎**每个请求**压一层 undo
-   * （在第一个真正生效的动作之前；一条都没生效就不压），所以客户端也按请求记——
-   * 请求前的游标只在响应回来且 `executed > 0` 时才压栈。请求抛错时什么都不留，
-   * 撤销就不会弹出一条服务端并不存在的历史。
-   */
-  async function sendRunRequest(
-    id: string,
-    command: RunCommand,
-    actions: readonly Action[],
-  ): Promise<ActionsResponse> {
-    const before = state.cursor;
-    const response = await api.actions(id, actions);
-    if (response.executed > 0) pushCursor(before);
-    applyActions(command, response);
-    return response;
-  }
-
-  /**
-   * 运行途中积木被改动（产物过期，或自动重编译换了一份产物）：旧产物的后续分片已经不是
-   * 画布上的程序，不能再发。这不是用户的「终止」，所以不记 `aborted`。
-   */
-  function artifactChanged(artifact: PayloadArtifact): boolean {
-    return tracker.state.artifact !== artifact || tracker.state.stale;
-  }
-
-  /**
-   * 运行（05 §3）：先 `[reset]` 回到初态，再从头按 512 分片发**完整**序列，末尾不补 `run`。
-   *
-   * 终止只在每次响应应用之后检查：在途那片的响应照常应用（服务端已经执行了它），之后不再发。
-   */
-  async function runAll(id: string, round: RunRound): Promise<void> {
-    const artifact = tracker.state.artifact;
-    if (artifact === undefined) return;
-    const total = artifact.actions.length;
-    // 排在别的命令后面时就被终止了：一个请求都不发。
-    if (abortedBy(round, total)) return;
-    const reset = await sendRunRequest(id, { kind: 'reset' }, [{ type: 'reset' }]);
-    if (abortedBy(round, total) || stopped(reset, 1)) return;
-    for (const chunk of runChunks(artifact.actions)) {
-      if (artifactChanged(artifact)) return;
-      const response = await sendRunRequest(id, { kind: 'run-all' }, chunk);
-      if (abortedBy(round, total) || stopped(response, chunk.length)) return;
-    }
-  }
+  /** 分片循环的读写口：游标、响应应用与「已终止」都仍由控制器持有。 */
+  const runAllDeps: RunAllDeps = {
+    api,
+    tracker,
+    cursor: () => state.cursor,
+    pushCursor,
+    applyActions,
+    markAborted: (aborted) => patch({ aborted }),
+  };
 
   async function debugNow(id: string, command: RunCommand, round: RunRound | undefined): Promise<void> {
     if (command.kind === 'run-all') {
-      await runAll(id, round ?? { cancelled: false });
+      await runAll(runAllDeps, id, round ?? { cancelled: false });
       return;
     }
     await stepOnce(id, command);
@@ -858,16 +780,6 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     });
   }
 
-  /** 一轮「运行」的外壳：不论放行、被复查拦下、失败还是终止，`running` 都在这里复位。 */
-  async function runRound(round: RunRound): Promise<void> {
-    try {
-      await execute({ kind: 'run-all' }, round);
-    } finally {
-      if (currentRound === round) currentRound = undefined;
-      patch({ running: false });
-    }
-  }
-
   function run(command: RunCommand): void {
     const blocked = blockedReason(command);
     if (blocked !== undefined) {
@@ -876,16 +788,12 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     }
     // 终止不是请求：不进串行队列，只置本轮的取消标志。
     if (command.kind === 'abort') {
-      if (currentRound !== undefined) currentRound.cancelled = true;
+      rounds.abort();
       return;
     }
     lastIntent = { kind: 'run', command };
     if (command.kind === 'run-all') {
-      const round: RunRound = { cancelled: false };
-      currentRound = round;
-      // 同步置位：同一 tick 的第二次「运行」在点击时就被 MESSAGE_RUNNING 挡下。
-      patch({ running: true, aborted: undefined });
-      enqueue(() => runRound(round));
+      enqueue(rounds.begin((round) => execute({ kind: 'run-all' }, round)));
       return;
     }
     enqueue(() => execute(command));
