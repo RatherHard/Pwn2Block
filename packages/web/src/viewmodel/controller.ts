@@ -90,9 +90,9 @@ export interface ControllerState {
   readonly sessionId?: string;
   readonly page?: PageState;
   readonly history: HistoryDepthView;
-  /** 程序区数据源（H 的追踪器快照）。 */
+  /** 编译产物与过期状态（H 的追踪器快照）。 */
   readonly artifact: PayloadCompileState;
-  /** 程序区当前执行位置：下一次要提交的动作下标。 */
+  /** 当前执行位置（游标）：下一次单步要提交的动作下标。 */
   readonly cursor: number;
   /** 最近一次请求的动作结果。 */
   readonly results: readonly ActionResultView[];
@@ -121,7 +121,7 @@ type Intent =
   | { readonly kind: 'open'; readonly id: string }
   | { readonly kind: 'run'; readonly command: RunCommand };
 
-/** 本地会话记录里要应用到程序区的那部分（见 `pendingResume` 的注释）。 */
+/** 本地会话记录里要套回游标与结果的那部分（见 `pendingResume` 的注释）。 */
 interface StoredResume {
   readonly cursor: number;
   readonly results: readonly ActionResultView[];
@@ -191,9 +191,9 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   let debugSnapshot: DebugSnapshot | undefined;
   let lastIntent: Intent | undefined;
   /**
-   * 会话恢复时待应用的「程序区指针」（05 §3.1、04 §1.1）。
+   * 会话恢复时待应用的游标（05 §3.1、04 §1.1）。
    *
-   * 服务端只回投影，不回「程序区走到第几条动作」——那是纯前端的指针，所以它跟会话 id 一起
+   * 服务端只回投影，不回「执行到第几条动作」——那是纯前端的指针，所以它跟会话 id 一起
    * 存在本地。**只有产物的动作条数跟存的时候一致才认**：画布存档丢了或被改过，产物就对不上，
    * 硬套一个旧指针会让下一次单步把已经执行过的动作再提交一遍。
    */
@@ -439,7 +439,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       notice: undefined,
       sessionExpired: false,
     });
-    // 程序区位置变了就落盘：刷新后要接着这里，而不是把已经执行过的动作再发一遍。
+    // 游标变了就落盘：刷新后要接着这里，而不是把已经执行过的动作再发一遍。
     persistResume();
   }
 
@@ -640,7 +640,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
    * 1. 题面 + 画布：先把 `challenge` 发下去让页面壳挂上画布并装回本地存档；
    * 2. 会话：`GET /api/sessions/:id` 接回旧实例或新建。
    *
-   * 反过来的话，会话状态先到、画布还是空的，用户会看到「服务端调试状态回来了、程序区空着」的
+   * 反过来的话，会话状态先到、画布还是空的，用户会看到「服务端调试状态回来了、画布空着」的
    * 半恢复；而画布装载本身会触发一次重编译，重编译的产物必须落在**已经恢复好的**画布上。
    */
   async function openSession(id: string): Promise<void> {
@@ -648,7 +648,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     const challenge: PublicChallenge = await api.getChallenge(id);
     // **换题**才清产物：`state.challenge` 记得的是画布当前挂的那道题（`open()` 只改
     // `challengeId`，不动它）。同一道题重新打开（「重新开始」/ 重试）时画布没换，
-    // 产物与它仍然对得上，清掉只会让程序区空着而画布上还有积木——又一种半恢复。
+    // 产物与它仍然对得上，清掉只会让画布上还有积木、却没有可运行的产物——又一种半恢复。
     if (state.challenge?.id !== id) tracker.clear();
     cursorStack = [];
     debugSnapshot = undefined;
@@ -697,7 +697,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   }
 
   /**
-   * 把「程序区走到哪儿」写进本地会话记录（05 §3.1）：刷新后要接着上次的位置，而不是从头发一遍。
+   * 把游标（执行到哪儿）写进本地会话记录（05 §3.1）：刷新后要接着上次的位置，而不是从头发一遍。
    *
    * 还没套上旧指针时（`pendingResume` 有值，产物还没编译出来）**不写**：这时候 `state.cursor`
    * 还是刚重置的 0，落盘会把刚读出来的旧指针覆盖掉。
@@ -714,7 +714,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
   }
 
   /**
-   * 把会话恢复时读到的程序区指针套上去，**只认条数对得上的产物**；对不上就丢掉并说明，
+   * 把会话恢复时读到的游标套上去，**只认条数对得上的产物**；对不上就丢掉并说明，
    * 绝不把一个指向别的动作序列的指针硬套上去。
    */
   function applyPendingResume(): void {
@@ -841,7 +841,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       // 重新开始也要把旧会话还回去：它可能还活着（只是被判题结果 / 编辑折腾过），
       // 而存活会话有配额（04 §6）。已经被回收的会话 DELETE 会回 404，忽略即可。
       retireSession();
-      // 新会话就等于新实例：本地那条会话记录（含程序区指针）必须一起丢掉，
+      // 新会话就等于新实例：本地那条会话记录（含游标）必须一起丢掉，
       // 否则刷新后会拿旧指针去对新实例。**画布与产物不动**——积木是用户的程序，
       // 不是会话的一部分（D5 批次 2；`openSession` 也按同一条口径决定要不要清产物）。
       if (id !== undefined) clearSession(deps.store, id);
@@ -907,7 +907,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       tracker.compile(program, challenge);
       cursorStack = [];
       patch({ artifact: tracker.state, cursor: 0, results: [] });
-      // 画布恢复会走到这里：产物刚编出来，正是判断「上次的程序区指针还算不算数」的时候。
+      // 画布恢复会走到这里：产物刚编出来，正是判断「上次的游标还算不算数」的时候。
       applyPendingResume();
       // 产物条数是新的，会话记录里的 `actionsLength` 也要跟着走。
       persistResume();

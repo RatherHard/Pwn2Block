@@ -34,7 +34,7 @@ export interface OutputInput {
   readonly results: readonly ActionResultView[];
   readonly projection?: Projection;
   /**
-   * 程序区游标（05 §3）：用来把结果里的第 k 条对回产物里的第几个动作，
+   * 游标（05 §3）：用来把结果里的第 k 条对回产物里的第几个动作，
    * 从而给被拒绝 / 异常的动作一个「定位积木」出口（05 §5、§6）。
    */
   readonly cursor?: number;

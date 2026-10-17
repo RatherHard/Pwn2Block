@@ -290,7 +290,7 @@ describe('装载 → 通知 → 过期 + 重编译（D 的接线顺序）', () =
     });
 
     bridge.loadProgram(stepState().state);
-    // 产物其实是最新的，但 `stale` 被后一步置位：界面会禁用试运行与提交——
+    // 产物其实是最新的，但 `stale` 被后一步置位：界面会禁用运行、单步与提交——
     // 这正是 `noteEdit` / `compile` 的调用顺序必须由接线方保证的原因（artifact.ts 的协议）。
     expect(tracker.state.artifact?.actions).toEqual([{ type: 'step', count: 1 }]);
     expect(tracker.state.stale).toBe(true);

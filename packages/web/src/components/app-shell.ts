@@ -394,8 +394,7 @@ export class Pwn2BlockApp extends LitElement {
 
   /**
    * 输出区（05 §6）：挂在页面壳里，位于工作区下方、横跨整行（§5.1）。数据来自
-   * `outputEntries`（纯函数），与原来在 payload 面板里的那一份完全一致，只是搬了地方。
-   * 判题结果模式下，原来程序区上方的说明文字改放在这里顶部。
+   * `outputEntries`（纯函数）。判题结果模式下顶部加一行说明：下面列的是调试实例的历史结果。
    */
   private renderOutput(state: ControllerState) {
     const artifact = state.artifact.artifact;

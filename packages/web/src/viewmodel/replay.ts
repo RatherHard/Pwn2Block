@@ -245,7 +245,7 @@ export interface ActionInstructions {
   readonly labels: readonly string[];
 }
 
-/** 「第 k 个动作执行了哪些指令」：给程序区与判题横幅用（09 §3.4）。 */
+/** 「第 k 个动作执行了哪些指令」：给判题横幅用（09 §3.4）。 */
 export function actionInstructionsAt(replay: ReplayView, position: number): ActionInstructions | undefined {
   const action = actionOfPosition(replay, position);
   if (action === undefined) return undefined;

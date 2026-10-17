@@ -17,7 +17,7 @@ import {
  * D 按冻结语义接线：读 `state.stale / artifact / errors / revision`，调 `compile / noteEdit / clear`。
  * 所以这里逐条钉住那五句话，而不是只测"能编译"：
  * 1. 成功：替换产物、`revision + 1`、`stale = false`、清空错误；
- * 2. 失败：**清空产物**、保留错误、`revision` 不动（旧产物绝不能留下来被试运行或提交）；
+ * 2. 失败：**清空产物**、保留错误、`revision` 不动（旧产物绝不能留下来被运行或提交）；
  * 3. `noteEdit()`：有产物才标过期；没有产物是空操作；
  * 4. `clear()`：三项全清，`revision` 不回退（避免新旧产物撞号）；
  * 5. 来源表错位是有真实输出时的硬不变式，正常编译不会误报。
@@ -145,7 +145,7 @@ describe('产物跟踪器：编译失败', () => {
     expect(tracker.state.errors).not.toBe(first);
   });
 
-  it('上一份成功的产物不会在失败后留下来：报错之后没有可试运行的东西', () => {
+  it('上一份成功的产物不会在失败后留下来：报错之后没有可运行的东西', () => {
     const tracker = createArtifactTracker();
     tracker.compile(goodProgram, openChallenge);
     tracker.compile(badProgram, openChallenge);
@@ -288,14 +288,14 @@ describe('产物跟踪器：编辑 → 过期 → 重编译的完整序列（05 
   /**
    * D 的接线只有两种调用：画布变了就 `noteEdit()`，然后（必须）`compile()`。
    * 这一组用例把「一轮编辑」的每个阶段都钉住，尤其是**失败那一轮**：产物被清掉之后，
-   * 界面既不能拿旧产物去试运行，也不能因为"有错误"就丢掉错误列表。
+   * 界面既不能拿旧产物去运行，也不能因为"有错误"就丢掉错误列表。
    */
   it('五个阶段逐阶段断言：成功 → 编辑 → 编译失败 → 修好 → 再成功', () => {
     const tracker = createArtifactTracker();
     const first = tracker.compile(goodProgram, openChallenge);
     expect(tracker.state).toEqual({ artifact: first, errors: [], stale: false, revision: 1 });
 
-    // 阶段 2：画布改了，但还没重编译——产物过期，界面必须禁用试运行与提交。
+    // 阶段 2：画布改了，但还没重编译——产物过期，界面必须禁用运行与提交。
     tracker.noteEdit();
     expect(tracker.state.stale).toBe(true);
     expect(tracker.state.artifact).toBe(first);

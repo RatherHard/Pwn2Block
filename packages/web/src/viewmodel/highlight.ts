@@ -1,9 +1,8 @@
 /**
  * 「该高亮哪块积木」的唯一派生点（05 §4、§6，09 §3.4）。纯函数，可在 node 里单测。
  *
- * 界面上的三处定位读同一个结果，不允许各算一套：
+ * 界面上的两处定位读同一个结果，不允许各算一套：
  * - **画布高亮**：`app-shell` 把它作为 `highlightBlockId` 交给 payload 面板 → Blockly 桥；
- * - **程序区**：编译失败时程序区没有行，只留一个「定位出错积木」按钮，目标就是它；
  * - **输出区 / 判题横幅**：错误条目与被拒绝动作的「定位积木」按钮。
  *
  * 所有位置判定都经 H 的 `compiler/locate.ts`：空串 `blockId` 翻成「没有位置」，
@@ -26,10 +25,10 @@ export interface VerdictHighlight {
 export interface HighlightInput {
   readonly mode: PageMode;
   readonly verdict?: VerdictHighlight;
-  /** 当前程序区的产物（09 §3.2 的追踪器快照）。 */
+  /** 当前的编译产物（09 §3.2 的追踪器快照）。 */
   readonly artifact: PayloadArtifact | undefined;
   readonly errors: readonly CompileError[];
-  /** 最近一次请求的动作结果与程序区游标（调试实例）。 */
+  /** 最近一次请求的动作结果与游标（调试实例）。 */
   readonly results: readonly ActionResultView[];
   readonly cursor: number;
 }
@@ -62,7 +61,7 @@ export function actionRowFor(
 
 /**
  * 结果里第一条被拒绝的动作在产物里的下标（0-based）；没有拒绝或定位不出来时 `undefined`。
- * 程序区据此给那一行标「× 拒绝」（05 §6 的 `rejected` 结论）。
+ * 画布高亮与输出区的「定位积木」据此找到那块积木（05 §6 的 `rejected` 结论）。
  */
 export function rejectedRowFor(
   artifact: PayloadArtifact | undefined,
@@ -76,7 +75,7 @@ export function rejectedRowFor(
 
 /**
  * 调试路径的偏移 `分片起点`：**服务端 `results` 的下标基准是分片起点**（04 §5），
- * 不是整份产物的起点——一次试运行会按 `MAX_ACTIONS_PER_REQUEST`（512）分片，
+ * 不是整份产物的起点——一次「运行」会按 `MAX_ACTIONS_PER_REQUEST`（512）分片，
  * 每片的 `results[i]` 说的是这一片里第 `i` 个动作。
  *
  * 控制器把游标按 `results.length`（这一片尝试过的动作数）推进，所以
@@ -91,7 +90,7 @@ export function debugOffset(results: readonly ActionResultView[], cursor: number
  * 当前该在画布上高亮的积木 id；`undefined` 表示「清掉高亮」。
  *
  * 优先级：判题结果里的被拒绝动作 → 调试结果里的被拒绝动作 → 第一条可定位的编译错误。
- * 判题那份来源表版本对不上时不猜，但也不因此挡掉编译错误的定位（程序区在两种模式下都可见）。
+ * 判题那份来源表版本对不上时不猜，但也不因此挡掉编译错误的定位（画布在两种模式下都可见）。
  */
 export function highlightBlockId(input: HighlightInput): string | undefined {
   const verdict = input.verdict;

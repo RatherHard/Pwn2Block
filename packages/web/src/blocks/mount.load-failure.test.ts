@@ -11,7 +11,7 @@ import { mountBlockly, type BlocklyBridge, type SerializedWorkspace } from './mo
  *
  * D4 实测的缺陷：`replaceWorkspace` 先 `clear()` 再 `load()`，坏 state 让 Blockly 在中途抛错，
  * 但**画布已经被清空**、且**一个通知都不发**——用户的程序凭空消失，界面还被蒙在鼓里
- * （用户会看到空画布、程序区却还是旧产物）。这就是 05 §4 最忌讳的"困惑"。
+ * （用户会看到空画布，「运行」和提交用的却还是旧产物）。这就是 05 §4 最忌讳的"困惑"。
  *
  * D5 定稿的语义：
  * - **成功**：替换画布内容，装载完成后主动通知一次（与 D4 行为一致，`mount.load.test.ts` 钉住）；

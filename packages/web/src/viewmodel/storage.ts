@@ -8,9 +8,9 @@
  * 3. 丢失 / 损坏 / 被禁用 / 写不进去，都只是「便利消失」，绝不影响做题（同 `viewmodel/hints.ts`）。
  *
  * 会话记录里除了 `sessionId` 还带上 `cursor` / `results` / `actionsLength`：调试实例的**服务端**
- * 状态能靠 `GET /api/sessions/:id` 取回，但「程序区走到第几条动作」是纯前端的指针，
- * 服务端没有这个字段（04 §1.1）。不存它就会出现「服务端执行到第 3 条、程序区还停在开头」，
- * 下一次试运行会把已经执行过的动作再提交一遍。
+ * 状态能靠 `GET /api/sessions/:id` 取回，但「执行到第几条动作」（游标）是纯前端的指针，
+ * 服务端没有这个字段（04 §1.1）。不存它就会出现「服务端执行到第 3 条、游标还停在开头」，
+ * 下一次单步会把已经执行过的动作再提交一遍。
  */
 import type { ActionResultView } from '@pwn2block/shared';
 import { isViewKind, type ViewKind } from './views';
