@@ -38,7 +38,9 @@ export class Pwn2BlockIoView extends LitElement {
         max-height: 10rem;
         overflow: auto;
       }
-      .hex .byte {
+      /* stdin 的 hex 行与字符行用同一格宽，上下逐字节对齐。 */
+      .hex .byte,
+      .stdin .byte {
         display: inline-block;
         width: 2ch;
         margin-right: 1ch;

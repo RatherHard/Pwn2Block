@@ -13,21 +13,8 @@ export const LABEL_KIND_NAMES: Readonly<Record<LabelKind, string>> = {
   custom: '自定义',
 };
 
-/** 终端风格配色：每类标注一个颜色，深色背景下都能读。 */
-export const LABEL_KIND_COLORS: Readonly<Record<LabelKind, string>> = {
-  func: '#7ee787',
-  buffer: '#79c0ff',
-  saved_bp: '#e3b341',
-  ret_addr: '#ff7b72',
-  custom: '#d2a8ff',
-};
-
 export function labelKindName(kind: LabelKind): string {
   return LABEL_KIND_NAMES[kind];
-}
-
-export function labelKindColor(kind: LabelKind): string {
-  return LABEL_KIND_COLORS[kind];
 }
 
 /** 覆盖 `addr` 的标注（左闭右开 `[addr, addr + size)`）；重叠时取第一个。 */

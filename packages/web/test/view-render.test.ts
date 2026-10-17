@@ -14,6 +14,7 @@ import '../src/components/registers-view';
 import '../src/components/memory-view';
 import '../src/components/io-view';
 import { createViewContext, type ViewContext } from '../src/viewmodel/context';
+import { rowStyles } from '../src/components/view-rows';
 import { EMPTY_DIFF, diffProjections } from '../src/viewmodel/diff';
 import { SAMPLE_FDS, SAMPLE_SYSCALLS, hexOf, makeChallenge, makeProjection, makeVma, p64 } from './helpers';
 
@@ -239,5 +240,49 @@ describe('pwndbg 风格排版（设计 §3.3）', () => {
     expect(text(syscalls[0]).startsWith('60 (0x3c) exit')).toBe(true);
     const fds = rows(view, '.fds');
     expect(text(fds[1]).startsWith('1 stdout')).toBe(true);
+  });
+
+  it('指令行：只有当前行带 aria-current，其余行不写该属性', async () => {
+    const view = await mount('pwn2block-disasm-view', contextOf(stackProjection()));
+    const list = rows(view);
+    expect(list[0]!.getAttribute('aria-current')).toBe('true');
+    expect(list.slice(1).map((row) => row.hasAttribute('aria-current'))).toEqual([false, false]);
+  });
+
+  it('寄存器：FLAGS 说明以可见文字给出，变化的标志用文字注明', async () => {
+    const base = { RSP: '0x7fffff00', RBP: '0x7fffff10', RIP: '0x400000' };
+    const before = makeProjection({ registers: base, flags: { ZF: false, CF: false, SF: false } });
+    const after = makeProjection({ registers: base, flags: { ZF: true, CF: false, SF: false } });
+    const view = await mount('pwn2block-registers-view', contextOf(after, before));
+    const list = rows(view);
+    const flags = list[list.length - 1]!;
+    expect(text(flags)).toBe('FLAGS [ ZF cf sf ]');
+    expect(flags.hasAttribute('title')).toBe(false);
+    expect(flags.querySelector('.flags')?.classList.contains('changed')).toBe(true);
+    expect(text(view.renderRoot.querySelector('.flags-note'))).toBe(
+      '大写 = 置位，小写 = 清零 · ZF 零标志（本次变化） · CF 进位标志 · SF 符号标志',
+    );
+  });
+});
+
+describe('行样式层叠（设计 §2：值着色不能被按钮基础样式盖掉）', () => {
+  // jsdom 的 getComputedStyle 不解析 shadow root 里的 <style>（实测颜色恒为 rgb(0, 0, 0)），
+  // 所以这里检查样式表结构，而不是计算后的颜色。
+  const cssText = rowStyles.cssText.replace(/\/\*[\s\S]*?\*\//g, '');
+  const selectorsWithColor = [...cssText.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter(([, , body]) => /(^|[;\s])color\s*:/.test(body!))
+    .flatMap(([, selector]) => selector!.split(',').map((item) => item.trim()));
+
+  it('行内按钮的颜色规则用 :where 降权，不出现裸 .row button', () => {
+    expect(selectorsWithColor).toContain(':where(.row) button');
+    expect(selectorsWithColor.filter((selector) => /(^|\s)\.row\b[^)]*\bbutton\b/.test(selector))).toEqual([]);
+  });
+
+  it('.changed 排在所有 .r-* 之后，同一元素上变化色优先', () => {
+    const changed = cssText.lastIndexOf('.changed');
+    for (const region of ['.r-code', '.r-stack', '.r-data', '.r-hidden']) {
+      expect(cssText.indexOf(region)).toBeGreaterThan(-1);
+      expect(cssText.lastIndexOf(region)).toBeLessThan(changed);
+    }
   });
 });

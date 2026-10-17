@@ -5,7 +5,7 @@
  * `target` 渲染成可点击的 `<win>`（不在本次反汇编窗口时给出提示）；`ip` 所在行以 `►` 开头、
  * 整行用 `--p2b-ip` 并自动滚入视野；函数列表由公开标注里 `kind = func` 的条目生成，放在命令栏。
  */
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { parseHex } from '@pwn2block/shared';
 import { buildDisasmRows, findDisasmRow, type DisasmRowModel } from '../viewmodel/disasm';
 import { formatAddrShort } from '../viewmodel/format';
@@ -25,11 +25,6 @@ export class Pwn2BlockDisasmView extends LitElement {
       .rows {
         grid-template-columns: repeat(5, max-content);
       }
-      .row.ip,
-      .row.ip .addr,
-      .row.ip .sym {
-        color: var(--p2b-ip);
-      }
       .row.focused {
         outline: 1px dashed var(--p2b-focus);
       }
@@ -48,6 +43,16 @@ export class Pwn2BlockDisasmView extends LitElement {
       button.target {
         margin-left: 1ch;
         color: var(--p2b-code);
+      }
+      /*
+       * 当前指令整行用 --p2b-ip（设计 §3.3），盖过 .addr / .sym / .dim 与跳转目标的颜色；
+       * 必须排在 .row.changed .text 之后（同为 (0,2,0)），ip 行以 ► 与 ip 色为准。
+       * 跳转目标用 :where 压到与 button.target 相同的 (0,1,1)：盖过代码色，但不盖过共享样式的悬停反显。
+       */
+      .row.ip,
+      .row.ip > *,
+      :where(.row.ip) button.target {
+        color: var(--p2b-ip);
       }
       p.dim {
         margin: 0.3rem 0 0;
@@ -123,7 +128,7 @@ export class Pwn2BlockDisasmView extends LitElement {
       .filter((item) => item.length > 0)
       .join(' ');
     return html`
-      <div class=${classes} role="listitem" aria-current=${row.isIp ? 'true' : 'false'}>
+      <div class=${classes} role="listitem" aria-current=${row.isIp ? 'true' : nothing}>
         <span class="mark">${row.isIp ? '►' : ''}</span>
         <span class="addr">${row.address}</span>
         <span class="sym">${row.symbol === undefined ? '' : `<${row.symbol}>`}</span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { valueRegion } from '../src/viewmodel/region';
+import { valueRegion, vmaRegion } from '../src/viewmodel/region';
 import { makeReader, makeProjection, makeVma } from './helpers';
 
 describe('值区域着色（pwndbg 风格）', () => {
@@ -35,5 +35,12 @@ describe('值区域着色（pwndbg 风格）', () => {
 
   it('不在任何 VMA → unmapped', () => {
     expect(valueRegion(reader, 0x10n)).toBe('unmapped');
+  });
+
+  it('vmaRegion 直接按 VMA 布局分类：隐藏优先，其次按种类', () => {
+    expect(vmaRegion({ hidden: false, kind: 'code' })).toBe('code');
+    expect(vmaRegion({ hidden: false, kind: 'stack' })).toBe('stack');
+    expect(vmaRegion({ hidden: false, kind: 'heap' })).toBe('data');
+    expect(vmaRegion({ hidden: true, kind: 'code' })).toBe('hidden');
   });
 });

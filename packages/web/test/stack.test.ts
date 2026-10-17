@@ -52,14 +52,12 @@ describe('栈视图行投影（05 §2.2）', () => {
     expect(stackRowPrefix(17, 4)).toBe('11:0044');
   });
 
-  it('labels 按类别着色并显示名称', () => {
+  it('labels 显示类别与名称（不带专属颜色：TUI 调色板每色只表一种语义）', () => {
     const rows = startRows();
     const bufRow = rows.find((row) => row.addr === 0x7fffff00n);
     const retRow = rows.find((row) => row.addr === 0x7fffff18n);
-    expect(bufRow?.label).toMatchObject({ name: 'buf', kind: 'buffer', kindName: '缓冲区' });
-    expect(retRow?.label).toMatchObject({ name: 'ret addr', kind: 'ret_addr', kindName: '返回地址' });
-    expect(bufRow?.label?.color).toMatch(/^#/);
-    expect(bufRow?.label?.color).not.toBe(retRow?.label?.color);
+    expect(bufRow?.label).toEqual({ name: 'buf', kind: 'buffer', kindName: '缓冲区' });
+    expect(retRow?.label).toEqual({ name: 'ret addr', kind: 'ret_addr', kindName: '返回地址' });
   });
 
   it('隐藏 VMA 的字节显示 ?? 并标出所属 VMA', () => {

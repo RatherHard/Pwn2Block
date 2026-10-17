@@ -33,8 +33,10 @@ export class Pwn2BlockStackView extends LitElement {
       .rows {
         grid-template-columns: repeat(6, max-content);
       }
+      /* 锚点不占语义色（黄色已表示「本次变化」，设计 §1）：前景色加粗。 */
       .anchor {
-        color: var(--p2b-changed);
+        color: var(--p2b-fg);
+        font-weight: 700;
       }
       .byte {
         display: inline-block;

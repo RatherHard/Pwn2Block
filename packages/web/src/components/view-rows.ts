@@ -56,8 +56,12 @@ export const rowStyles = css`
   .cols {
     color: var(--p2b-dim);
   }
-  /* 行内可点的值 / 目标：不撑高行，也不套 [ ]。 */
-  .row button {
+  /*
+   * 行内可点的值 / 目标：不撑高行，也不套 [ ]。
+   * 用 :where() 把特异性压到 (0,0,1)：只盖过共享样式里同为 (0,0,1) 的 button 默认色，
+   * 让 .changed / .r-* 这类单类名规则仍能给按钮着色，共享样式里的反显（hover / 按下 / 选中）也照旧生效。
+   */
+  :where(.row) button {
     min-height: 0;
     padding: 0;
     border: none;
@@ -66,16 +70,9 @@ export const rowStyles = css`
     text-align: left;
     text-decoration: underline dotted;
   }
-  .row button::before,
-  .row button::after {
+  :where(.row) button::before,
+  :where(.row) button::after {
     content: none;
-  }
-  /* 上面的规则排在共享样式之后，要把反显（hover / 按下 / 选中）显式补回来。 */
-  .row button:hover:not(:disabled),
-  .row button:active:not(:disabled),
-  .row button[aria-pressed='true'] {
-    color: var(--p2b-bg);
-    background: var(--p2b-fg);
   }
   .addr {
     color: var(--p2b-addr);
@@ -95,6 +92,7 @@ export const rowStyles = css`
   .r-hidden {
     color: var(--p2b-hidden);
   }
+  /* 必须排在 .r-* 之后：同一个值既变化又指向某区域时，变化色优先。 */
   .changed {
     color: var(--p2b-changed);
   }

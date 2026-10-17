@@ -11,10 +11,13 @@ import { sharedStyles, terminalTheme } from '../theme';
 import { regionClass, rowStyles } from './view-rows';
 import type { ViewContext } from './view-context';
 
-/** 原标志位表里的说明挪进提示：`ZF 零标志 = 1；…`，变化的标志单独注明。 */
-function flagsTitle(flags: readonly FlagRowModel[]): string {
-  const parts = flags.map((flag) => `${flag.name} ${flag.description} = ${flag.value ? 1 : 0}${flag.changed ? '（本次变化）' : ''}`);
-  return `大写表示置位，小写表示清零：${parts.join('；')}`;
+/**
+ * FLAGS 行下方的可见说明：`大写 = 置位 · ZF 零标志 · CF 进位标志 · SF 符号标志`。
+ * 变化的标志在名字后写「（本次变化）」，颜色之外还有文字（05 §7）。
+ */
+function flagsNote(flags: readonly FlagRowModel[]): string {
+  const parts = flags.map((flag) => `${flag.name} ${flag.description}${flag.changed ? '（本次变化）' : ''}`);
+  return ['大写 = 置位，小写 = 清零', ...parts].join(' · ');
 }
 
 export class Pwn2BlockRegistersView extends LitElement {
@@ -37,6 +40,9 @@ export class Pwn2BlockRegistersView extends LitElement {
       }
       .copied {
         color: var(--p2b-ip);
+      }
+      .flags-note {
+        margin: 0.2rem 0 0;
       }
     `,
   ];
@@ -62,16 +68,17 @@ export class Pwn2BlockRegistersView extends LitElement {
       </div>
       <div class="rows" role="list" aria-label="寄存器：名称、值、十进制、指向">
         ${rows.registers.map((row) => this.renderRow(row))}
-        <div class="row" role="listitem" title=${flagsTitle(rows.flags)}>
-          <span class=${changedFlags.length === 0 ? 'flags' : 'flags changed'}
-            >${changedFlags.length === 0 ? '' : '*'}${flagsLine(rows.flags)}</span>
+        <div class="row" role="listitem">
+          <span class=${changedFlags.length === 0 ? 'flags' : 'flags changed'}>${flagsLine(rows.flags)}</span>
         </div>
       </div>
+      <p class="dim flags-note">${flagsNote(rows.flags)}</p>
     `;
   }
 
   private renderRow(row: RegisterRowModel) {
-    // `.changed` 在 rowStyles 里排在 `.r-*` 之后，同时存在时变化色优先。
+    // 区域类与 `.changed` 同为单类名 (0,1,0)，rowStyles 里 `.changed` 排在 `.r-*` 之后，所以变化色优先；
+    // 行内按钮的基础样式用 `:where(.row) button` 压到 (0,0,1)，不会盖过这两类颜色。
     const valueClass = `value ${regionClass(row.region)}${row.changed ? ' changed' : ''}`;
     return html`
       <div class="row" role="listitem">

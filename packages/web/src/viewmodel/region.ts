@@ -9,11 +9,15 @@ import type { ProjectionReader } from './reader';
 
 export type ValueRegion = 'code' | 'stack' | 'data' | 'hidden' | 'unmapped';
 
+/** 已知是哪个 VMA 时直接按它的公开布局分类：隐藏优先，其次按种类。 */
+export function vmaRegion(vma: { readonly hidden: boolean; readonly kind: string }): Exclude<ValueRegion, 'unmapped'> {
+  if (vma.hidden) return 'hidden';
+  if (vma.kind === 'code') return 'code';
+  if (vma.kind === 'stack') return 'stack';
+  return 'data';
+}
+
 export function valueRegion(reader: ProjectionReader, value: bigint): ValueRegion {
   const found = reader.locate(value);
-  if (!found) return 'unmapped';
-  if (found.vma.hidden) return 'hidden';
-  if (found.vma.kind === 'code') return 'code';
-  if (found.vma.kind === 'stack') return 'stack';
-  return 'data';
+  return found ? vmaRegion(found.vma) : 'unmapped';
 }

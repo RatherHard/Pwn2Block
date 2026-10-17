@@ -11,7 +11,7 @@ import type { Label, LabelKind, Projection, Roles } from '@pwn2block/shared';
 import { parseHex } from '@pwn2block/shared';
 import { byteChanged, EMPTY_DIFF, type ProjectionDiff } from './diff';
 import { alignDown, formatAddr, printableAsciiOfBytes } from './format';
-import { labelAt, labelKindColor, labelKindName } from './labels';
+import { labelAt, labelKindName } from './labels';
 import { describePointerChain, resolvePointerChain, type PointerDescription } from './pointer';
 import { createProjectionReader, type ByteState } from './reader';
 import { valueRegion, type ValueRegion } from './region';
@@ -41,7 +41,6 @@ export interface StackRowLabel {
   readonly name: string;
   readonly kind: LabelKind;
   readonly kindName: string;
-  readonly color: string;
 }
 
 export interface StackRowModel {
@@ -102,7 +101,6 @@ function rowLabel(labels: readonly Label[] | undefined, start: bigint, end: bigi
     name: label.name,
     kind: label.kind,
     kindName: labelKindName(label.kind),
-    color: labelKindColor(label.kind),
   };
 }
 

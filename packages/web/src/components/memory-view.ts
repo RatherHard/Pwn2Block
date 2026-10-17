@@ -19,17 +19,16 @@ import {
   type VmaListRow,
 } from '../viewmodel/memory';
 import { formatSize, parseAddrInput } from '../viewmodel/format';
-import { createProjectionReader, type ProjectionReader } from '../viewmodel/reader';
-import { valueRegion } from '../viewmodel/region';
+import { vmaRegion } from '../viewmodel/region';
 import { sharedStyles, terminalTheme } from '../theme';
 import { regionClass, rowStyles } from './view-rows';
 import type { ViewContext } from './view-context';
 
 const DUMP_ROW_BYTES = 16;
 
-/** 整行着色复用 `valueRegion`：隐藏优先，其次按 VMA 种类（设计 §3.3）。 */
-function regionOf(reader: ProjectionReader | undefined, row: VmaListRow): string {
-  return reader === undefined ? '' : regionClass(valueRegion(reader, row.start));
+/** 整行着色直接取自这一行 VMA 的公开布局：隐藏优先，其次按种类（设计 §3.3）。 */
+function regionOf(row: VmaListRow): string {
+  return regionClass(vmaRegion(row));
 }
 
 export class Pwn2BlockMemoryView extends LitElement {
@@ -80,16 +79,13 @@ export class Pwn2BlockMemoryView extends LitElement {
   override render() {
     const rows = this.context === undefined ? [] : buildVmaList(this.context.projection, this.context.archBits);
     const selected = rows.find((row) => row.id === this.selectedId);
-    const reader = this.context === undefined
-      ? undefined
-      : createProjectionReader(this.context.projection, this.context.archBits);
     return html`
       <div class="cmd"><span class="dim">${rows.length} 个 VMA · 隐藏区只有布局 · 点名称看 hexdump</span></div>
       <div class="rows" role="list" aria-label="VMA：起始、结束、权限、大小、名称">
         <div class="cols" aria-hidden="true">
           <span>起始</span><span>结束</span><span>权限</span><span>大小</span><span>名称</span><span></span><span></span>
         </div>
-        ${rows.map((row) => this.renderVmaRow(row, regionOf(reader, row)))}
+        ${rows.map((row) => this.renderVmaRow(row, regionOf(row)))}
       </div>
       ${selected === undefined ? html`<p class="dim">选中一个非隐藏 VMA 以 hexdump 浏览。</p>` : this.renderDetail(selected)}
     `;
