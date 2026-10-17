@@ -33,7 +33,7 @@ describe('栈搜索实际组件', () => {
     const field = input(view, '搜索字节序列', '41 42');
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     await view.updateComplete;
-    expect(view.renderRoot.querySelector('tbody th')?.textContent?.trim()).toBe('0x0000000000001000');
+    expect(view.renderRoot.querySelector('.row .addr')?.textContent?.trim()).toBe('0x0000000000001000');
     expect(view.renderRoot.querySelector('[role="status"]')?.textContent).toContain('0x1001');
     expect(view.renderRoot.querySelector<HTMLInputElement>('[aria-label="行首对齐偏移"]')?.value).toBe('0');
   });
@@ -44,7 +44,7 @@ describe('栈搜索实际组件', () => {
     input(view, '搜索字节序列', 'AB ');
     search();
     await view.updateComplete;
-    const before = view.renderRoot.querySelector('tbody th')?.textContent;
+    const before = view.renderRoot.querySelector('.row .addr')?.textContent;
     expect(view.renderRoot.querySelector('[role="status"]')?.textContent).toContain('0x1001');
     input(view, '搜索字节序列', 'XYZ');
     search();
@@ -54,7 +54,7 @@ describe('栈搜索实际组件', () => {
     search();
     await view.updateComplete;
     expect(view.renderRoot.querySelector('[role="alert"]')?.textContent).toContain('ASCII');
-    expect(view.renderRoot.querySelector('tbody th')?.textContent).toBe(before);
+    expect(view.renderRoot.querySelector('.row .addr')?.textContent).toBe(before);
   });
 });
 
@@ -67,7 +67,7 @@ describe('栈视图对齐偏移', () => {
     });
     document.body.append(view);
     await view.updateComplete;
-    const first = () => BigInt(view.renderRoot.querySelector('tbody th')?.textContent?.trim() ?? '0');
+    const first = () => BigInt(view.renderRoot.querySelector('.row .addr')?.textContent?.trim() ?? '0');
     const before = first();
     const field = view.renderRoot.querySelector<HTMLInputElement>('[aria-label="行首对齐偏移"]');
     if (!field) throw new Error('缺少对齐输入');

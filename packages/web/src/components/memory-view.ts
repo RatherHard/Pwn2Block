@@ -1,8 +1,8 @@
 /**
- * 自由视图（05 §2.5）。
+ * 自由视图（05 §2.5，排版见 frontend-tui 设计 §3.3）。
  *
- * 列出全部 VMA 的布局（id、类别、名称、范围、权限、大小）；隐藏的标「隐藏」，
- * **只显示布局、不显示内容**；非隐藏 VMA 可选，用 hex dump 按窗口浏览。
+ * VMA 列表每行 `起始 结束 权限 大小 名称`，整行按区域着色；隐藏的标「隐藏」，
+ * **只显示布局、不显示内容**；非隐藏 VMA 可选，下方用 hexdump（`地址  16 字节  |ASCII|`）按窗口浏览。
  * 不提供任意地址读取：只能看投影里已经有的字节。
  */
 import { LitElement, css, html } from 'lit';
@@ -15,76 +15,53 @@ import {
   dumpByteLength,
   dumpMaxOffset,
   hiddenNotice,
+  type HexDumpRow,
   type VmaListRow,
 } from '../viewmodel/memory';
 import { formatSize, parseAddrInput } from '../viewmodel/format';
+import { createProjectionReader, type ProjectionReader } from '../viewmodel/reader';
+import { valueRegion } from '../viewmodel/region';
 import { sharedStyles, terminalTheme } from '../theme';
+import { regionClass, rowStyles } from './view-rows';
 import type { ViewContext } from './view-context';
 
 const DUMP_ROW_BYTES = 16;
+
+/** 整行着色复用 `valueRegion`：隐藏优先，其次按 VMA 种类（设计 §3.3）。 */
+function regionOf(reader: ProjectionReader | undefined, row: VmaListRow): string {
+  return reader === undefined ? '' : regionClass(valueRegion(reader, row.start));
+}
 
 export class Pwn2BlockMemoryView extends LitElement {
   static override styles = [
     terminalTheme,
     sharedStyles,
+    rowStyles,
     css`
-      :host {
-        display: block;
-        padding: 0.3rem 0.5rem;
+      .rows {
+        grid-template-columns: repeat(7, max-content);
       }
-      header {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        flex-wrap: wrap;
-        margin-bottom: 0.3rem;
-      }
-      tr.selected td,
-      tr.selected th {
-        color: var(--p2b-ip);
-      }
-      th.id {
-        color: var(--p2b-addr);
-        font-weight: 400;
-      }
-      button.pick {
-        background: none;
-        border: none;
-        padding: 0;
-        color: inherit;
-        cursor: pointer;
-        text-decoration: underline dotted;
-      }
-      .perm {
-        color: var(--p2b-changed);
+      .row.selected {
+        font-weight: 700;
       }
       .dump {
         margin-top: 0.5rem;
       }
-      .dump-controls {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        margin-bottom: 0.3rem;
-        flex-wrap: wrap;
+      .dump .cmd {
+        border-top: 1px solid var(--p2b-line);
+        padding-top: 0.3rem;
       }
-      .dump-controls input {
-        width: 8rem;
+      /* hexdump 每行是一段定宽原文，列间距就是文本里的空格，不走 grid。 */
+      .dump .lines {
+        overflow-x: auto;
+        font-variant-ligatures: none;
       }
-      pre {
-        margin: 0;
+      .dump .row {
+        display: block;
         white-space: pre;
-        overflow: auto;
-        max-height: 22rem;
       }
-      .ascii {
-        color: var(--p2b-dim);
-      }
-      .hidden-notice {
-        color: var(--p2b-hidden);
-      }
-      .error {
-        color: var(--p2b-error);
+      p {
+        margin: 0.3rem 0 0;
       }
     `,
   ];
@@ -103,58 +80,39 @@ export class Pwn2BlockMemoryView extends LitElement {
   override render() {
     const rows = this.context === undefined ? [] : buildVmaList(this.context.projection, this.context.archBits);
     const selected = rows.find((row) => row.id === this.selectedId);
+    const reader = this.context === undefined
+      ? undefined
+      : createProjectionReader(this.context.projection, this.context.archBits);
     return html`
-      <header>
-        <h2>自由视图</h2>
-        <span class="note">${rows.length} 个 VMA · 隐藏区只有布局</span>
-      </header>
-      <table>
-        <thead>
-          <tr>
-            <th>VMA</th>
-            <th>类别</th>
-            <th>名称</th>
-            <th>范围</th>
-            <th>权限</th>
-            <th>大小</th>
-            <th>状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => this.renderVmaRow(row))}
-        </tbody>
-      </table>
-      ${selected === undefined ? html`<p class="note">选中一个非隐藏 VMA 以 hex dump 浏览。</p>` : this.renderDetail(selected)}
+      <div class="cmd"><span class="dim">${rows.length} 个 VMA · 隐藏区只有布局 · 点名称看 hexdump</span></div>
+      <div class="rows" role="list" aria-label="VMA：起始、结束、权限、大小、名称">
+        <div class="cols" aria-hidden="true">
+          <span>起始</span><span>结束</span><span>权限</span><span>大小</span><span>名称</span><span></span><span></span>
+        </div>
+        ${rows.map((row) => this.renderVmaRow(row, regionOf(reader, row)))}
+      </div>
+      ${selected === undefined ? html`<p class="dim">选中一个非隐藏 VMA 以 hexdump 浏览。</p>` : this.renderDetail(selected)}
     `;
   }
 
-  private renderVmaRow(row: VmaListRow) {
+  private renderVmaRow(row: VmaListRow, region: string) {
     const selected = row.id === this.selectedId;
+    const classes = ['row', region, selected ? 'selected' : ''].filter((item) => item.length > 0).join(' ');
     return html`
-      <tr class=${selected ? 'selected' : ''}>
-        <th class="id" scope="row">
-          <button
-            type="button"
-            class="pick"
-            title=${row.hasContent ? '查看内容' : '隐藏区域：只显示布局'}
-            @click=${() => this.select(row)}
-          >
-            ${row.id}
-          </button>
-        </th>
-        <td>${row.kindName}</td>
-        <td>${row.label ?? ''}</td>
-        <td>${row.range}</td>
-        <td class="perm">${row.perm}</td>
-        <td>${row.sizeText}</td>
-        <td>
-          ${row.hidden
-            ? html`<span class="hidden-tag">隐藏</span>`
-            : row.hasContent
-              ? '可见'
-              : html`<span class="empty">无内容</span>`}
-        </td>
-      </tr>
+      <div class=${classes} role="listitem">
+        <span>${row.startText}</span>
+        <span>${row.endText}</span>
+        <span>${row.perm}</span>
+        <span>${row.sizeText}</span>
+        <span><button
+          type="button"
+          aria-pressed=${selected ? 'true' : 'false'}
+          title=${row.hasContent ? '查看内容' : '隐藏区域：只显示布局'}
+          @click=${() => this.select(row)}
+        >${row.id}</button></span>
+        <span class="dim">${row.label ?? ''} ${row.kindName}</span>
+        <span>${row.hidden ? '隐藏' : row.hasContent ? '' : html`<span class="dim">无内容</span>`}</span>
+      </div>
     `;
   }
 
@@ -162,14 +120,12 @@ export class Pwn2BlockMemoryView extends LitElement {
     if (!row.hasContent) {
       return html`
         <div class="dump">
-          <p class="hidden-notice">${hiddenNotice(row)}</p>
-          <p class="note">隐藏 VMA 的字节永远不会出现在响应里，也就不会出现在这里（01 §6 第 2 条）。</p>
+          <p class="r-hidden">${hiddenNotice(row)}</p>
+          <p class="dim">隐藏 VMA 的字节永远不会出现在响应里，也就不会出现在这里（01 §6 第 2 条）。</p>
         </div>
       `;
     }
     const hex = this.vmaHex(row.id);
-    const byteLength = dumpByteLength(hex);
-    const maxOffset = dumpMaxOffset(byteLength, DEFAULT_DUMP_ROWS, DUMP_ROW_BYTES);
     const dump = buildHexDump(hex, {
       baseAddr: row.start,
       byteOffset: this.dumpOffset,
@@ -178,32 +134,37 @@ export class Pwn2BlockMemoryView extends LitElement {
     });
     return html`
       <div class="dump">
-        <div class="dump-controls">
-          <strong>${row.id}</strong>
-          <button type="button" @click=${() => this.page(-1)} ?disabled=${this.dumpOffset === 0}>上一页</button>
-          <button type="button" @click=${() => this.page(1)} ?disabled=${this.dumpOffset >= maxOffset}>
-            下一页
-          </button>
-          <button type="button" @click=${() => this.setOffset(0)}>回到起点</button>
-          <label
-            >字节偏移：
-            <input
-              type="text"
-              .value=${live(`0x${this.dumpOffset.toString(16)}`)}
-              aria-label="hex dump 字节偏移"
-              @change=${(event: Event) => this.setOffsetText((event.target as HTMLInputElement).value)}
-            />
-          </label>
-          <span class="note">共 ${formatSize(BigInt(byteLength))} 字节</span>
-          ${this.offsetError.length === 0 ? '' : html`<span class="error" role="alert">${this.offsetError}</span>`}
+        ${this.renderDumpCmd(row, dumpByteLength(hex))}
+        <div class="lines" role="list" aria-label=${`${row.id} 的 hexdump：地址、16 字节、ASCII`}>
+          ${dump.map((line) => this.renderDumpLine(line))}
         </div>
-        <pre>${dump.map(
-          (line) => html`<div>
-<span class="mono-dim">${line.address}</span>  ${line.hex}  <span class="ascii">|${line.ascii}|</span>
-</div>`,
-        )}</pre>
       </div>
     `;
+  }
+
+  private renderDumpCmd(row: VmaListRow, byteLength: number) {
+    const maxOffset = dumpMaxOffset(byteLength, DEFAULT_DUMP_ROWS, DUMP_ROW_BYTES);
+    return html`
+      <div class="cmd">
+        <strong>${row.id}</strong>
+        <button type="button" @click=${() => this.page(-1)} ?disabled=${this.dumpOffset === 0}>上一页</button>
+        <button type="button" @click=${() => this.page(1)} ?disabled=${this.dumpOffset >= maxOffset}>下一页</button>
+        <button type="button" @click=${() => this.setOffset(0)}>回到起点</button>
+        <label>偏移 <input
+          type="text"
+          .value=${live(`0x${this.dumpOffset.toString(16)}`)}
+          aria-label="hex dump 字节偏移"
+          @change=${(event: Event) => this.setOffsetText((event.target as HTMLInputElement).value)}
+        /></label>
+        <span class="dim">共 ${formatSize(BigInt(byteLength))} 字节</span>
+        ${this.offsetError.length === 0 ? '' : html`<span class="error" role="alert">${this.offsetError}</span>`}
+      </div>
+    `;
+  }
+
+  /** 一行就是 `地址  16 字节  |ASCII|` 的原文：模板写在一行里，不让缩进混进文本。 */
+  private renderDumpLine(line: HexDumpRow) {
+    return html`<div class="row" role="listitem"><span class="addr">${line.address}</span>  <span>${line.hex}</span>  <span class="dim">|${line.ascii}|</span></div>`;
   }
 
   private vmaHex(id: string): string | undefined {

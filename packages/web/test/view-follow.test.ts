@@ -30,7 +30,7 @@ async function mount<K extends 'pwn2block-stack-view' | 'pwn2block-disasm-view'>
 it('新投影把 sp 所在行滚入当前主体区，界面重绘不抢回 sp', async () => {
   const { body, view } = await mount('pwn2block-stack-view');
   // 新 sp 在第 6 行，几何位置位于主体区下方。
-  const row = view.renderRoot.querySelectorAll('tbody tr')[5]!;
+  const row = view.renderRoot.querySelectorAll('.row')[5]!;
   vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 380, bottom: 400 } as DOMRect);
   const next = makeProjection({ registers: { RSP: '0x7fffff08', RBP: '0x7fffff10', RIP: '0x400001' }, steps: 1 });
   // 手动窗口保持不变，让新 sp 移入第 6 行。
@@ -51,24 +51,24 @@ it('新投影把 sp 所在行滚入当前主体区，界面重绘不抢回 sp', 
 
 it('手动点指令目标后，新投影恢复 ip 跟随；只滚主体区，不滚整页', async () => {
   const { body, view } = await mount('pwn2block-disasm-view');
-  const rows = view.renderRoot.querySelectorAll('tbody tr');
+  const rows = view.renderRoot.querySelectorAll('.row');
   vi.spyOn(rows[1]!, 'getBoundingClientRect').mockReturnValue({ top: 380, bottom: 400 } as DOMRect);
   vi.spyOn(rows[2]!, 'getBoundingClientRect').mockReturnValue({ top: 480, bottom: 500 } as DOMRect);
   view.renderRoot.querySelector<HTMLButtonElement>('.target')!.click();
   await view.updateComplete;
-  expect(view.renderRoot.querySelector('tr.focused')?.textContent).toContain('target');
+  expect(view.renderRoot.querySelector('.row.focused')?.textContent).toContain('target');
   vi.mocked(body.scrollTo).mockClear();
   view.context = { ...context, projection: { ...initial, steps: 1, registers: initial.registers.map((reg) =>
     reg.name === 'RIP' ? { ...reg, value: '0x400001' } : reg) } };
   await view.updateComplete;
-  expect(view.renderRoot.querySelector('tr.focused')).toBeNull();
+  expect(view.renderRoot.querySelector('.row.focused')).toBeNull();
   expect(body.scrollTo).toHaveBeenCalledWith({ top: 100 });
 });
 
 it('栈搜索跳转后将第一行滚回主体区视野，而不是留下旧滚动位置', async () => {
   const { body, view } = await mount('pwn2block-stack-view');
   body.scrollTop = 200;
-  vi.spyOn(view.renderRoot.querySelector('tbody tr')!, 'getBoundingClientRect')
+  vi.spyOn(view.renderRoot.querySelector('.row')!, 'getBoundingClientRect')
     .mockReturnValue({ top: -100, bottom: -80 } as DOMRect);
   const input = view.renderRoot.querySelector<HTMLInputElement>('[aria-label="搜索字节序列"]')!;
   input.value = 'c9 c3';
@@ -87,7 +87,7 @@ function ipMoved() {
 it('隐藏的视图不滚动', async () => {
   const { body, view } = await mount('pwn2block-disasm-view');
   body.hidden = true;
-  const row = view.renderRoot.querySelectorAll('tbody tr')[1]!;
+  const row = view.renderRoot.querySelectorAll('.row')[1]!;
   vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 380, bottom: 400 } as DOMRect);
   view.context = { ...context, projection: ipMoved() };
   await view.updateComplete;
@@ -98,14 +98,14 @@ it('切回标签时补做跟随滚动', async () => {
   const { body, view } = await mount('pwn2block-disasm-view');
   view.active = false;
   await view.updateComplete;
-  const row = view.renderRoot.querySelectorAll('tbody tr')[1]!;
+  const row = view.renderRoot.querySelectorAll('.row')[1]!;
   vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 380, bottom: 400 } as DOMRect);
   view.context = { ...context, projection: ipMoved() };
   await view.updateComplete;
   expect(body.scrollTo).not.toHaveBeenCalled();
   view.active = true;
   await view.updateComplete;
-  expect(view.renderRoot.querySelector('tr.ip')).toBe(row);
+  expect(view.renderRoot.querySelector('.row.ip')).toBe(row);
   expect(body.scrollTo).toHaveBeenCalledTimes(1);
   expect(body.scrollTo).toHaveBeenCalledWith({ top: 100 });
 });
@@ -121,7 +121,7 @@ it('栈视图切回标签时补做跟随：滚到 sp 行', async () => {
   view.active = false;
   await view.updateComplete;
   vi.mocked(body.scrollTo).mockClear();
-  const row = view.renderRoot.querySelectorAll('tbody tr')[5]!;
+  const row = view.renderRoot.querySelectorAll('.row')[5]!;
   vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 380, bottom: 400 } as DOMRect);
   const next = makeProjection({ registers: { RSP: '0x7fffff08', RBP: '0x7fffff10', RIP: '0x400001' }, steps: 1 });
   view.context = { ...context, projection: next };

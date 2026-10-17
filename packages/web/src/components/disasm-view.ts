@@ -1,9 +1,9 @@
 /**
- * 指令视图（05 §2.3）。
+ * 指令视图（05 §2.3，排版见 frontend-tui 设计 §3.3）。
  *
- * 三列：地址、机器码、伪汇编。数据直接来自投影 `disasm`，**前端不解码**。
- * `target` 可点击跳转（不在本次反汇编窗口时给出提示）；`ip` 所在行高亮并自动滚入视野；
- * 函数列表由公开标注里 `kind = func` 的条目生成。
+ * 每行 `► 0x400000 <vuln+0>  <机器码>  <伪汇编>`。数据直接来自投影 `disasm`，**前端不解码**。
+ * `target` 渲染成可点击的 `<win>`（不在本次反汇编窗口时给出提示）；`ip` 所在行以 `►` 开头、
+ * 整行用 `--p2b-ip` 并自动滚入视野；函数列表由公开标注里 `kind = func` 的条目生成，放在命令栏。
  */
 import { LitElement, css, html } from 'lit';
 import { parseHex } from '@pwn2block/shared';
@@ -12,6 +12,7 @@ import { formatAddrShort } from '../viewmodel/format';
 import { funcLabels } from '../viewmodel/labels';
 import { roleValue } from '../viewmodel/roles';
 import { sharedStyles, terminalTheme } from '../theme';
+import { rowStyles } from './view-rows';
 import { scrollRowInBody } from './view-scroll';
 import type { ViewContext } from './view-context';
 
@@ -19,54 +20,37 @@ export class Pwn2BlockDisasmView extends LitElement {
   static override styles = [
     terminalTheme,
     sharedStyles,
+    rowStyles,
     css`
-      :host {
-        display: block;
-        padding: 0.3rem 0.5rem;
+      .rows {
+        grid-template-columns: repeat(5, max-content);
       }
-      header {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        flex-wrap: wrap;
-        margin-bottom: 0.3rem;
-      }
-      .funcs {
-        display: flex;
-        gap: 0.3rem;
-        flex-wrap: wrap;
-      }
-      tr.ip th,
-      tr.ip td {
+      .row.ip,
+      .row.ip .addr,
+      .row.ip .sym {
         color: var(--p2b-ip);
       }
-      tr.ip th.addr::before {
-        content: '▶ ';
-        color: var(--p2b-ip);
-      }
-      tr.focused td,
-      tr.focused th {
+      .row.focused {
         outline: 1px dashed var(--p2b-focus);
       }
-      tr.changed td {
+      .row.changed .text {
         color: var(--p2b-changed);
       }
-      th.addr {
-        color: var(--p2b-addr);
-        font-weight: 400;
+      .sym {
+        color: var(--p2b-code);
       }
-      td.bytes {
-        color: var(--p2b-dim);
+      .mark {
+        width: 1ch;
       }
-      td.text {
+      .text {
         white-space: pre;
       }
       button.target {
-        padding: 0 0.3rem;
-        margin-left: 0.4rem;
+        margin-left: 1ch;
+        color: var(--p2b-code);
       }
-      .error {
-        color: var(--p2b-error);
+      p.dim {
+        margin: 0.3rem 0 0;
       }
     `,
   ];
@@ -93,55 +77,45 @@ export class Pwn2BlockDisasmView extends LitElement {
     const notice = this.context?.disasmNotice;
     if (notice !== undefined) {
       return html`
-        <header>
-          <h2>指令视图</h2>
-        </header>
         <p class="error" role="status" aria-live="polite">${notice}</p>
-        <p class="note">
+        <p class="dim">
           录像帧不带逐帧反汇编（09 §3.4），代码段在回放中被改写后无法保证这一帧的指令；
           前端不解码，也不会继续显示过期反汇编（03 §4）。回放里的寄存器与栈视图不受影响。
         </p>
       `;
     }
     const rows = this.disasmRows();
-    const funcs = funcLabels(this.context?.labels);
     return html`
-      <header>
-        <h2>指令视图</h2>
-        <span class="note">${rows.length} 条 · 伪汇编来自服务端投影</span>
-        ${funcs.length === 0
-          ? ''
-          : html`<span class="funcs">函数：
-              ${funcs.map(
-                (label) =>
-                  html`<button type="button" @click=${() => this.jumpTo(parseHex(label.addr))}>
-                    ${label.name}
-                  </button>`,
-              )}
-            </span>`}
-        ${this.focusMiss.length === 0 ? '' : html`<span class="error" role="alert">${this.focusMiss}</span>`}
-      </header>
-      <table>
-        <thead>
-          <tr>
-            <th>地址</th>
-            <th>机器码</th>
-            <th>伪汇编</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => this.renderRow(row))}
-        </tbody>
-      </table>
-      <p class="note">
+      ${this.renderCmd(rows.length)}
+      <div class="rows" role="list" aria-label="指令：地址、符号、机器码、伪汇编">
+        ${rows.map((row) => this.renderRow(row))}
+      </div>
+      <p class="dim">
         没有断点：想停在某条指令前，用「运行 N 步」冲过去再 step_back 倒回来，或者点上面的跳转目标。
       </p>
     `;
   }
 
+  private renderCmd(count: number) {
+    const funcs = funcLabels(this.context?.labels);
+    return html`
+      <div class="cmd">
+        <span class="dim">${count} 条 · 伪汇编来自服务端投影</span>
+        ${funcs.length === 0
+          ? ''
+          : html`<span class="dim">函数</span>
+              ${funcs.map(
+                (label) =>
+                  html`<button type="button" @click=${() => this.jumpTo(parseHex(label.addr))}>${label.name}</button>`,
+              )}`}
+        ${this.focusMiss.length === 0 ? '' : html`<span class="error" role="alert">${this.focusMiss}</span>`}
+      </div>
+    `;
+  }
+
   private renderRow(row: DisasmRowModel) {
-    const target = row.target;
     const classes = [
+      'row',
       row.isIp ? 'ip' : '',
       this.focusedAddr === row.addr ? 'focused' : '',
       row.changed ? 'changed' : '',
@@ -149,24 +123,25 @@ export class Pwn2BlockDisasmView extends LitElement {
       .filter((item) => item.length > 0)
       .join(' ');
     return html`
-      <tr class=${classes}>
-        <th class="addr" scope="row">${row.address}</th>
-        <td class="bytes">${row.bytesText}</td>
-        <td class="text">
-          ${row.text}
-          ${target === undefined
-            ? ''
-            : html`<button
-                type="button"
-                class="target"
-                title="跳到 ${formatAddrShort(target)}"
-                @click=${() => this.jumpTo(target)}
-              >
-                → ${row.targetText}
-              </button>`}
-        </td>
-      </tr>
+      <div class=${classes} role="listitem" aria-current=${row.isIp ? 'true' : 'false'}>
+        <span class="mark">${row.isIp ? '►' : ''}</span>
+        <span class="addr">${row.address}</span>
+        <span class="sym">${row.symbol === undefined ? '' : `<${row.symbol}>`}</span>
+        <span class="dim">${row.bytesText}</span>
+        <span class="text">${row.text}${this.renderTarget(row)}</span>
+      </div>
     `;
+  }
+
+  private renderTarget(row: DisasmRowModel) {
+    const target = row.target;
+    if (target === undefined) return '';
+    return html`<button
+      type="button"
+      class="target"
+      title="跳到 ${formatAddrShort(target)}"
+      @click=${() => this.jumpTo(target)}
+    >&lt;${row.targetText}&gt;</button>`;
   }
 
   private disasmRows(): readonly DisasmRowModel[] {
@@ -215,7 +190,7 @@ export class Pwn2BlockDisasmView extends LitElement {
     // 只有切回标签与同投影的 context 变化落在同一次更新里时才起作用：否则下一行不会提前返回。
     const reactivated = changed.get('active') === false;
     if (!reactivated && changed.has('context') && previous?.projection === this.context?.projection) return;
-    const selector = this.focusedAddr === undefined ? 'tr.ip' : 'tr.focused';
+    const selector = this.focusedAddr === undefined ? '.row.ip' : '.row.focused';
     scrollRowInBody(this, this.renderRoot.querySelector(selector));
   }
 }

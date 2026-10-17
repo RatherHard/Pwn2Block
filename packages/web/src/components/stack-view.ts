@@ -12,8 +12,15 @@ import { live } from 'lit/directives/live.js';
 import { alignDown, formatAddrShort, parseAddrInput } from '../viewmodel/format';
 import { searchVisibleBytes, type ByteSearchMode } from '../viewmodel/search';
 import { roleValue } from '../viewmodel/roles';
-import { buildStackRows, findRowIndex, refollowBase, type StackRowModel } from '../viewmodel/stack';
+import {
+  buildStackRows,
+  findRowIndex,
+  refollowBase,
+  type StackByteCell,
+  type StackRowModel,
+} from '../viewmodel/stack';
 import { sharedStyles, terminalTheme } from '../theme';
+import { regionClass, rowStyles } from './view-rows';
 import { scrollRowInBody } from './view-scroll';
 import type { ViewContext } from './view-context';
 
@@ -21,73 +28,34 @@ export class Pwn2BlockStackView extends LitElement {
   static override styles = [
     terminalTheme,
     sharedStyles,
+    rowStyles,
     css`
-      :host {
-        display: block;
-        padding: 0.3rem 0.5rem;
-      }
-      header {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-        margin-bottom: 0.3rem;
-      }
-      .jump input {
-        width: 9rem;
-      }
-      table {
-        font-variant-ligatures: none;
-      }
-      tr.changed td,
-      tr.changed th {
-        color: var(--p2b-changed);
-      }
-      th.addr {
-        color: var(--p2b-addr);
-        font-weight: 400;
+      .rows {
+        grid-template-columns: repeat(6, max-content);
       }
       .anchor {
         color: var(--p2b-changed);
       }
       .byte {
         display: inline-block;
-        width: 1.7ch;
-        text-align: center;
+        width: 2ch;
+        margin-right: 1ch;
+      }
+      .byte:last-child {
+        margin-right: 0;
       }
       .byte.hidden {
         color: var(--p2b-hidden);
-      }
-      .byte.unmapped {
-        color: var(--p2b-dim);
       }
       .byte.changed {
         color: var(--p2b-changed);
         font-weight: 700;
       }
-      .ascii {
-        color: var(--p2b-dim);
-      }
       .label {
-        font-weight: 600;
+        font-weight: 700;
       }
-      .note-cell {
-        color: var(--p2b-dim);
-      }
-      .note-cell .arrows {
-        color: var(--p2b-fg);
-      }
-      .note-cell .hidden-tag {
-        color: var(--p2b-hidden);
-      }
-      .legend {
-        display: flex;
-        gap: 0.8rem;
-        margin-top: 0.3rem;
-        color: var(--p2b-dim);
-      }
-      .error {
-        color: var(--p2b-error);
+      p.dim {
+        margin: 0.3rem 0 0;
       }
     `,
   ];
@@ -122,110 +90,95 @@ export class Pwn2BlockStackView extends LitElement {
   }
 
   override render() {
-    const rows = this.rows();
-    const sp = this.spValue();
-    const following = this.jumpBase === undefined;
     return html`
-      <header>
-        <h2>栈视图</h2>
-        <span class="note">每行 ${this.wordBytes()} 字节 · ${following ? '跟随 sp' : `已跳到 ${formatAddrShort(this.baseAddr())}`}</span>
-        <span class="jump">
-          <label>跳转：<input
-            type="text"
-            .value=${this.inputText}
-            placeholder="0x7fffff00"
-            aria-label="跳转到地址"
-            @input=${(event: Event) => {
-              this.inputText = (event.target as HTMLInputElement).value;
-            }}
-            @keydown=${(event: KeyboardEvent) => {
-              if (event.key === 'Enter') this.jump();
-            }}
-          /></label>
-          <button type="button" @click=${() => this.jump()}>跳转</button>
-          <button type="button" @click=${() => this.jumpTo(sp)}>跳到 sp</button>
-          <button type="button" @click=${() => this.followSp()} ?disabled=${following}>跟随 sp</button>
-        </span>
-        <label
-          >对齐偏移：
-          <input
-            type="number"
-            min="0"
-            max=${this.wordBytes() - 1}
-            .value=${live(String(this.alignOffset))}
-            aria-label="行首对齐偏移"
-            @change=${(event: Event) => this.setAlign((event.target as HTMLInputElement).value)}
-          />
-        </label>
-        ${this.inputError.length > 0 ? html`<span class="error" role="alert">${this.inputError}</span>` : ''}
-      </header>
-      <div class="search">
-        <label>字节搜索：<input
-          aria-label="搜索字节序列" placeholder="41 42"
-          @input=${(event: Event) => { this.searchText = (event.target as HTMLInputElement).value; }}
-          @keydown=${(event: KeyboardEvent) => { if (event.key === 'Enter') this.search(); }}
-        /></label>
-        <select aria-label="搜索编码" @change=${(event: Event) => {
-          this.searchMode = (event.target as HTMLSelectElement).value === 'ascii' ? 'ascii' : 'hex';
-        }}>
-          <option value="hex">hex</option><option value="ascii">ASCII</option>
-        </select>
-        <button type="button" @click=${() => this.search()}>搜索</button>
-        <span class=${this.searchInvalid ? 'error' : 'note'} role=${this.searchInvalid ? 'alert' : 'status'}>${this.searchMessage}</span>
+      <div class="cmd">${this.renderJump()} ${this.renderSearch()}</div>
+      <div class="rows" role="list" aria-label="栈：行号:偏移、锚点、地址、字节、指针链、标注">
+        ${this.rows().map((row) => this.renderRow(row))}
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>地址</th>
-            <th>锚点</th>
-            <th>字节</th>
-            <th>ASCII</th>
-            <th>标注</th>
-            <th>附注</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => this.renderRow(row))}
-        </tbody>
-      </table>
-      <p class="legend">
-        <span class="hidden-tag">?? = 隐藏 VMA（内容未下发）</span>
-        <span>空白 = 未映射</span>
-        <span class="changed">黄色 = 本次投影变化的字节</span>
-      </p>
+      <p class="dim">?? = 隐藏 VMA（内容未下发） · 空白 = 未映射 · 黄色 = 本次投影变化的字节</p>
     `;
   }
 
-  private renderRow(row: StackRowModel) {
-    const chain = row.chain;
+  private renderJump() {
+    const following = this.jumpBase === undefined;
     return html`
-      <tr data-row=${row.index} class=${`${row.changed ? 'changed' : ''} ${row.anchors.some((anchor) => anchor.role === 'sp') ? 'sp' : ''}`}>
-        <th class="addr" scope="row">${row.address}</th>
-        <td class="anchor">
-          ${row.anchors.map((anchor) => (anchor.role ? `${anchor.role} (${anchor.name})` : anchor.name)).join(' ')}
-        </td>
-        <td class="bytes">
-          ${row.cells.map((cell) => {
-            const text = cell.text.length === 0 ? '\u00a0' : cell.text;
-            const classes = `byte ${cell.state}${cell.changed ? ' changed' : ''}`;
-            return html`<span class=${classes} title=${cell.vmaId ?? '未映射'}>${text}</span>`;
-          })}
-        </td>
-        <td class="ascii">${row.ascii === undefined ? '' : `|${row.ascii}|`}</td>
-        <td class="label" style=${row.label === undefined ? '' : `color:${row.label.color}`}>
-          ${row.label === undefined ? '' : `${row.label.kindName}：${row.label.name}`}
-        </td>
-        <td class="note-cell">
-          ${chain === undefined
-            ? ''
-            : html`<span class="arrows">${chain.arrows}</span>
-                ${chain.annotation === undefined ? '' : ` ${chain.annotation}`}`}
-          ${row.hiddenVmaIds.length === 0
-            ? ''
-            : html`<span class="hidden-tag"> 隐藏 VMA「${row.hiddenVmaIds.join('、')}」</span>`}
-        </td>
-      </tr>
+      <span class="dim">每行 ${this.wordBytes()} 字节 · ${following ? '跟随 sp' : `已跳到 ${formatAddrShort(this.baseAddr())}`}</span>
+      <label>跳转 <input
+        type="text"
+        .value=${this.inputText}
+        placeholder="0x7fffff00"
+        aria-label="跳转到地址"
+        @input=${(event: Event) => {
+          this.inputText = (event.target as HTMLInputElement).value;
+        }}
+        @keydown=${(event: KeyboardEvent) => {
+          if (event.key === 'Enter') this.jump();
+        }}
+      /></label>
+      <button type="button" @click=${() => this.jump()}>跳转</button>
+      <button type="button" @click=${() => this.jumpTo(this.spValue())}>跳到 sp</button>
+      <button type="button" @click=${() => this.followSp()} ?disabled=${following}>跟随 sp</button>
+      <label>对齐 <input
+        type="number"
+        min="0"
+        max=${this.wordBytes() - 1}
+        .value=${live(String(this.alignOffset))}
+        aria-label="行首对齐偏移"
+        @change=${(event: Event) => this.setAlign((event.target as HTMLInputElement).value)}
+      /></label>
+      ${this.inputError.length > 0 ? html`<span class="error" role="alert">${this.inputError}</span>` : ''}
     `;
+  }
+
+  private renderSearch() {
+    return html`
+      <label>搜索 <input
+        aria-label="搜索字节序列" placeholder="41 42"
+        @input=${(event: Event) => { this.searchText = (event.target as HTMLInputElement).value; }}
+        @keydown=${(event: KeyboardEvent) => { if (event.key === 'Enter') this.search(); }}
+      /></label>
+      <select aria-label="搜索编码" @change=${(event: Event) => {
+        this.searchMode = (event.target as HTMLSelectElement).value === 'ascii' ? 'ascii' : 'hex';
+      }}>
+        <option value="hex">hex</option><option value="ascii">ASCII</option>
+      </select>
+      <button type="button" @click=${() => this.search()}>搜索</button>
+      <span class=${this.searchInvalid ? 'error' : 'dim'} role=${this.searchInvalid ? 'alert' : 'status'}>${this.searchMessage}</span>
+    `;
+  }
+
+  /** `NN:OOOO│ <锚点> <地址>  <W 个字节>  <链/附注>  <标注名>`（设计 §3.3）。 */
+  private renderRow(row: StackRowModel) {
+    const isSp = row.anchors.some((anchor) => anchor.role === 'sp');
+    return html`
+      <div class=${isSp ? 'row sp' : 'row'} role="listitem" data-row=${row.index}>
+        <span class="dim">${row.prefix}│</span>
+        <span class="anchor">${row.anchors.map((anchor) => (anchor.role ? `${anchor.role} (${anchor.name})` : anchor.name)).join(' ')}</span>
+        <span class="addr">${row.address}</span>
+        <span class=${`value ${regionClass(row.region)}`}>${row.cells.map((cell) => this.renderCell(cell))}</span>
+        <span>${this.renderNote(row)}</span>
+        <span class="label">${row.label === undefined ? '' : `${row.label.kindName}：${row.label.name}`}</span>
+      </div>
+    `;
+  }
+
+  /** 未映射的字节格留空（不换成任何字符），宽度由 CSS 的 2ch 撑住。 */
+  private renderCell(cell: StackByteCell) {
+    const classes = `byte ${cell.state}${cell.changed ? ' changed' : ''}`;
+    return html`<span class=${classes} title=${cell.vmaId ?? '未映射'}>${cell.text}</span>`;
+  }
+
+  /** 指针链优先；不像指针时退到本行可打印 ASCII；隐藏字节只标所属 VMA，不给内容。 */
+  private renderNote(row: StackRowModel) {
+    const chain = row.chain;
+    const hidden = row.hiddenVmaIds.length === 0
+      ? ''
+      : html` <span class="r-hidden">隐藏 VMA「${row.hiddenVmaIds.join('、')}」</span>`;
+    if (chain !== undefined) {
+      const annotation = chain.annotation === undefined ? '' : html` <span class="dim">${chain.annotation}</span>`;
+      return html`${chain.arrows}${annotation}${hidden}`;
+    }
+    return html`${row.ascii === undefined ? '' : html`<span class="dim">'${row.ascii}'</span>`}${hidden}`;
   }
 
   private wordBytes(): number {
