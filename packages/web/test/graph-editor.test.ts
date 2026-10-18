@@ -13,7 +13,9 @@ import {
   paste,
   pruneConnections,
   redo,
+  groupSelection,
   removeNodes,
+  ungroup,
   reorder,
   select,
   setParam,
@@ -324,5 +326,48 @@ describe('容器折叠（只改布局）', () => {
     expect(setCollapsed(state, 'run', true)).toBe(state);
     const folded = setCollapsed(state, 'if', true);
     expect(setCollapsed(folded, 'if', true)).toBe(folded);
+  });
+});
+
+describe('分组（只改布局）', () => {
+  function twoNodes() {
+    return createEditor(
+      workflow({
+        nodes: [wfNode('hex', NODE.hex, { hex: '41' }), wfNode('run', NODE.run), wfNode('feed', NODE.feed)],
+        edges: [],
+        main: ['hex', 'run'],
+      }),
+    );
+  }
+
+  it('分组不涨语义版本，解组后节点原样保留', () => {
+    const base = twoNodes();
+    const result = groupSelection({ ...base, selection: ['hex', 'run'] });
+    if (!result.ok) throw new Error(result.message);
+    const grouped = result.state;
+    expect(grouped.semanticRevision).toBe(base.semanticRevision);
+    expect(grouped.layoutRevision).toBe(base.layoutRevision + 1);
+    expect(grouped.document.groups?.[0]?.members).toEqual(['hex', 'run']);
+    expect(grouped.document.main).toEqual(base.document.main);
+
+    const ungrouped = ungroup(grouped, grouped.document.groups?.[0]?.id ?? '');
+    expect(ungrouped.document.groups).toEqual([]);
+    expect(ungrouped.document.nodes.map((node) => node.id)).toEqual(base.document.nodes.map((node) => node.id));
+  });
+
+  it('少于两个节点时拒绝分组', () => {
+    const base = twoNodes();
+    const result = groupSelection({ ...base, selection: ['hex'] });
+    expect(result.ok).toBe(false);
+  });
+
+  it('删掉节点后自动裁掉悬空成员，空组消失', () => {
+    const base = twoNodes();
+    const result = groupSelection({ ...base, selection: ['hex', 'run'] });
+    if (!result.ok) throw new Error(result.message);
+    const removed = removeNodes(result.state, ['hex']);
+    expect(removed.document.groups?.[0]?.members).toEqual(['run']);
+    const emptied = removeNodes(removed, ['run']);
+    expect(emptied.document.groups).toEqual([]);
   });
 });

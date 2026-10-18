@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { NODE } from '@pwn2block/shared';
 import type { PortContext } from '@pwn2block/shared';
-import { addNode, connect, createEditor, setCollapsed } from '../src/graph/editor';
+import { addNode, connect, createEditor, groupSelection, setCollapsed } from '../src/graph/editor';
 import type { GraphEditorState } from '../src/graph/editor';
 import type { GraphEdit, Pwn2BlockGraphCanvas } from '../src/components/graph-canvas';
 import '../src/components/graph-canvas';
@@ -206,5 +206,22 @@ describe('容器折叠与缩放简化', () => {
     canvas.setZoom(0.4);
     await canvas.updateComplete;
     expect(canvas.shadowRoot?.querySelector('.subtitle')).toBeNull();
+  });
+});
+
+describe('分组框', () => {
+  it('分组画出虚线框与名字，成员都折叠隐藏时不画', async () => {
+    const base = createEditor(
+      workflow({
+        nodes: [wfNode('hex', NODE.hex, { hex: '41' }), wfNode('run', NODE.run)],
+        edges: [],
+        main: ['hex', 'run'],
+      }),
+    );
+    const result = groupSelection({ ...base, selection: ['hex', 'run'] });
+    if (!result.ok) throw new Error(result.message);
+    const canvas = await mount(result.state);
+    expect(canvas.shadowRoot?.querySelector('[data-group]')).not.toBeNull();
+    expect(canvas.shadowRoot?.textContent ?? '').toContain('组 1');
   });
 });

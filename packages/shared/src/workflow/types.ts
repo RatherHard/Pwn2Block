@@ -112,6 +112,16 @@ export interface GraphModule {
   readonly layout: Readonly<Record<string, NodeLayout>>;
 }
 
+/**
+ * 画布上的分组（06 §3）：只是把若干节点框在一起便于阅读，**不改变执行顺序、不进入编译**，
+ * 因此增删分组只涨布局版本。一个节点最多属于一个分组。
+ */
+export interface GraphGroup {
+  readonly id: string;
+  readonly name: string;
+  readonly members: readonly string[];
+}
+
 export interface GraphDocument {
   readonly format: typeof WORKFLOW_FORMAT;
   readonly version: number;
@@ -119,6 +129,7 @@ export interface GraphDocument {
   readonly connections: readonly GraphConnection[];
   readonly main: readonly string[];
   readonly layout: Readonly<Record<string, NodeLayout>>;
+  readonly groups?: readonly GraphGroup[];
   /** 用户在当前图里定义的模块；调用节点按 id + 版本引用它们。 */
   readonly modules?: readonly GraphModule[];
 }

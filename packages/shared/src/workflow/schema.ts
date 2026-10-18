@@ -76,6 +76,12 @@ export const GraphModuleSchema = z.strictObject({
   ...ModuleBodySchema,
 });
 
+export const GraphGroupSchema = z.strictObject({
+  id: z.string().regex(NODE_ID_RE),
+  name: z.string().min(1).max(40),
+  members: z.array(z.string().regex(NODE_ID_RE)).min(1).max(256),
+});
+
 export const GraphDocumentSchema = z.strictObject({
   format: z.literal(WORKFLOW_FORMAT),
   version: z.number().int().min(1),
@@ -83,6 +89,7 @@ export const GraphDocumentSchema = z.strictObject({
   connections: z.array(GraphConnectionSchema).max(WORKFLOW_MAX_CONNECTIONS),
   main: z.array(z.string().regex(NODE_ID_RE)).max(WORKFLOW_MAX_REGION_ITEMS),
   layout: z.record(z.string(), NodeLayoutSchema).default({}),
+  groups: z.array(GraphGroupSchema).max(128).default([]),
   modules: z.array(GraphModuleSchema).max(WORKFLOW_MAX_MODULES).default([]),
 });
 

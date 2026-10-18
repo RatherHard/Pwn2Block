@@ -24,6 +24,7 @@ import { compileGraph } from '../workflow/compile';
 import { checkParam } from '../workflow/params';
 import { lookupGraph } from '../workflow/document';
 import { extractModule } from '../graph/extract';
+import { groupSelection, ungroup } from '../graph/editor';
 import { upgradeModule, upgradeTargetOf } from '../graph/module-upgrade';
 import { exportDocument, importDocument } from '../graph/transfer';
 import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
@@ -247,6 +248,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
         >编译</button>
         <button ?disabled=${state.past.length === 0} @click=${() => this.setEditor(undo(state))}>撤销</button>
         <button ?disabled=${state.future.length === 0} @click=${() => this.setEditor(redo(state))}>重做</button>
+        ${state.selection.length < 2
+          ? nothing
+          : html`<button @click=${() => this.run((editor) => groupSelection(editor))}>分组</button>`}
         ${state.selection.length === 0
           ? nothing
           : html`<button @click=${() => this.extractSelection()}>提取为模块</button>`}
@@ -311,7 +315,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
           )}
         </section>`,
       )}
-      ${this.renderModules()}
+      ${this.renderModules()} ${this.renderGroups()}
     </aside>`;
   }
 
@@ -346,6 +350,20 @@ export class Pwn2BlockGraphPanel extends LitElement {
               }),
             )}
         >${module.name} v${module.version}</button>`,
+      )}
+    </section>`;
+  }
+
+  /** 已建的分组：只列名字与解组入口；分组是布局，改它不需要重新编译。 */
+  private renderGroups() {
+    const groups = this.editor.document.groups ?? [];
+    if (groups.length === 0) return nothing;
+    return html`<section class="modules">
+      <h3>分组</h3>
+      ${groups.map(
+        (group) => html`<button data-group=${group.id} @click=${() => this.setEditor(ungroup(this.editor, group.id))}
+          >${group.name} · ${group.members.length} 个节点（解组）</button
+        >`,
       )}
     </section>`;
   }

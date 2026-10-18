@@ -665,7 +665,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
         @dblclick=${this.onDoubleClick}
       >
         <g transform=${viewportTransform(this.viewport)}>
-          ${this.renderRegions()}
+          ${this.renderGroups()} ${this.renderRegions()}
           ${this.renderExecEdges(state, placement)} ${this.renderDataEdges(state, placement)}
           ${this.boxRect === undefined
             ? nothing
@@ -680,6 +680,33 @@ export class Pwn2BlockGraphCanvas extends LitElement {
   }
 
   /** 区域框画在连线与节点下面：嵌套时由外向内排，命中取最内层。 */
+  /**
+   * 分组框（06 §3）：只按当前可见节点算外框，成员全被折叠隐藏时整组不画。
+   * 它是纯显示，不参与命中测试，也不会改变执行顺序。
+   */
+  private renderGroups(): unknown {
+    const state = this.state;
+    if (state === undefined) return nothing;
+    const groups = state.document.groups ?? [];
+    if (groups.length === 0) return nothing;
+    const boxes = new Map(this.boxes().map((box) => [box.id, box]));
+    return groups.map((group) => {
+      const members = group.members.flatMap((id) => {
+        const box = boxes.get(id);
+        return box === undefined ? [] : [box];
+      });
+      if (members.length === 0) return nothing;
+      const left = Math.min(...members.map((box) => box.x)) - 16;
+      const top = Math.min(...members.map((box) => box.y)) - 28;
+      const right = Math.max(...members.map((box) => box.x + box.width)) + 16;
+      const bottom = Math.max(...members.map((box) => box.y + box.height)) + 14;
+      return svg`<g data-group=${group.id}>
+        <rect class="group" x=${left} y=${top} width=${right - left} height=${bottom - top} rx="10" />
+        <text class="grouplabel" x=${left + 10} y=${top + 16}>${truncate(group.name, 20)}</text>
+      </g>`;
+    });
+  }
+
   private renderRegions(): unknown {
     return this.frames().map(
       (frame) => svg`<g class="region" data-region=${frame.nodeId} data-region-name=${frame.region}>

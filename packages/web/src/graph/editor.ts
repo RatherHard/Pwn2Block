@@ -3,6 +3,7 @@ import type {
   GraphConnection,
   GraphDocument,
   GraphNode,
+  GraphGroup,
   NodeLayout,
   ParamValue,
   ParamValues,
@@ -63,6 +64,16 @@ export function createEditor(document: GraphDocument): GraphEditorState {
 }
 
 /** 用给定命令修改文档；自动记撤销栈、清空重做栈、递增对应修订号。 */
+/** 分组只引用存在的节点：删节点、提取模块后自动裁掉空分组与悬空成员。 */
+function pruneGroups(document: GraphDocument): GraphDocument {
+  if (document.groups === undefined || document.groups.length === 0) return document;
+  const ids = new Set(document.nodes.map((node) => node.id));
+  const groups = document.groups
+    .map((group) => ({ ...group, members: group.members.filter((id) => ids.has(id)) }))
+    .filter((group) => group.members.length > 0);
+  return { ...document, groups };
+}
+
 function apply(
   state: GraphEditorState,
   document: GraphDocument,
@@ -70,10 +81,11 @@ function apply(
   selection: readonly string[] = state.selection,
 ): GraphEditorState {
   const historyKind = kind === 'layout' ? 'layout' : 'semantic';
+  const pruned = pruneGroups(document);
   return {
     ...state,
-    document,
-    selection: selection.filter((id) => document.nodes.some((node) => node.id === id)),
+    document: pruned,
+    selection: selection.filter((id) => pruned.nodes.some((node) => node.id === id)),
     semanticRevision: historyKind === 'semantic' ? state.semanticRevision + 1 : state.semanticRevision,
     layoutRevision: historyKind === 'layout' ? state.layoutRevision + 1 : state.layoutRevision,
     past: kind === 'reset' ? state.past : [...state.past, state.document].slice(-MAX_HISTORY),
@@ -542,6 +554,37 @@ export function moveOut(state: GraphEditorState, nodeIds: readonly string[]): Gr
     document = withRegion(withRegion(document, regionPath, without), parentPath, nextOwner);
   }
   return document === state.document ? state : apply(state, document, 'semantic', nodeIds);
+}
+
+/** 分组：把选中的节点框在一起。只改布局，不碰执行顺序与编译产物。 */
+export function groupSelection(state: GraphEditorState): EditResult {
+  const members = state.selection.filter(
+    (id) => id !== 'start' && state.document.nodes.some((node) => node.id === id),
+  );
+  if (members.length < 2) return { ok: false, message: '先选至少两个节点再分组' };
+  const rest = (state.document.groups ?? []).map((group) => ({
+    ...group,
+    members: group.members.filter((id) => !members.includes(id)),
+  }));
+  const kept = rest.filter((group) => group.members.length > 0);
+  const groups = [...kept, { id: nextGroupId(state.document, kept), name: `组 ${kept.length + 1}`, members }];
+  return { ok: true, state: apply(state, { ...state.document, groups }, 'layout', members) };
+}
+
+/** 解组：只删分组框，节点与连线原样保留。 */
+export function ungroup(state: GraphEditorState, groupId: string): GraphEditorState {
+  const groups = (state.document.groups ?? []).filter((group) => group.id !== groupId);
+  if (groups.length === (state.document.groups ?? []).length) return state;
+  return apply(state, { ...state.document, groups }, 'layout');
+}
+
+function nextGroupId(document: GraphDocument, groups: readonly GraphGroup[]): string {
+  const taken = new Set(groups.map((group) => group.id));
+  for (let index = 1; index < 1000; index += 1) {
+    const candidate = `group${index}`;
+    if (!taken.has(candidate) && !document.nodes.some((node) => node.id === candidate)) return candidate;
+  }
+  return `group-${Date.now().toString(36)}`;
 }
 
 /** 用一份新文档替换当前文档（提取模块、导入等整块编辑共用入口）。 */
