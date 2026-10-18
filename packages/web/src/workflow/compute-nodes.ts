@@ -5,6 +5,7 @@ import {
   cyclicSequence,
   hexToBytes,
   nodeInputs,
+  nodeSpec,
   nodeOutput,
   NODE,
   PYTHON_MAX_EVALS_PER_COMPILE,
@@ -12,6 +13,7 @@ import {
 import type { EncodedValue, GraphNode, NodeKindSpec, PortType } from '@pwn2block/shared';
 import { addr, concat, int, padding, string, wordBytes, ByteBuildError } from '../compiler/bytes';
 import { paramsOf } from './document';
+import { findVar } from './context';
 import { report, type EvalContext, type ValueResult } from './context';
 import { MAX_INT_BITS } from './params';
 import type { PreviewSegment, PythonEvalResult, WorkflowValue } from './types';
@@ -26,12 +28,7 @@ import type { PreviewSegment, PythonEvalResult, WorkflowValue } from './types';
 
 /** 求值器提供给节点计算的回调（避免与本模块的递归依赖）。 */
 export interface EvalHelpers {
-  readonly resolve: (
-    node: GraphNode,
-    spec: NodeKindSpec,
-    port: string,
-    path: readonly string[],
-  ) => Promise<ValueResult>;
+  readonly resolve: (node: GraphNode, spec: NodeKindSpec, port: string) => Promise<ValueResult>;
   /** 内部值 → 传输编码（Python 节点的输入）。 */
   readonly encode: (value: WorkflowValue) => EncodedValue;
 }
@@ -77,10 +74,9 @@ async function intInput(
   node: GraphNode,
   spec: NodeKindSpec,
   port: string,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<bigint | undefined> {
-  const result = await helpers.resolve(node, spec, port, path);
+  const result = await helpers.resolve(node, spec, port);
   return expectType(ctx, node, port, result, 'int', '整数')?.value;
 }
 
@@ -89,10 +85,9 @@ async function bytesInput(
   node: GraphNode,
   spec: NodeKindSpec,
   port: string,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<Uint8Array | undefined> {
-  const result = await helpers.resolve(node, spec, port, path);
+  const result = await helpers.resolve(node, spec, port);
   return expectType(ctx, node, port, result, 'bytes', '字节')?.bytes;
 }
 
@@ -101,10 +96,9 @@ async function boolInput(
   node: GraphNode,
   spec: NodeKindSpec,
   port: string,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<boolean | undefined> {
-  const result = await helpers.resolve(node, spec, port, path);
+  const result = await helpers.resolve(node, spec, port);
   return expectType(ctx, node, port, result, 'bool', '布尔')?.value;
 }
 
@@ -113,10 +107,9 @@ async function textInput(
   node: GraphNode,
   spec: NodeKindSpec,
   port: string,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<string | undefined> {
-  const result = await helpers.resolve(node, spec, port, path);
+  const result = await helpers.resolve(node, spec, port);
   return expectType(ctx, node, port, result, 'text', '文本')?.text;
 }
 
@@ -124,43 +117,48 @@ export function computeNode(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   switch (node.kind) {
     case NODE.fill:
-      return computeFill(ctx, node, spec, path, helpers);
+      return computeFill(ctx, node, spec, helpers);
     case NODE.text:
-      return computeText(ctx, node, spec, path, helpers);
+      return computeText(ctx, node, spec, helpers);
     case NODE.hex:
       // 可以直接填 hex，也可以由别的字节节点接线：两种都走同一条输入解析。
-      return helpers.resolve(node, spec, 'hex', path);
+      return helpers.resolve(node, spec, 'hex');
     case NODE.int:
-      return computeInt(ctx, node, spec, path, helpers);
+      return computeInt(ctx, node, spec, helpers);
     case NODE.address:
-      return computeAddress(ctx, node, spec, path, helpers);
+      return computeAddress(ctx, node, spec, helpers);
     case NODE.concat:
-      return computeConcat(ctx, node, spec, path, helpers);
+      return computeConcat(ctx, node, spec, helpers);
     case NODE.arith:
-      return computeArith(ctx, node, spec, path, helpers);
+      return computeArith(ctx, node, spec, helpers);
     case NODE.compare:
-      return computeCompare(ctx, node, spec, path, helpers);
+      return computeCompare(ctx, node, spec, helpers);
     case NODE.logic:
-      return computeLogic(ctx, node, spec, path, helpers);
+      return computeLogic(ctx, node, spec, helpers);
     case NODE.bytesToInt:
-      return computeBytesToInt(ctx, node, spec, path, helpers);
+      return computeBytesToInt(ctx, node, spec, helpers);
     case NODE.slice:
-      return computeSlice(ctx, node, spec, path, helpers);
+      return computeSlice(ctx, node, spec, helpers);
     case NODE.assemble:
-      return computeAssemble(ctx, node, spec, path, helpers);
+      return computeAssemble(ctx, node, spec, helpers);
     case NODE.select:
-      return computeSelect(ctx, node, spec, path, helpers);
+      return computeSelect(ctx, node, spec, helpers);
     case NODE.cyclic:
-      return computeCyclic(ctx, node, spec, path, helpers);
+      return computeCyclic(ctx, node, spec, helpers);
     case NODE.find:
-      return computeFind(ctx, node, spec, path, helpers);
+      return computeFind(ctx, node, spec, helpers);
     case NODE.python:
-      return computePython(ctx, node, spec, path, helpers);
+      return computePython(ctx, node, spec, helpers);
+    case NODE.varGet:
+      return Promise.resolve(computeVarGet(ctx, node));
+    case NODE.index:
+      return Promise.resolve(computeIndex(ctx, node));
+    case NODE.accumulator:
+      return Promise.resolve(computeAccumulator(ctx, node));
     default:
       return Promise.resolve(report(ctx, 'eval_failed', node.id, `节点 ${spec.label} 不是数据节点，无法求值`));
   }
@@ -170,12 +168,11 @@ async function computeFill(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const byte = await intInput(ctx, node, spec, 'byte', path, helpers);
+  const byte = await intInput(ctx, node, spec, 'byte', helpers);
   if (byte === undefined) return { ok: false };
-  const count = await intInput(ctx, node, spec, 'count', path, helpers);
+  const count = await intInput(ctx, node, spec, 'count', helpers);
   if (count === undefined) return { ok: false };
   if (byte < 0n || byte > 0xffn) {
     return report(ctx, 'invalid_param', node.id, `填充字节必须在 0x00..0xff 之间，收到 ${byte}`);
@@ -209,10 +206,9 @@ async function computeText(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const text = await textInput(ctx, node, spec, 'text', path, helpers);
+  const text = await textInput(ctx, node, spec, 'text', helpers);
   if (text === undefined) return { ok: false };
   const encoding = typeof node.params.encoding === 'string' ? node.params.encoding : 'utf-8';
   if (!(ENCODINGS as readonly string[]).includes(encoding)) {
@@ -226,12 +222,11 @@ async function computeInt(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const value = await intInput(ctx, node, spec, 'value', path, helpers);
+  const value = await intInput(ctx, node, spec, 'value', helpers);
   if (value === undefined) return { ok: false };
-  const width = await intInput(ctx, node, spec, 'width', path, helpers);
+  const width = await intInput(ctx, node, spec, 'width', helpers);
   if (width === undefined) return { ok: false };
   const endian = node.params.endian === 'big' ? 'big' : 'little';
   const out = guard(ctx, node, () => int(value, Number(width), endian));
@@ -242,10 +237,9 @@ async function computeAddress(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const value = await intInput(ctx, node, spec, 'value', path, helpers);
+  const value = await intInput(ctx, node, spec, 'value', helpers);
   if (value === undefined) return { ok: false };
   const out = guard(ctx, node, () => addr(value, wordBytes(ctx.workflow.archBits)));
   return out === undefined ? { ok: false } : bytesOf(out);
@@ -255,7 +249,6 @@ async function computeConcat(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   const segments: PreviewSegment[] = [];
@@ -264,7 +257,7 @@ async function computeConcat(
   let offset = 0;
   for (let index = 0; index < count; index += 1) {
     const port = `item${index}`;
-    const bytes = await bytesInput(ctx, node, spec, port, path, helpers);
+    const bytes = await bytesInput(ctx, node, spec, port, helpers);
     if (bytes === undefined) return { ok: false };
     segments.push({ port, offset, length: bytes.length });
     parts.push(bytes);
@@ -295,15 +288,14 @@ async function computeArith(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   const op = typeof node.params.op === 'string' ? node.params.op : 'ADD';
   const operation = ARITHMETIC[op];
   if (operation === undefined) return report(ctx, 'invalid_param', node.id, `未知运算 ${op}`);
-  const a = await intInput(ctx, node, spec, 'a', path, helpers);
+  const a = await intInput(ctx, node, spec, 'a', helpers);
   if (a === undefined) return { ok: false };
-  const b = await intInput(ctx, node, spec, 'b', path, helpers);
+  const b = await intInput(ctx, node, spec, 'b', helpers);
   if (b === undefined) return { ok: false };
   if ((op === 'DIVIDE' || op === 'MOD') && b === 0n) {
     return report(ctx, 'eval_failed', node.id, `${op === 'DIVIDE' ? '整除' : '取余'}的除数是 0`);
@@ -322,13 +314,12 @@ async function computeCompare(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   const op = typeof node.params.op === 'string' ? node.params.op : 'EQ';
-  const a = await intInput(ctx, node, spec, 'a', path, helpers);
+  const a = await intInput(ctx, node, spec, 'a', helpers);
   if (a === undefined) return { ok: false };
-  const b = await intInput(ctx, node, spec, 'b', path, helpers);
+  const b = await intInput(ctx, node, spec, 'b', helpers);
   if (b === undefined) return { ok: false };
   const result =
     op === 'EQ'
@@ -352,14 +343,13 @@ async function computeLogic(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   const op = typeof node.params.op === 'string' ? node.params.op : 'AND';
-  const a = await boolInput(ctx, node, spec, 'a', path, helpers);
+  const a = await boolInput(ctx, node, spec, 'a', helpers);
   if (a === undefined) return { ok: false };
   if (op === 'NOT') return { ok: true, value: { kind: 'bool', value: !a } };
-  const b = await boolInput(ctx, node, spec, 'b', path, helpers);
+  const b = await boolInput(ctx, node, spec, 'b', helpers);
   if (b === undefined) return { ok: false };
   const result = op === 'AND' ? a && b : op === 'OR' ? a || b : op === 'XOR' ? a !== b : undefined;
   if (result === undefined) return report(ctx, 'invalid_param', node.id, `未知逻辑运算 ${op}`);
@@ -370,12 +360,11 @@ async function computeBytesToInt(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const bytes = await bytesInput(ctx, node, spec, 'bytes', path, helpers);
+  const bytes = await bytesInput(ctx, node, spec, 'bytes', helpers);
   if (bytes === undefined) return { ok: false };
-  const width = await intInput(ctx, node, spec, 'width', path, helpers);
+  const width = await intInput(ctx, node, spec, 'width', helpers);
   if (width === undefined) return { ok: false };
   const size = Number(width);
   if (!Number.isInteger(size) || size < 1 || size > 8) {
@@ -402,14 +391,13 @@ async function computeSlice(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const bytes = await bytesInput(ctx, node, spec, 'bytes', path, helpers);
+  const bytes = await bytesInput(ctx, node, spec, 'bytes', helpers);
   if (bytes === undefined) return { ok: false };
-  const offset = await intInput(ctx, node, spec, 'offset', path, helpers);
+  const offset = await intInput(ctx, node, spec, 'offset', helpers);
   if (offset === undefined) return { ok: false };
-  const length = await intInput(ctx, node, spec, 'length', path, helpers);
+  const length = await intInput(ctx, node, spec, 'length', helpers);
   if (length === undefined) return { ok: false };
   if (offset < 0n || length < 0n) {
     return report(ctx, 'eval_failed', node.id, `截取需要非负的偏移与长度，收到 ${offset} / ${length}`);
@@ -431,7 +419,6 @@ async function computeAssemble(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   const count = Number(node.params.count ?? 2);
@@ -440,7 +427,7 @@ async function computeAssemble(
   const segments: PreviewSegment[] = [];
 
   for (let index = 0; index < count; index += 1) {
-    const offset = await intInput(ctx, node, spec, `offset${index}`, path, helpers);
+    const offset = await intInput(ctx, node, spec, `offset${index}`, helpers);
     if (offset === undefined) return { ok: false };
     if (offset < 0n || offset > 0x100000n) {
       return report(
@@ -450,7 +437,7 @@ async function computeAssemble(
         `第 ${index + 1} 段偏移必须在 0..0x100000 之间，收到 ${offset}`,
       );
     }
-    const bytes = await bytesInput(ctx, node, spec, `item${index}`, path, helpers);
+    const bytes = await bytesInput(ctx, node, spec, `item${index}`, helpers);
     if (bytes === undefined) return { ok: false };
     placed.push({ offset: Number(offset), bytes });
     segments.push({ port: `item${index}`, offset: Number(offset), length: bytes.length });
@@ -481,23 +468,21 @@ async function computeSelect(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const condition = await boolInput(ctx, node, spec, 'cond', path, helpers);
+  const condition = await boolInput(ctx, node, spec, 'cond', helpers);
   if (condition === undefined) return { ok: false };
   // 只求值被选中的候选值：没被选中的分支即使有错（甚至要跑 Python）也不该执行。
-  return helpers.resolve(node, spec, condition ? 'a' : 'b', path);
+  return helpers.resolve(node, spec, condition ? 'a' : 'b');
 }
 
 async function computeCyclic(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const length = await intInput(ctx, node, spec, 'length', path, helpers);
+  const length = await intInput(ctx, node, spec, 'length', helpers);
   if (length === undefined) return { ok: false };
   if (length < 0n) return report(ctx, 'invalid_param', node.id, `长度不能为负，收到 ${length}`);
   const alphabet = alphabetOf(typeof node.params.alphabet === 'string' ? node.params.alphabet : 'lower');
@@ -509,10 +494,9 @@ async function computeFind(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
-  const needle = await bytesInput(ctx, node, spec, 'needle', path, helpers);
+  const needle = await bytesInput(ctx, node, spec, 'needle', helpers);
   if (needle === undefined) return { ok: false };
   if (needle.length === 0) {
     return report(ctx, 'eval_failed', node.id, '要找的字节是空的：定位序列里空串没有唯一偏移');
@@ -534,7 +518,6 @@ async function computePython(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
   helpers: EvalHelpers,
 ): Promise<ValueResult> {
   const evaluator = ctx.workflow.python;
@@ -557,7 +540,7 @@ async function computePython(
   const ports = nodeInputs(spec, paramsOf(node, spec), ctx.portContext);
   const inputs: { name: string; type: PortType; value: EncodedValue }[] = [];
   for (const port of ports) {
-    const result = await helpers.resolve(node, spec, port.name, path);
+    const result = await helpers.resolve(node, spec, port.name);
     if (!result.ok) return result;
     inputs.push({ name: port.name, type: port.type, value: helpers.encode(result.value) });
   }
@@ -605,4 +588,84 @@ function decodeEncoded(value: EncodedValue): WorkflowValue | undefined {
     case 'text':
       return { kind: 'text', text: value.text };
   }
+}
+
+// ---------------------------------------------------------------------------
+// 变量、循环下标与累计值（06 §5.3、§5.4）
+// ---------------------------------------------------------------------------
+
+/** 读当前作用域可见的变量；没声明就是错误，不返回空值。 */
+function computeVarGet(ctx: EvalContext, node: GraphNode): ValueResult {
+  const name = typeof node.params.name === 'string' ? node.params.name.trim() : '';
+  const type = typeParamOf(node);
+  const found = findVar(ctx.scope, name);
+  if (found === undefined) {
+    return report(
+      ctx,
+      'undeclared_variable',
+      node.id,
+      `变量「${name || '（未命名）'}」在这里没有声明：只能在声明之后、同一层或内层读取（06 §5.4）`,
+    );
+  }
+  if (found.binding.type !== type) {
+    return report(
+      ctx,
+      'variable_type_mismatch',
+      node.id,
+      `变量「${name}」是${found.binding.type}，但节点按${type}读取`,
+    );
+  }
+  return { ok: true, value: found.binding.value };
+}
+
+/** 当前轮下标：由节点**所在**的最近一层循环决定，所以嵌套循环里能各取各的。 */
+function computeIndex(ctx: EvalContext, node: GraphNode): ValueResult {
+  const loop = nearestLoopOf(ctx, node.id);
+  if (loop === undefined) {
+    return report(ctx, 'index_outside_loop', node.id, '「循环下标」只能放在循环体里使用（06 §5.3）');
+  }
+  const round = ctx.loops.get(loop);
+  if (round === undefined) {
+    return report(ctx, 'eval_failed', node.id, '「循环下标」只能在循环执行时取值');
+  }
+  return intOf(BigInt(round));
+}
+
+/** 本轮开始时的累计值；第一轮就是循环的初始值，零次循环时结果也等于初始值。 */
+function computeAccumulator(ctx: EvalContext, node: GraphNode): ValueResult {
+  const loop = nearestLoopOf(ctx, node.id);
+  if (loop === undefined) {
+    return report(ctx, 'eval_failed', node.id, '「累计值」只能放在循环体里使用');
+  }
+  const value = ctx.accumulators.get(loop);
+  if (value === undefined) {
+    return report(ctx, 'eval_failed', node.id, '「累计值」只能在循环执行时取值');
+  }
+  const type = typeParamOf(node);
+  if (value.kind !== type) {
+    return report(
+      ctx,
+      'variable_type_mismatch',
+      node.id,
+      `循环的累计值是${value.kind}，但节点按${type}读取`,
+    );
+  }
+  return { ok: true, value };
+}
+
+/** 节点最近的循环容器 id：沿放置路径由内向外找。 */
+export function nearestLoopOf(ctx: EvalContext, nodeId: string): string | undefined {
+  const placement = ctx.lookup.placements.get(nodeId);
+  if (placement === undefined) return undefined;
+  for (let index = placement.path.length - 1; index >= 1; index -= 1) {
+    const containerId = placement.path[index]?.split('/')[0] ?? '';
+    const container = ctx.lookup.nodes.get(containerId);
+    if (container !== undefined && nodeSpec(container.kind)?.loop === true) return containerId;
+  }
+  return undefined;
+}
+
+function typeParamOf(node: GraphNode): 'int' | 'bool' | 'bytes' | 'text' {
+  const raw = node.params.type;
+  return raw === 'bool' || raw === 'bytes' || raw === 'text' ? raw : 'int';
 }

@@ -16,12 +16,14 @@ import type {
   PrimitiveAction,
   WorkflowIssue,
 } from '@pwn2block/shared';
+import { execControl, isControlKind, type ExecSink, type FlowSignal } from './control';
 import { paramsOf } from './document';
 import { createEvalContext, evalNodeValue, resolveInput, type EvalContext } from './evaluate';
 import type {
   CompileGraphInput,
   CompileOutcome,
   CompileTraceEntry,
+  CompiledAction,
   NodePreview,
   WorkflowArtifact,
   WorkflowOrigin,
@@ -29,47 +31,50 @@ import type {
 import { WORKFLOW_ORIGIN_VERSION } from './types';
 import { validateGraph } from './validate';
 
-/** 编译产物里的动作：与现有动作协议一致（8 类原子动作 + 出题人积木）。 */
-type CompiledAction = PrimitiveAction | BlockAction;
-
 /**
  * 图 → 动作序列（06 §2「流程先完成数据计算…再生成动作序列」；07 §3「图编译」）。
  *
  * 契约：
- * - **只产出动作**：编译期求完所有数据，得到的就是现有动作协议里的原子动作；
- *   VM、投影、判题完全不用改，服务端仍做权限校验并从初态判题（01 §4）。
+ * - **只产出动作**：编译期求完所有数据、展开分支/循环/模块，得到的就是现有动作协议里的
+ *   原子动作；VM、投影、判题完全不用改，服务端仍做权限校验并从初态判题（01 §4）。
  * - **要么完整产物、要么带节点的错误**：任何一处失败都不发布部分动作（07 §P1）。
  * - **不推进 VM**：编译只算数据，`feed` / `step` / `run` 只是被排进序列（06 §2）。
- * - **可取消**：每个语句之间检查取消信号；取消返回 `cancelled`，不产生产物。
+ * - **可取消**：每个语句之前检查取消信号；取消返回 `cancelled`，不产生产物。
  * - 纯异步函数：不读 DOM、不读时间（Python 结果由注入的求值器提供）。
  */
+
+/** 编译被取消：用异常穿透嵌套执行，外层统一转成 `cancelled` 问题。 */
+class CompileCancelled extends Error {
+  constructor(readonly nodeId: string) {
+    super('编译已取消');
+  }
+}
+
 export async function compileGraph(input: CompileGraphInput): Promise<CompileOutcome> {
   const validation = validateGraph(input.document, input.context);
   if (!validation.ok) return { ok: false, issues: validation.errors };
 
   const ctx = createEvalContext(input.document, input.context, validation.lookup);
-  const actions: CompiledAction[] = [];
-  const origins: WorkflowOrigin[] = [];
-  const trace: CompileTraceEntry[] = [];
+  const sink: ExecSink = { actions: [], origins: [], trace: [] };
 
-  for (const nodeId of input.document.main) {
-    if (input.signal?.aborted === true) {
-      return { ok: false, issues: [cancelledIssue(nodeId)] };
+  try {
+    const signal = await execSequence(ctx, input.document.main, ['main'], sink, input.signal);
+    if (signal !== undefined) {
+      ctx.issues.push({
+        code: signal === 'break' ? 'break_outside_loop' : 'continue_outside_loop',
+        severity: 'error',
+        nodeId: '',
+        message: `「${signal === 'break' ? '跳出循环' : '继续下一轮'}」只能出现在循环体内（06 §5.3）`,
+      });
     }
-    const node = validation.lookup.nodes.get(nodeId);
-    if (node === undefined) continue;
-    const spec = nodeSpec(node.kind);
-    if (spec === undefined) continue;
-    if (node.kind === 'start') continue;
-
-    const before = ctx.issues.length;
-    await compileStatement(ctx, node, spec, actions, origins, trace);
-    if (ctx.issues.length > before) {
-      return { ok: false, issues: [...ctx.issues] };
-    }
+  } catch (error) {
+    if (error instanceof CompileCancelled) return { ok: false, issues: [cancelledIssue(error.nodeId)] };
+    throw error;
   }
 
-  if (actions.length > MAX_SUBMIT_ACTIONS) {
+  if (ctx.issues.length > 0) return { ok: false, issues: [...ctx.issues] };
+
+  if (sink.actions.length > MAX_SUBMIT_ACTIONS) {
     return {
       ok: false,
       issues: [
@@ -77,18 +82,18 @@ export async function compileGraph(input: CompileGraphInput): Promise<CompileOut
           code: 'limit_exceeded',
           severity: 'error',
           nodeId: '',
-          message: `动作数 ${actions.length} 超过上限 ${MAX_SUBMIT_ACTIONS}，一次提交发不出去（04 §6）`,
+          message: `动作数 ${sink.actions.length} 超过上限 ${MAX_SUBMIT_ACTIONS}，一次提交发不出去（04 §6）`,
         },
       ],
     };
   }
 
   const artifact: WorkflowArtifact = {
-    actions,
-    origins,
+    actions: sink.actions,
+    origins: sink.origins,
     originsVersion: WORKFLOW_ORIGIN_VERSION,
     previews: collectPreviews(ctx),
-    trace,
+    trace: sink.trace,
     documentRevision: input.documentRevision,
   };
   return { ok: true, artifact, warnings: validation.warnings };
@@ -104,56 +109,79 @@ function cancelledIssue(nodeId: string): WorkflowIssue {
 }
 
 /**
- * 编译一个语句节点；数据节点放在执行位置上时只求值、不产生动作
- * （放在循环体里可以按轮次重算，见 06 §5.3）。
+ * 执行一层语句序列。返回循环控制信号（`break` / `continue` 由内向外冒泡），
+ * 容器自己决定是消费信号（循环）还是继续往外传（分支）。
  */
-async function compileStatement(
+async function execSequence(
   ctx: EvalContext,
-  node: GraphNode,
-  spec: NodeKindSpec,
-  actions: CompiledAction[],
-  origins: WorkflowOrigin[],
-  trace: CompileTraceEntry[],
-): Promise<void> {
-  const path = ctx.lookup.placements.get(node.id)?.path ?? ['main'];
-  if (!spec.exec) {
-    await evalNodeValue(ctx, node.id, path);
-    const summary = ctx.previews.get(node.id)?.summary ?? '';
-    trace.push({ nodeId: node.id, path, message: `求值 ${spec.label}：${summary}` });
-    return;
-  }
+  ids: readonly string[],
+  path: readonly string[],
+  sink: ExecSink,
+  cancel: AbortSignal | undefined,
+): Promise<FlowSignal> {
+  for (const nodeId of ids) {
+    if (cancel?.aborted === true) throw new CompileCancelled(nodeId);
+    const node = ctx.lookup.nodes.get(nodeId);
+    if (node === undefined) continue;
+    const spec = nodeSpec(node.kind);
+    if (spec === undefined) continue;
+    if (node.kind === 'start') continue;
+    // 「结果」不是语句：它由所在区域执行完后统一读取（06 §5.2）。
+    if (node.kind === NODE.result) continue;
 
-  const action = await buildAction(ctx, node, spec, path);
-  if (action === undefined) return;
-  actions.push(action);
-  origins.push({ index: actions.length - 1, nodeId: node.id, path });
-  trace.push({ nodeId: node.id, path, message: `动作 ${action.type}` });
+    if (isControlKind(node.kind)) {
+      const flow = await execControl(ctx, node, spec, path, {
+        sink,
+        execSequence: (members, nested) => execSequence(ctx, members, nested, sink, cancel),
+      });
+      if (flow !== undefined) return flow;
+      continue;
+    }
+
+    if (!spec.exec) {
+      const result = await evalNodeValue(ctx, nodeId);
+      if (result.ok) {
+        const summary = ctx.previews.get(nodeId)?.summary ?? '';
+        trace(sink, nodeId, path, `求值 ${spec.label}：${summary}`, ctx);
+      }
+      continue;
+    }
+
+    const action = await buildAction(ctx, node, spec);
+    if (action === undefined) continue;
+    sink.actions.push(action);
+    sink.origins.push(originOf(sink, nodeId, path, ctx));
+    trace(sink, nodeId, path, `动作 ${action.type}`, ctx);
+  }
+  return undefined;
 }
 
-/** 单个动作的字节上限：与请求体上限同一量级，避免拼出一个发不出去的 payload。 */
+/** 一次动作的字节上限：与请求体上限同一量级，避免拼出一个发不出去的 payload。 */
 const MAX_ACTION_BYTES = 512 * 1024;
+
+/** 轨迹上限：循环多时轨迹会很长，界面只需要最近的一段。 */
+const MAX_TRACE_ENTRIES = 256;
 
 async function buildAction(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
 ): Promise<CompiledAction | undefined> {
   switch (node.kind) {
     case NODE.feed: {
-      const bytes = await inputBytes(ctx, node, spec, 'data', path);
+      const bytes = await inputBytes(ctx, node, spec, 'data');
       if (bytes === undefined) return undefined;
       return { type: 'feed', hex: bytesToHex(bytes) } satisfies PrimitiveAction;
     }
     case NODE.write: {
-      const address = await inputNonNegative(ctx, node, spec, 'addr', path, '目标地址');
+      const address = await inputNonNegative(ctx, node, spec, 'addr', '目标地址');
       if (address === undefined) return undefined;
-      const bytes = await inputBytes(ctx, node, spec, 'data', path);
+      const bytes = await inputBytes(ctx, node, spec, 'data');
       if (bytes === undefined) return undefined;
       return { type: 'write_bytes', addr: formatHex(address), hex: bytesToHex(bytes) } satisfies PrimitiveAction;
     }
     case NODE.push: {
-      const value = await inputNonNegative(ctx, node, spec, 'value', path, '压栈的值');
+      const value = await inputNonNegative(ctx, node, spec, 'value', '压栈的值');
       if (value === undefined) return undefined;
       return { type: 'push', value: formatHex(value) } satisfies PrimitiveAction;
     }
@@ -162,12 +190,12 @@ async function buildAction(
     case NODE.ret:
       return { type: 'ret' } satisfies PrimitiveAction;
     case NODE.call: {
-      const address = await inputNonNegative(ctx, node, spec, 'addr', path, '调用地址');
+      const address = await inputNonNegative(ctx, node, spec, 'addr', '调用地址');
       if (address === undefined) return undefined;
       return { type: 'call', addr: formatHex(address) } satisfies PrimitiveAction;
     }
     case NODE.step: {
-      const count = await inputNonNegative(ctx, node, spec, 'count', path, '指令数');
+      const count = await inputNonNegative(ctx, node, spec, 'count', '指令数');
       if (count === undefined) return undefined;
       const value = Number(count);
       if (value < 1 || value > MAX_STEP_COUNT) {
@@ -176,7 +204,7 @@ async function buildAction(
       return { type: 'step', count: value } satisfies PrimitiveAction;
     }
     case NODE.run: {
-      const maxSteps = await inputNonNegative(ctx, node, spec, 'maxSteps', path, '最多指令数');
+      const maxSteps = await inputNonNegative(ctx, node, spec, 'maxSteps', '最多指令数');
       if (maxSteps === undefined) return undefined;
       const value = Number(maxSteps);
       if (value < 1 || value > MAX_RUN_MAX_STEPS) {
@@ -185,7 +213,7 @@ async function buildAction(
       return { type: 'run', maxSteps: value } satisfies PrimitiveAction;
     }
     case NODE.author:
-      return buildAuthorAction(ctx, node, spec, path);
+      return buildAuthorAction(ctx, node, spec);
     default:
       return fail(ctx, node, `节点 ${spec.label} 是数据节点，不能直接执行`);
   }
@@ -201,9 +229,8 @@ async function inputBytes(
   node: GraphNode,
   spec: NodeKindSpec,
   port: string,
-  path: readonly string[],
 ): Promise<Uint8Array | undefined> {
-  const result = await resolveInput(ctx, node, spec, port, path);
+  const result = await resolveInput(ctx, node, spec, port);
   if (!result.ok) return undefined;
   if (result.value.kind !== 'bytes') {
     ctx.issues.push({
@@ -231,10 +258,9 @@ async function inputNonNegative(
   node: GraphNode,
   spec: NodeKindSpec,
   port: string,
-  path: readonly string[],
   label: string,
 ): Promise<bigint | undefined> {
-  const result = await resolveInput(ctx, node, spec, port, path);
+  const result = await resolveInput(ctx, node, spec, port);
   if (!result.ok) return undefined;
   if (result.value.kind !== 'int') {
     ctx.issues.push({
@@ -265,7 +291,6 @@ async function buildAuthorAction(
   ctx: EvalContext,
   node: GraphNode,
   spec: NodeKindSpec,
-  path: readonly string[],
 ): Promise<CompiledAction | undefined> {
   const id = typeof node.params.id === 'string' ? node.params.id : '';
   const block = (ctx.workflow.authorBlocks ?? []).find((candidate) => candidate.id === id);
@@ -276,7 +301,7 @@ async function buildAuthorAction(
   for (const param of block.params) {
     const port = ports.find((candidate) => candidate.name === param.name);
     if (port === undefined) return fail(ctx, node, `出题人积木 ${id} 的参数 ${param.name} 没有对应的输入口`);
-    const result = await resolveInput(ctx, node, spec, param.name, path);
+    const result = await resolveInput(ctx, node, spec, param.name);
     if (!result.ok) return undefined;
     if (param.type === 'bytes') {
       if (result.value.kind !== 'bytes') return fail(ctx, node, `参数 ${param.name} 需要字节`);
@@ -294,6 +319,44 @@ async function buildAuthorAction(
   return action;
 }
 
+function originOf(
+  sink: ExecSink,
+  nodeId: string,
+  path: readonly string[],
+  ctx: EvalContext,
+): WorkflowOrigin {
+  const rounds = roundsOf(ctx);
+  return {
+    index: sink.actions.length - 1,
+    nodeId,
+    path,
+    ...(rounds === undefined ? {} : { rounds }),
+  };
+}
+
+function trace(
+  sink: ExecSink,
+  nodeId: string,
+  path: readonly string[],
+  message: string,
+  ctx: EvalContext,
+): void {
+  if (sink.trace.length >= MAX_TRACE_ENTRIES) return;
+  const rounds = roundsOf(ctx);
+  sink.trace.push({ nodeId, path, message, ...(rounds === undefined ? {} : { rounds }) });
+}
+
+/** 当时所有活跃循环的轮次；没有循环就不带这个字段。 */
+function roundsOf(ctx: EvalContext): Readonly<Record<string, number>> | undefined {
+  if (ctx.loops.size === 0) return undefined;
+  const rounds: Record<string, number> = {};
+  for (const [nodeId, round] of ctx.loops) rounds[nodeId] = round;
+  return rounds;
+}
+
 function collectPreviews(ctx: EvalContext): readonly NodePreview[] {
   return [...ctx.previews.values()];
 }
+
+/** 供测试与画布判断「这条轨迹是否来自某个循环轮次」。 */
+export type { CompileTraceEntry };

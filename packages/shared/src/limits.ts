@@ -134,3 +134,9 @@ export const PYTHON_QUEUE_LIMIT = 8;
 
 /** 一次编译允许发起的 Python 求值次数上限。 */
 export const PYTHON_MAX_EVALS_PER_COMPILE = 64;
+
+/** 单个循环最多执行的轮数。超过就报错定位到循环，不悄悄截断（06 §5.3）。 */
+export const WORKFLOW_MAX_LOOP_ITERATIONS = 256;
+
+/** 一次编译里所有循环累计的轮数上限：嵌套循环共享同一份预算。 */
+export const WORKFLOW_MAX_TOTAL_ITERATIONS = 4096;

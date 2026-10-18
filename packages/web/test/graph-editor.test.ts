@@ -6,7 +6,9 @@ import {
   copySelection,
   createEditor,
   disconnect,
+  moveInto,
   moveNodes,
+  moveOut,
   paste,
   pruneConnections,
   redo,
@@ -17,7 +19,7 @@ import {
   undo,
 } from '../src/graph/editor';
 import type { EditResult, GraphEditorState } from '../src/graph/editor';
-import { WORKFLOW_CONTEXT, wfNode, workflow } from './workflow-helpers';
+import { WORKFLOW_CONTEXT, wfEdge, wfNode, workflow } from './workflow-helpers';
 
 /**
  * 编辑器命令（06 §3；07 §P2）：加节点、接线规则、删除、撤销/重做、复制粘贴与顺序调整。
@@ -251,3 +253,48 @@ describe('编辑器：执行顺序', () => {
 function seedEditorWithStart(): GraphEditorState {
   return createEditor(emptyGraphDocument());
 }
+
+describe('编辑器：容器', () => {
+  function withBranch(): GraphEditorState {
+    return createEditor(
+      workflow({
+        nodes: [
+          wfNode('cmp', NODE.compare, { op: 'EQ', a: 1, b: 1 }),
+          wfNode('if', NODE.if, {}, { then: [], else: [] }),
+          wfNode('step', NODE.step, { count: 1 }),
+        ],
+        edges: [wfEdge('cmp', 'if', 'cond')],
+        main: ['if', 'step'],
+      }),
+    );
+  }
+
+  it('把语句移进分支区域，且可撤销', () => {
+    const result = moveInto(withBranch(), ['step'], 'if', 'then');
+    if (!result.ok) throw new Error(result.message);
+    expect(result.state.document.main).toEqual(['if']);
+    expect(result.state.document.nodes.find((node) => node.id === 'if')?.regions?.then).toEqual(['step']);
+    const back = undo(result.state);
+    expect(back.document.main).toEqual(['if', 'step']);
+  });
+
+  it('拒绝把容器放进自己的子区域', () => {
+    const result = moveInto(withBranch(), ['if'], 'if', 'then');
+    expect(result.ok).toBe(false);
+  });
+
+  it('移出容器后紧跟在容器之后', () => {
+    const inside = moveInto(withBranch(), ['step'], 'if', 'then');
+    if (!inside.ok) throw new Error(inside.message);
+    const outside = moveOut(inside.state, ['step']);
+    expect(outside.document.main).toEqual(['if', 'step']);
+    expect(outside.document.nodes.find((node) => node.id === 'if')?.regions?.then).toEqual([]);
+  });
+
+  it('新容器自带空区域', () => {
+    const result = addNode(seedEditorWithStart(), { kind: NODE.repeat });
+    if (!result.ok) throw new Error(result.message);
+    const node = result.state.document.nodes.find((candidate) => candidate.kind === NODE.repeat);
+    expect(node?.regions?.body).toEqual([]);
+  });
+});

@@ -271,3 +271,101 @@ export function fitViewport(boxes: readonly NodeBox[], size: Size, padding = 40)
     y: (size.height - height * zoom) / 2 - minY * zoom,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 容器区域（06 §5.2；07 §P4「容器折叠、内部编辑和边界端口」）
+// ---------------------------------------------------------------------------
+
+/** 区域框内边距与标签高度：子节点被包在框里，标签条不挡拖动。 */
+export const REGION_PADDING = 18;
+export const REGION_LABEL_HEIGHT = 22;
+/** 空区域也要有可放置面积，否则没法把第一个节点拖进去。 */
+export const EMPTY_REGION_HEIGHT = 64;
+
+export interface RegionFrame {
+  readonly nodeId: string;
+  readonly region: string;
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly empty: boolean;
+}
+
+export interface ContainerShape {
+  readonly nodeId: string;
+  /** 该容器声明的区域（名字与标签来自目录）。 */
+  readonly regions: readonly { readonly name: string; readonly label: string }[];
+  /** 区域成员：容器节点自己的 `regions`。 */
+  readonly members: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * 由子节点包围盒推出区域框：区域没有自己的坐标，跟着子节点走，所以拖动子节点时框会自适应。
+ * 空区域挂在容器下方给一块放置区；嵌套容器再按面积从小到大排，命中时取最内层。
+ */
+export function regionFrames(
+  containers: readonly ContainerShape[],
+  boxes: readonly NodeBox[],
+): readonly RegionFrame[] {
+  const byId = new Map(boxes.map((box) => [box.id, box]));
+  const frames: RegionFrame[] = [];
+  for (const container of containers) {
+    const owner = byId.get(container.nodeId);
+    for (const region of container.regions) {
+      const members = (container.members[region.name] ?? [])
+        .map((id) => byId.get(id))
+        .filter((box): box is NodeBox => box !== undefined);
+      if (members.length === 0) {
+        if (owner === undefined) continue;
+        frames.push({
+          nodeId: container.nodeId,
+          region: region.name,
+          label: region.label,
+          x: owner.x,
+          y: owner.y + owner.height + 8,
+          width: NODE_WIDTH,
+          height: EMPTY_REGION_HEIGHT,
+          empty: true,
+        });
+        continue;
+      }
+      const minX = Math.min(...members.map((box) => box.x));
+      const minY = Math.min(...members.map((box) => box.y));
+      const maxX = Math.max(...members.map((box) => box.x + box.width));
+      const maxY = Math.max(...members.map((box) => box.y + box.height));
+      frames.push({
+        nodeId: container.nodeId,
+        region: region.name,
+        label: region.label,
+        x: minX - REGION_PADDING,
+        y: minY - REGION_PADDING - REGION_LABEL_HEIGHT,
+        width: maxX - minX + REGION_PADDING * 2,
+        height: maxY - minY + REGION_PADDING * 2 + REGION_LABEL_HEIGHT,
+        empty: false,
+      });
+    }
+  }
+  return frames;
+}
+
+/** 命中区域框：取面积最小（最内层）的一个，嵌套时不会误放到外层。 */
+export function regionAt(frames: readonly RegionFrame[], point: Point): RegionFrame | undefined {
+  let best: RegionFrame | undefined;
+  let bestArea = Number.POSITIVE_INFINITY;
+  for (const frame of frames) {
+    const contains =
+      point.x >= frame.x &&
+      point.x <= frame.x + frame.width &&
+      point.y >= frame.y &&
+      point.y <= frame.y + frame.height;
+    if (!contains) continue;
+    const area = frame.width * frame.height;
+    if (area < bestArea) {
+      best = frame;
+      bestArea = area;
+    }
+  }
+  return best;
+}

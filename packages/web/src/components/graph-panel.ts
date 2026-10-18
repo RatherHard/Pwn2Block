@@ -2,6 +2,8 @@ import { LitElement, css, html, nothing } from 'lit';
 import {
   ACTION_NAMES,
   availableNodeSpecs,
+  CURRENT_STAGE,
+  nodeSpec,
   defaultParams,
   nodeParams,
   emptyGraphDocument,
@@ -17,6 +19,7 @@ import type {
 } from '@pwn2block/shared';
 import { compileGraph } from '../workflow/compile';
 import { checkParam } from '../workflow/params';
+import { lookupGraph } from '../workflow/document';
 import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
 import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import {
@@ -25,7 +28,9 @@ import {
   copySelection,
   createEditor,
   disconnect,
+  moveInto,
   moveNodes,
+  moveOut,
   paste,
   redo,
   removeNodes,
@@ -244,7 +249,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
   }
 
   private renderToolbox() {
-    const stage = 'p3';
+    const stage = CURRENT_STAGE;
     const groups = new Map<string, { label: string; kinds: { kind: string; label: string; summary: string }[] }>();
     for (const spec of availableNodeSpecs(stage)) {
       const group = groups.get(spec.category) ?? { label: spec.category, kinds: [] };
@@ -286,21 +291,23 @@ export class Pwn2BlockGraphPanel extends LitElement {
     }
     const node = selected[0];
     if (node === undefined) return nothing;
-    const spec = availableNodeSpecs('p3').find((candidate) => candidate.kind === node.kind);
+    const spec = nodeSpec(node.kind);
     const specs = spec === undefined ? [] : nodeParams(spec, defaultParams(spec));
-    const placement = this.editor.document.main.indexOf(node.id);
+    const lookup = lookupGraph(this.editor.document);
+    const placement = lookup.placements.get(node.id);
+    const container = placement?.container;
     return html`<aside class="inspector" aria-label="检查器">
       <h3>${spec?.label ?? node.kind}</h3>
       <p><code>${node.id}</code></p>
-      ${placement >= 0
-        ? html`<div class="row">
-            <button ?disabled=${placement === 0} @click=${() => this.run((state) => reorder(state, node.id, -1))}>前移</button>
-            <button
-              ?disabled=${placement === this.editor.document.main.length - 1}
-              @click=${() => this.run((state) => reorder(state, node.id, 1))}
-            >后移</button>
-          </div>`
-        : nothing}
+      ${placement === undefined
+        ? nothing
+        : html`<div class="row">
+            <button ?disabled=${placement.index === 0} @click=${() => this.run((state) => reorder(state, node.id, -1))}>前移</button>
+            <button @click=${() => this.run((state) => reorder(state, node.id, 1))}>后移</button>
+            ${container === undefined
+              ? nothing
+              : html`<button @click=${() => this.setEditor(moveOut(this.editor, [node.id]))}>移出容器</button>`}
+          </div>`}
       ${specs.map((param) => this.renderParam(node.id, param, challenge))}
       <div class="row">
         <button @click=${() => this.canvas()?.focusNode(node.id)}>定位</button>
@@ -441,6 +448,12 @@ export class Pwn2BlockGraphPanel extends LitElement {
       case 'delete':
         this.setEditor(removeNodes(this.editor, edit.ids));
         return;
+      case 'moveInto': {
+        const result = moveInto(this.editor, edit.nodeIds, edit.container, edit.region);
+        if (result.ok) this.setEditor(result.state);
+        else this.say(result.message);
+        return;
+      }
       case 'reorder':
         this.setEditor(reorderAfter(this.editor, edit.nodeId, edit.after));
         return;

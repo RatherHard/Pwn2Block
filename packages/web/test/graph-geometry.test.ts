@@ -9,13 +9,16 @@ import {
   fitViewport,
   hitTest,
   nodeBox,
+  regionAt,
+  regionFrames,
   screenToWorld,
   worldToScreen,
   zoomAt,
   type NodeBox,
+  type RegionFrame,
 } from '../src/graph/geometry';
 import type { ParamValue, PortContext } from '@pwn2block/shared';
-import { wfNode } from './workflow-helpers';
+import { WORKFLOW_CONTEXT, wfNode } from './workflow-helpers';
 
 /**
  * 画布几何（06 §3）：节点尺寸、端口方位、正交走线、命中与视口变换。
@@ -152,5 +155,43 @@ describe('视口变换', () => {
 
   it('没有节点时不动视口', () => {
     expect(fitViewport([], { width: 800, height: 600 })).toEqual({ x: 0, y: 0, zoom: 1 });
+  });
+});
+
+describe('区域框与容器', () => {
+  it('区域框包住子节点，空区域给一块放置区', () => {
+    const parent = wfNode('if', NODE.if, {}, { then: ['a'], else: [] });
+    const child = wfNode('a', NODE.step, { count: 1 });
+    const boxes = [
+      nodeBox(parent, { x: 0, y: 0 }, { context: WORKFLOW_CONTEXT }),
+      nodeBox(child, { x: 260, y: 120 }, { context: WORKFLOW_CONTEXT }),
+    ].filter((box): box is NodeBox => box !== undefined);
+    const frames = regionFrames(
+      [
+        {
+          nodeId: 'if',
+          regions: [
+            { name: 'then', label: '成立' },
+            { name: 'else', label: '否则' },
+          ],
+          members: parent.regions ?? {},
+        },
+      ],
+      boxes,
+    );
+    const then = frames.find((frame) => frame.region === 'then');
+    const otherwise = frames.find((frame) => frame.region === 'else');
+    expect(then?.empty).toBe(false);
+    expect(then?.x).toBeLessThan(260);
+    expect(otherwise?.empty).toBe(true);
+    expect(regionAt(frames, { x: 300, y: 140 })?.region).toBe('then');
+    expect(regionAt(frames, { x: 100, y: 400 })).toBeUndefined();
+  });
+
+  it('嵌套区域命中取最内层', () => {
+    const outer: RegionFrame = { nodeId: 'outer', region: 'body', label: '循环体', x: 0, y: 0, width: 400, height: 400, empty: false };
+    const inner: RegionFrame = { nodeId: 'inner', region: 'then', label: '成立', x: 100, y: 100, width: 100, height: 100, empty: false };
+    expect(regionAt([outer, inner], { x: 150, y: 150 })?.nodeId).toBe('inner');
+    expect(regionAt([outer, inner], { x: 20, y: 20 })?.nodeId).toBe('outer');
   });
 });

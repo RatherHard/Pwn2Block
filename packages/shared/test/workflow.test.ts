@@ -40,7 +40,7 @@ describe('节点目录', () => {
       expect(kinds.has(spec.kind)).toBe(false);
       kinds.add(spec.kind);
       expect(spec.version).toBeGreaterThanOrEqual(1);
-      expect(['p2', 'p3', 'p7']).toContain(spec.stage);
+      expect(['p2', 'p3', 'p4', 'p5', 'p7']).toContain(spec.stage);
       expect(spec.summary.length).toBeGreaterThan(0);
     }
     expect(kinds.size).toBeGreaterThan(15);

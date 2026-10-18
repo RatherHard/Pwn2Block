@@ -18,8 +18,8 @@ import type {
 /**
  * 图编译与求值的内部类型（07 §3「核心接口」）。
  *
- * 这一层与画布库、DOM 无关：图文档进，动作出。所以它能脱离浏览器单测——「分支只生成选中
- * 路径的动作」「零次循环仍有结果」这类语义断言不需要点鼠标（07 §6）。
+ * 这一层与画布库、DOM 无关：图文档进，动作出。所以它能脱离浏览器单测——
+ * 「分支只生成选中路径的动作」「零次循环仍有结果」这类语义断言不需要点鼠标（07 §6）。
  */
 
 /** 编译产物里的动作：与现有动作协议完全一致，服务端仍做权限校验与权威判题。 */
@@ -50,12 +50,12 @@ export type PythonEvalResult =
   | { readonly ok: true; readonly value: EncodedValue }
   | { readonly ok: false; readonly error: PythonEvalError };
 
-/** 节点在某个执行区域里的位置。`path` 由外向里，顶层是 `['main']`。 */
+/** 节点在某个执行区域里的位置。`path` 由外向内，顶层是 `['main']`。 */
 export interface NodePlacement {
   readonly nodeId: string;
   /** 例如 `['main', 'if-1/then']`。 */
   readonly path: readonly string[];
-  /** 所属容器节点 id（顶层为 undefined）。 */
+  /** 所属容器节点 id（顶层为 `undefined`）。 */
   readonly container?: string;
   /** 在所属区域里的序号（从 0 开始）。 */
   readonly index: number;
@@ -80,11 +80,13 @@ export interface PreviewSegment {
   readonly length: number;
 }
 
-/** 动作来源：动作 → 节点，再加容器路径（07 §P8 的定位依据）。 */
+/** 动作来源：动作 → 节点，再带容器路径与循环轮次（07 §P8 的定位依据）。 */
 export interface WorkflowOrigin {
   readonly index: number;
   readonly nodeId: string;
   readonly path: readonly string[];
+  /** 生成这条动作时各循环的轮次（循环节点 id → 从 0 开始的轮次）。 */
+  readonly rounds?: Readonly<Record<string, number>>;
 }
 
 /** 来源表格式版本：与产物不一致时按「来源未知」处理，不猜。 */
@@ -95,6 +97,8 @@ export interface CompileTraceEntry {
   readonly nodeId: string;
   readonly path: readonly string[];
   readonly message: string;
+  /** 当时的循环轮次，便于解释「第几轮做了什么」。 */
+  readonly rounds?: Readonly<Record<string, number>>;
 }
 
 /** 一次成功编译的完整产物。只有 `actions` 进网络请求。 */

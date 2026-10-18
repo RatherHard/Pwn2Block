@@ -127,6 +127,15 @@ export const WORKFLOW_ISSUE_CODES = [
   'cancelled',
   'python_unavailable',
   'python_failed',
+  'result_outside_control',
+  'missing_region_result',
+  'region_result_type_mismatch',
+  'break_outside_loop',
+  'continue_outside_loop',
+  'index_outside_loop',
+  'undeclared_variable',
+  'duplicate_variable',
+  'variable_type_mismatch',
 ] as const;
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
 
@@ -210,7 +219,7 @@ export interface NodePorts {
 export type NodeCategory = 'flow' | 'data' | 'action';
 
 /** 交付阶段：与 07 的 P2 / P3 / P7 对应，工具箱按阶段开放。 */
-export type NodeStage = 'p2' | 'p3' | 'p7';
+export type NodeStage = 'p2' | 'p3' | 'p4' | 'p5' | 'p7';
 
 /**
  * 一种节点的定义。**目录即契约**：表单、校验、编译、工具箱都从这里读，
@@ -247,12 +256,19 @@ export interface NodeKindSpec {
   /** 固定输出类型。 */
   readonly output?: PortType;
   /** 输出类型由参数声明的节点（条件选值、Python）。 */
-  readonly dynamicOutput?: (params: ParamValues) => PortType;
-  /** 容器区域（条件分支、循环体）；本阶段只有 `start` 没有区域之外的容器。 */
+  readonly dynamicOutput?: (params: ParamValues) => PortType | undefined;
+  /** 容器区域（条件分支、循环体）。 */
   readonly regions?: readonly {
     readonly name: string;
     readonly label: string;
   }[];
+  /** 区域数量依赖参数的容器（否则如果链）。 */
+  readonly dynamicRegions?: (params: ParamValues) => readonly {
+    readonly name: string;
+    readonly label: string;
+  }[];
+  /** 循环容器：`break`/`continue` 只能出现在它里面（06 §5.3）。 */
+  readonly loop?: boolean;
   /** 动作节点要求的权限名，对应题目的 `allowedActions`。 */
   readonly action?: ActionName;
   /** 出题人积木：参数与端口由题目包声明。 */

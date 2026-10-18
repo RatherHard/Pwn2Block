@@ -1,4 +1,4 @@
-import { defaultParams, nodeInputs, nodeOutput, nodeSpec } from '@pwn2block/shared';
+import { defaultParams, nodeInputs, nodeOutput, nodeRegions, nodeSpec } from '@pwn2block/shared';
 import type {
   GraphConnection,
   GraphDocument,
@@ -126,10 +126,15 @@ export function addNode(
   const spec = nodeSpec(options.kind);
   if (spec === undefined) return { ok: false, message: `未知节点类型：${options.kind}` };
   const id = nextNodeId(state.document, options.kind);
+  const declared = nodeRegions(spec, { ...defaultParams(spec), ...(options.params ?? {}) });
+  const regions = declared.length === 0
+    ? {}
+    : { regions: Object.fromEntries(declared.map((region) => [region.name, []])) };
   const node: GraphNode = {
     id,
     kind: options.kind,
     params: { ...defaultParams(spec), ...(options.params ?? {}) },
+    ...regions,
   };
   const placement = options.at ?? freePosition(state.document);
   const document: GraphDocument = {
@@ -147,7 +152,9 @@ export function removeNodes(state: GraphEditorState, ids: readonly string[]): Gr
   if (doomed.size === 0) return state;
   const document: GraphDocument = {
     ...state.document,
-    nodes: state.document.nodes.filter((node) => !doomed.has(node.id)),
+    nodes: state.document.nodes
+      .filter((node) => !doomed.has(node.id))
+      .map((node) => stripRegionMembers(node, doomed)),
     connections: state.document.connections.filter(
       (connection) => !doomed.has(connection.from.node) && !doomed.has(connection.to.node),
     ),
@@ -207,7 +214,7 @@ export function setParam(
   context: PortContext,
 ): GraphEditorState {
   const nodes = state.document.nodes.map((node) =>
-    node.id === nodeId ? { ...node, params: { ...node.params, [name]: value } } : node,
+    node.id === nodeId ? withDeclaredRegions({ ...node, params: { ...node.params, [name]: value } }) : node,
   );
   const document = pruneConnections({ ...state.document, nodes }, context);
   return apply(state, document, 'semantic');
@@ -350,8 +357,11 @@ export function reorderAfter(state: GraphEditorState, nodeId: string, afterId: s
 
 function regionOf(document: GraphDocument, path: readonly string[]): readonly string[] | undefined {
   if (path.length === 1) return document.main;
-  const owner = document.nodes.find((node) => node.id === path[0]);
-  return owner?.regions?.[path[1] as string];
+  const segment = path[path.length - 1] ?? '';
+  const ownerId = segment.split('/')[0] ?? '';
+  const regionName = segment.split('/')[1] ?? '';
+  const owner = document.nodes.find((node) => node.id === ownerId);
+  return owner?.regions?.[regionName];
 }
 
 function withRegion(
@@ -360,8 +370,9 @@ function withRegion(
   items: readonly string[],
 ): GraphDocument {
   if (path.length === 1) return { ...document, main: items };
-  const ownerId = path[0] as string;
-  const regionName = path[1] as string;
+  const segment = path[path.length - 1] ?? '';
+  const ownerId = segment.split('/')[0] ?? '';
+  const regionName = segment.split('/')[1] ?? '';
   const nodes = document.nodes.map((node) =>
     node.id === ownerId
       ? { ...node, regions: { ...(node.regions ?? {}), [regionName]: items } }
@@ -452,4 +463,99 @@ export function redo(state: GraphEditorState): GraphEditorState {
     semanticRevision: state.semanticRevision + 1,
     layoutRevision: state.layoutRevision + 1,
   };
+}
+
+/** 参数变化可能带来新的区域（否则如果链）：补齐空区域，已有的成员保持不动。 */
+function withDeclaredRegions(node: GraphNode): GraphNode {
+  const spec = nodeSpec(node.kind);
+  if (spec === undefined) return node;
+  const declared = nodeRegions(spec, node.params);
+  if (declared.length === 0) return node;
+  const regions: Record<string, readonly string[]> = { ...(node.regions ?? {}) };
+  let changed = node.regions === undefined;
+  for (const region of declared) {
+    if (regions[region.name] === undefined) {
+      regions[region.name] = [];
+      changed = true;
+    }
+  }
+  return changed ? { ...node, regions } : node;
+}
+
+/** 删除节点时把它从所有容器的区域里摘掉，避免留下指向空气的成员。 */
+function stripRegionMembers(node: GraphNode, doomed: ReadonlySet<string>): GraphNode {
+  if (node.regions === undefined) return node;
+  const regions: Record<string, readonly string[]> = {};
+  let changed = false;
+  for (const [name, members] of Object.entries(node.regions)) {
+    const kept = members.filter((id) => !doomed.has(id));
+    if (kept.length !== members.length) changed = true;
+    regions[name] = kept;
+  }
+  return changed ? { ...node, regions } : node;
+}
+
+// ---------------------------------------------------------------------------
+// 容器编辑（06 §5.2；07 §P4）
+// ---------------------------------------------------------------------------
+
+/** 把选中的语句移进容器的某个区域；容器不能进自己或自己的子孙。 */
+export function moveInto(
+  state: GraphEditorState,
+  nodeIds: readonly string[],
+  containerId: string,
+  region: string,
+): EditResult {
+  const container = state.document.nodes.find((node) => node.id === containerId);
+  if (container === undefined) return { ok: false, message: `找不到容器 ${containerId}` };
+  const spec = nodeSpec(container.kind);
+  if (spec === undefined || !nodeRegions(spec, container.params).some((candidate) => candidate.name === region)) {
+    return { ok: false, message: `${spec?.label ?? container.kind} 没有区域 ${region}` };
+  }
+  const lookup = lookupGraph(state.document);
+  const containerPath = lookup.placements.get(containerId)?.path ?? ['main'];
+  const moving = nodeIds.filter((id) => id !== containerId && !containerPath.includes(id));
+  if (moving.length === 0) return { ok: false, message: '只能把别的节点放进容器：不能放容器自己或它的子孙' };
+
+  const stripped = removeFromSequences(state.document, moving);
+  const current = stripped.nodes.find((node) => node.id === containerId)?.regions?.[region] ?? [];
+  const next = [...current, ...moving.filter((id) => !current.includes(id))];
+  const document = withRegion(stripped, [...containerPath, `${containerId}/${region}`], next);
+  return { ok: true, state: apply(state, document, 'semantic', moving) };
+}
+
+/** 把区域里的语句移回容器所在的那一层，紧跟在容器之后。 */
+export function moveOut(state: GraphEditorState, nodeIds: readonly string[]): GraphEditorState {
+  let document = state.document;
+  for (const id of nodeIds) {
+    const placement = lookupGraph(document).placements.get(id);
+    if (placement?.container === undefined) continue;
+    const regionPath = placement.path;
+    const parentPath = regionPath.slice(0, -1);
+    const region = regionOf(document, regionPath);
+    if (region === undefined) continue;
+    const owner = regionOf(document, parentPath) ?? document.main;
+    const without = region.filter((member) => member !== id);
+    const ownerIndex = owner.indexOf(placement.container);
+    const nextOwner = [...owner];
+    nextOwner.splice(ownerIndex < 0 ? nextOwner.length : ownerIndex + 1, 0, id);
+    document = withRegion(withRegion(document, regionPath, without), parentPath, nextOwner);
+  }
+  return document === state.document ? state : apply(state, document, 'semantic', nodeIds);
+}
+
+/** 从主序列和所有区域里摘掉这些 id（移动前的清理）。 */
+function removeFromSequences(document: GraphDocument, ids: readonly string[]): GraphDocument {
+  const doomed = new Set(ids);
+  const nodes = document.nodes.map((node) =>
+    node.regions === undefined
+      ? node
+      : {
+          ...node,
+          regions: Object.fromEntries(
+            Object.entries(node.regions).map(([name, members]) => [name, members.filter((id) => !doomed.has(id))]),
+          ),
+        },
+  );
+  return { ...document, nodes, main: document.main.filter((id) => !doomed.has(id)) };
 }

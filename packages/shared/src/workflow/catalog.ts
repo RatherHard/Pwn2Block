@@ -1,3 +1,5 @@
+import { NODE } from './kinds';
+import { CONTROL_SPECS } from './catalog-control';
 import type { ArchBits } from '../primitives';
 import type { AuthorBlock } from '../challenge';
 import type {
@@ -27,38 +29,8 @@ import type {
 // 节点种类标识（稳定字符串，存档里直接写它）
 // ---------------------------------------------------------------------------
 
-export const NODE = {
-  start: 'start',
-  fill: 'data.fill',
-  text: 'data.text',
-  hex: 'data.hex',
-  int: 'data.int',
-  address: 'data.address',
-  concat: 'data.concat',
-  arith: 'data.arith',
-  compare: 'data.compare',
-  logic: 'data.logic',
-  bytesToInt: 'data.bytesToInt',
-  slice: 'data.slice',
-  assemble: 'data.assemble',
-  select: 'data.select',
-  cyclic: 'data.cyclic',
-  find: 'data.find',
-  python: 'data.python',
-  feed: 'action.feed',
-  write: 'action.write',
-  push: 'action.push',
-  pop: 'action.pop',
-  call: 'action.call',
-  ret: 'action.ret',
-  step: 'action.step',
-  run: 'action.run',
-  author: 'action.author',
-} as const;
-
-export type NodeKind = (typeof NODE)[keyof typeof NODE];
-
-export const WORKFLOW_NODE_KINDS: readonly NodeKind[] = Object.values(NODE);
+export { NODE, WORKFLOW_NODE_KINDS } from './kinds';
+export type { NodeKind } from './kinds';
 
 // ---------------------------------------------------------------------------
 // 常用参数
@@ -558,6 +530,7 @@ const START: NodeKindSpec = {
 /** 目录顺序就是工具箱顺序：先流程，再数据（由浅入深），最后动作。 */
 export const NODE_SPECS: readonly NodeKindSpec[] = [
   START,
+  ...CONTROL_SPECS,
   FILL,
   ADDRESS,
   CONCAT,
@@ -592,9 +565,9 @@ export function nodeSpec(kind: string): NodeKindSpec | undefined {
 }
 
 /** 当前交付阶段：目录里更晚阶段的节点不会出现在工具箱，但存档读入时要给出原因。 */
-export const CURRENT_STAGE: NodeKindSpec['stage'] = 'p3';
+export const CURRENT_STAGE: NodeKindSpec['stage'] = 'p4';
 
-const STAGE_ORDER: readonly NodeKindSpec['stage'][] = ['p2', 'p3', 'p7'];
+const STAGE_ORDER: readonly NodeKindSpec['stage'][] = ['p2', 'p3', 'p4', 'p5', 'p7'];
 
 export function stageAvailable(stage: NodeKindSpec['stage'], stageNow = CURRENT_STAGE): boolean {
   return STAGE_ORDER.indexOf(stage) <= STAGE_ORDER.indexOf(stageNow);
@@ -652,6 +625,14 @@ export function nodeOutput(
 ): OutputPortSpec | undefined {
   const type = spec.dynamicOutput?.(params) ?? spec.output;
   return type === undefined ? undefined : { name: 'out', label: '结果', type };
+}
+
+/** 容器区域：数量可以依赖参数（否则如果链）。 */
+export function nodeRegions(
+  spec: NodeKindSpec,
+  params: ParamValues,
+): readonly { readonly name: string; readonly label: string }[] {
+  return spec.dynamicRegions?.(params) ?? spec.regions ?? [];
 }
 
 /** 一次算清输入与输出端口。 */

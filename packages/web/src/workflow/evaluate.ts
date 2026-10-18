@@ -11,21 +11,22 @@ import {
 } from '@pwn2block/shared';
 import type { EncodedValue, GraphConnection, GraphNode, NodeKindSpec } from '@pwn2block/shared';
 import { computeNode, type EvalHelpers } from './compute-nodes';
-import { createEvalContext, report, type EvalContext, type ValueResult } from './context';
+import { cacheKeyOf, createEvalContext, report, type EvalContext, type ValueResult } from './context';
 import { edgeKeyOf, paramsOf } from './document';
 import { inlineValue } from './params';
 import type { NodePreview, PreviewSegment, WorkflowValue } from './types';
 
 /**
- * 数据节点的求值（06 §2、§4.1）。
+ * 数据节点的求值（06 §2、§4.1、§5）。
  *
  * 求值规则：
  * - **按依赖求值**：只有被动作（或其它数据节点）需要的节点才计算；没被选中分支里的节点不执行
  *   （06 §2「未选中分支中的 Python 不执行」）。
- * - **纯函数式**：数据节点只读自己的参数与上游结果，不读 VM 状态（06 §2），所以同样的图
- *   得到同样的字节——这也是编译能脱离 VM 单测的原因。
- * - **每次求值只算一次**：同一节点在一次编译里缓存结果；带轮次/变量的节点由调用方按轮次
- *   传不同的缓存键（P4）。
+ * - **纯函数式**：数据节点只读自己的参数、上游结果和当前作用域里的变量，不读 VM 状态（06 §2）。
+ * - **按执行上下文缓存**：同一个节点在循环每轮、不同分支里可能是不同的值，缓存键带上作用域、
+ *   轮次和变量版本（`cacheKeyOf`），不用节点 id 当键（07 §P4）。
+ * - **容器结果要等它执行**：`if` / `repeat` / `while` 带数据输出时，值由流程执行产生；
+ *   在执行之前引用它是错误，而不是拿一个空值。
  * - 错误一律变成带节点 id 的 `WorkflowIssue`，不抛异常：编译要能一次报出多处问题。
  *
  * 具体节点的计算在 `compute-nodes.ts`；本文件只负责缓存、步数上限、预览与递归，把递归
@@ -39,11 +40,11 @@ export type { EvalContext, ValueResult };
 export async function evalNodeValue(
   ctx: EvalContext,
   nodeId: string,
-  path: readonly string[] = ['main'],
 ): Promise<ValueResult> {
-  const cached = ctx.values.get(nodeId);
+  const key = cacheKeyOf(ctx, nodeId);
+  const cached = ctx.values.get(key);
   if (cached !== undefined) {
-    const segments = ctx.segments.get(nodeId);
+    const segments = ctx.segments.get(key);
     return segments === undefined ? { ok: true, value: cached } : { ok: true, value: cached, segments };
   }
 
@@ -53,6 +54,17 @@ export async function evalNodeValue(
   if (spec === undefined) return report(ctx, 'unknown_kind', nodeId, `未知节点类型：${node.kind}`);
   if (nodeOutput(spec, paramsOf(node, spec)) === undefined) {
     return report(ctx, 'eval_failed', nodeId, `节点 ${spec.label} 没有数据输出，不能当作值使用`);
+  }
+
+  if (spec.exec) {
+    const produced = ctx.produced.get(nodeId);
+    if (produced !== undefined) return { ok: true, value: produced };
+    return report(
+      ctx,
+      'eval_failed',
+      nodeId,
+      `${spec.label} 的结果还没有产生：它是一段流程，必须先执行到它`,
+    );
   }
 
   ctx.steps += 1;
@@ -65,23 +77,24 @@ export async function evalNodeValue(
     );
   }
 
-  const result = await computeNode(ctx, node, spec, path, helpersFor(ctx));
+  const result = await computeNode(ctx, node, spec, helpersFor(ctx));
   if (!result.ok) return result;
 
-  ctx.values.set(nodeId, result.value);
-  if (result.segments !== undefined) ctx.segments.set(nodeId, result.segments);
+  ctx.values.set(key, result.value);
+  if (result.segments !== undefined) ctx.segments.set(key, result.segments);
   ctx.previews.set(nodeId, makePreview(nodeId, result.value, result.segments));
   return result;
 }
 
 function helpersFor(ctx: EvalContext): EvalHelpers {
   return {
-    resolve: (node, spec, port, path) => resolveInput(ctx, node, spec, port, path),
+    resolve: (node, spec, port) => resolveInput(ctx, node, spec, port),
     encode: encodeValue,
   };
 }
 
-function makePreview(
+/** 生成节点预览（容器结果也用它，保证界面口径一致）。 */
+export function makePreview(
   nodeId: string,
   value: WorkflowValue,
   segments: readonly PreviewSegment[] | undefined,
@@ -136,7 +149,6 @@ export async function resolveInput(
   node: GraphNode,
   spec: NodeKindSpec,
   portName: string,
-  path: readonly string[],
 ): Promise<ValueResult> {
   const params = paramsOf(node, spec);
   const port = nodeInputs(spec, params, ctx.portContext).find((candidate) => candidate.name === portName);
@@ -146,7 +158,7 @@ export async function resolveInput(
 
   const edge = connectionInto(ctx, node.id, portName);
   if (edge !== undefined) {
-    const upstream = await evalNodeValue(ctx, edge.from.node, path);
+    const upstream = await evalNodeValue(ctx, edge.from.node);
     if (!upstream.ok) return upstream;
     if (upstream.value.kind !== port.type) {
       return report(

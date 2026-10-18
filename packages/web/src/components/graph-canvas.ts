@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing, svg } from 'lit';
 import type { GraphConnection, PortContext, PortType, WorkflowIssue } from '@pwn2block/shared';
-import { nodeInputs, nodeOutput, nodeSpec } from '@pwn2block/shared';
+import { nodeInputs, nodeOutput, nodeRegions, nodeSpec } from '@pwn2block/shared';
 import type { GraphEditorState, PortRef } from '../graph/editor';
 import {
   NODE_WIDTH,
@@ -10,6 +10,8 @@ import {
   edgePath,
   fitViewport,
   nodeBox,
+  regionAt,
+  regionFrames,
   rectsIntersect,
   screenToWorld,
   viewportTransform,
@@ -40,7 +42,13 @@ export type GraphEdit =
   | { readonly type: 'connect'; readonly from: PortRef; readonly to: PortRef }
   | { readonly type: 'disconnect'; readonly edge: GraphConnection }
   | { readonly type: 'delete'; readonly ids: readonly string[] }
-  | { readonly type: 'reorder'; readonly nodeId: string; readonly after: string };
+  | { readonly type: 'reorder'; readonly nodeId: string; readonly after: string }
+  | {
+      readonly type: 'moveInto';
+      readonly nodeIds: readonly string[];
+      readonly container: string;
+      readonly region: string;
+    };
 
 const PORT_COLORS: Readonly<Record<PortType, string>> = {
   int: 'var(--p2b-code)',
@@ -215,6 +223,20 @@ export class Pwn2BlockGraphCanvas extends LitElement {
     return boxes;
   }
 
+  /** 容器区域框：跟着子节点走，用于渲染与拖放命中。 */
+  private frames(): ReturnType<typeof regionFrames> {
+    const state = this.state;
+    if (state === undefined) return [];
+    const containers = state.document.nodes.flatMap((node) => {
+      const spec = nodeSpec(node.kind);
+      if (spec === undefined) return [];
+      const regions = nodeRegions(spec, node.params);
+      if (regions.length === 0) return [];
+      return [{ nodeId: node.id, regions, members: node.regions ?? {} }];
+    });
+    return regionFrames(containers, this.boxes());
+  }
+
   private previewOf(nodeId: string): NodePreview | undefined {
     return (this.previews ?? []).find((preview) => preview.nodeId === nodeId);
   }
@@ -329,6 +351,17 @@ export class Pwn2BlockGraphCanvas extends LitElement {
     this.capture(event);
   }
 
+  /** 松手时落在某个区域框里就把选中的语句移进去（容器自己与它的子孙除外，由编辑器再判一次）。 */
+  private dropIntoRegion(drag: { readonly nodes?: Readonly<Record<string, Point>> }, point: Point): void {
+    const state = this.state;
+    if (state === undefined) return;
+    const region = regionAt(this.frames(), point);
+    if (region === undefined) return;
+    const moved = Object.keys(drag.nodes ?? {});
+    if (moved.length === 0 || moved.includes(region.nodeId)) return;
+    this.emitEdit({ type: 'moveInto', nodeIds: moved, container: region.nodeId, region: region.region });
+  }
+
   private capture(event: PointerEvent): void {
     const target = event.currentTarget as SVGSVGElement | null;
     if (target === null || typeof target.setPointerCapture !== 'function') return;
@@ -398,6 +431,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
       const moves = this.liveMoves;
       this.liveMoves = {};
       if (Object.keys(moves).length > 0) this.emitEdit({ type: 'move', moves });
+      this.dropIntoRegion(drag, point);
       this.requestUpdate();
       return;
     }
@@ -622,6 +656,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
         @dblclick=${this.onDoubleClick}
       >
         <g transform=${viewportTransform(this.viewport)}>
+          ${this.renderRegions()}
           ${this.renderExecEdges(state, placement)} ${this.renderDataEdges(state, placement)}
           ${this.boxRect === undefined
             ? nothing
@@ -633,6 +668,19 @@ export class Pwn2BlockGraphCanvas extends LitElement {
       ${boxes.length === 0 ? html`<p class="hint">从左侧工具箱点一个节点开始。</p>` : nothing}
       ${this.message === '' ? nothing : html`<p class="hint">${this.message}</p>`}
     `;
+  }
+
+  /** 区域框画在连线与节点下面：嵌套时由外向内排，命中取最内层。 */
+  private renderRegions(): unknown {
+    return this.frames().map(
+      (frame) => svg`<g class="region" data-region=${frame.nodeId} data-region-name=${frame.region}>
+        <rect
+          x=${frame.x} y=${frame.y} width=${frame.width} height=${frame.height}
+          fill="var(--p2b-sunken)" stroke="var(--p2b-line)" stroke-dasharray="4 3"
+        />
+        <text class="label" x=${frame.x + 8} y=${frame.y + 15}>${truncate(frame.label, 12)}</text>
+      </g>`,
+    );
   }
 
   private renderNode(box: NodeBox, highlighted: { node: string; port: string } | undefined) {

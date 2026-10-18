@@ -1,5 +1,7 @@
 import {
+  NODE,
   nodeInputs,
+  nodeRegions,
   nodeOutput,
   nodeSpec,
   WORKFLOW_MAX_CONNECTIONS,
@@ -75,6 +77,8 @@ export function validateGraph(document: GraphDocument, context: WorkflowContext)
   checkEntry(document, starts, lookup, report);
   checkPlacement(document, lookup, report);
   checkRegions(document, lookup, report);
+  checkControlFlow(document, lookup, report);
+  checkVariables(document, lookup, report);
   checkConnections(document, portContext, lookup, report);
   checkCycles(document, report);
   checkMissingInputs(document, portContext, lookup, report);
@@ -213,7 +217,7 @@ function checkRegions(document: GraphDocument, lookup: GraphLookup, report: Repo
   for (const node of document.nodes) {
     if (node.regions === undefined) continue;
     const spec: NodeKindSpec | undefined = nodeSpec(node.kind);
-    const allowed = new Set(spec?.regions?.map((region) => region.name) ?? []);
+    const allowed = new Set(spec === undefined ? [] : nodeRegions(spec, node.params).map((region) => region.name));
     for (const [region, members] of Object.entries(node.regions)) {
       if (!allowed.has(region)) {
         report('unknown_region', node.id, `节点 ${node.kind} 没有区域 ${region}`);
@@ -428,4 +432,201 @@ function collectRegionMembers(document: GraphDocument): Record<string, readonly 
     }
   }
   return members;
+}
+
+// ---------------------------------------------------------------------------
+// 控制流与变量（06 §5；07 §P4）
+// ---------------------------------------------------------------------------
+
+/**
+ * 控制流的结构检查：`break`/`continue` 只在循环里、`结果` 只在区域末尾、
+ * 声明了结果的容器必须在每条可达路径上给出结果。
+ */
+function checkControlFlow(document: GraphDocument, lookup: GraphLookup, report: Report): void {
+  for (const node of document.nodes) {
+    const spec = nodeSpec(node.kind);
+    if (spec === undefined) continue;
+
+    if (node.kind === NODE.break || node.kind === NODE.continue) {
+      if (nearestLoopId(lookup, node.id) === undefined) {
+        const code = node.kind === NODE.break ? 'break_outside_loop' : 'continue_outside_loop';
+        report(code, node.id, `「${spec.label}」只能放在循环体里（06 §5.3）`);
+      }
+      continue;
+    }
+    if (node.kind === NODE.index || node.kind === NODE.accumulator) {
+      if (nearestLoopId(lookup, node.id) === undefined) {
+        report('index_outside_loop', node.id, `「${spec.label}」只有在循环体里才有值（06 §5.3）`);
+      }
+      continue;
+    }
+    if (node.kind === NODE.result) {
+      checkResultNode(lookup, node, report);
+      continue;
+    }
+    const regions = nodeRegions(spec, node.params);
+    if (regions.length === 0) continue;
+    checkContainerResults(lookup, node, regions, report);
+  }
+}
+
+/** `结果` 节点：只能在容器区域的末尾，且类型与容器声明一致。 */
+function checkResultNode(lookup: GraphLookup, node: GraphNode, report: Report): void {
+  const placement = lookup.placements.get(node.id);
+  if (placement === undefined) {
+    report('result_outside_control', node.id, '「结果」不能单独摆着：它在分支或循环体末尾才有意义');
+    return;
+  }
+  const containerId = placement.container;
+  const container = containerId === undefined ? undefined : lookup.nodes.get(containerId);
+  if (containerId === undefined || container === undefined) {
+    report('result_outside_control', node.id, '「结果」只能放在容器区域里，不能直接摆在顶层序列');
+    return;
+  }
+  const region = placement.path.at(-1)?.split('/')[1] ?? '';
+  const members = container.regions?.[region] ?? [];
+  if (members.at(-1) !== node.id) {
+    report('result_outside_control', node.id, '「结果」必须是所在区域的最后一条语句');
+    return;
+  }
+  const declared = resultTypeOf(container);
+  if (declared === 'none') {
+    report('result_outside_control', node.id, `容器 ${containerId} 没有声明结果，不需要「结果」节点`);
+    return;
+  }
+  if (typeParamOf(node) !== declared) {
+    report(
+      'region_result_type_mismatch',
+      node.id,
+      `「结果」是${typeParamOf(node)}，但容器 ${containerId} 声明的是${declared}`,
+    );
+  }
+}
+
+/** 容器声明了结果，就要在每条可达路径的末尾都给出结果。 */
+function checkContainerResults(
+  lookup: GraphLookup,
+  node: GraphNode,
+  regions: readonly { readonly name: string; readonly label: string }[],
+  report: Report,
+): void {
+  if (resultTypeOf(node) === 'none') return;
+  for (const region of regions) {
+    const members = node.regions?.[region.name] ?? [];
+    const last = members.at(-1);
+    const lastNode = last === undefined ? undefined : lookup.nodes.get(last);
+    if (lastNode === undefined || lastNode.kind !== NODE.result) {
+      report(
+        'missing_region_result',
+        node.id,
+        `节点 ${node.id} 声明了${resultTypeOf(node)}结果，但区域「${region.label}」末尾没有「结果」节点`,
+        { path: [...(lookup.placements.get(node.id)?.path ?? ['main']), `${node.id}/${region.name}`] },
+      );
+    }
+  }
+}
+
+/** 最近的循环容器 id：沿放置路径由内向外找。 */
+function nearestLoopId(lookup: GraphLookup, nodeId: string): string | undefined {
+  const placement = lookup.placements.get(nodeId);
+  if (placement === undefined) return undefined;
+  for (let index = placement.path.length - 1; index >= 1; index -= 1) {
+    const containerId = placement.path[index]?.split('/')[0] ?? '';
+    const container = lookup.nodes.get(containerId);
+    if (container !== undefined && nodeSpec(container.kind)?.loop === true) return containerId;
+  }
+  return undefined;
+}
+
+/** 一层作用域里已经声明过的变量。 */
+interface VarScope {
+  readonly parent?: VarScope;
+  readonly vars: Map<string, { readonly type: PortType }>;
+}
+
+/**
+ * 变量的静态检查（06 §5.4）：
+ * - 同一层重复声明报错；读取/设置必须能找到外层或本层（且本层要出现在它之前）的声明。
+ * - 分支/循环体看到的是**执行到容器那一刻**已声明的变量，所以按顺序边扫边加。
+ * - 没放进任何区域的读取节点按顶层作用域算（它被哪个语句用到由连线决定，静态上按最外层解释）。
+ */
+function checkVariables(document: GraphDocument, lookup: GraphLookup, report: Report): void {
+  const root: VarScope = { vars: new Map() };
+  walkVars(document.main, root, lookup, report);
+
+  for (const node of document.nodes) {
+    if (node.kind !== NODE.varGet || lookup.placements.get(node.id) !== undefined) continue;
+    resolveVar(root, node, '读取', report);
+  }
+}
+
+function walkVars(ids: readonly string[], scope: VarScope, lookup: GraphLookup, report: Report): void {
+  for (const id of ids) {
+    const node = lookup.nodes.get(id);
+    if (node === undefined) continue;
+    if (node.kind === NODE.varDeclare) {
+      const name = variableNameOf(node);
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(name)) {
+        report('invalid_param', node.id, `变量名「${name}」不合法：字母或下划线开头，只含字母、数字、下划线`, {
+          path: lookup.placements.get(node.id)?.path,
+        });
+        continue;
+      }
+      if (scope.vars.has(name)) {
+        report('duplicate_variable', node.id, `变量「${name}」在这层作用域里已经声明过了`);
+        continue;
+      }
+      scope.vars.set(name, { type: typeParamOf(node) });
+      continue;
+    }
+    if (node.kind === NODE.varGet || node.kind === NODE.varSet) {
+      resolveVar(scope, node, node.kind === NODE.varGet ? '读取' : '设置', report);
+      continue;
+    }
+    const spec = nodeSpec(node.kind);
+    if (spec === undefined) continue;
+    for (const region of nodeRegions(spec, node.params)) {
+      walkVars(node.regions?.[region.name] ?? [], { parent: scope, vars: new Map() }, lookup, report);
+    }
+  }
+}
+
+function resolveVar(
+  scope: VarScope,
+  node: GraphNode,
+  action: '读取' | '设置',
+  report: Report,
+): void {
+  const name = variableNameOf(node);
+  const type = typeParamOf(node);
+  let current: VarScope | undefined = scope;
+  while (current !== undefined) {
+    const binding = current.vars.get(name);
+    if (binding !== undefined) {
+      if (binding.type !== type) {
+        report(
+          'variable_type_mismatch',
+          node.id,
+          `变量「${name}」是${binding.type}，但这里按${type}${action}`,
+        );
+      }
+      return;
+    }
+    current = current.parent;
+  }
+  report('undeclared_variable', node.id, `变量「${name || '（未命名）'}」没有声明：先在它之前声明（06 §5.4）`);
+}
+
+function variableNameOf(node: GraphNode): string {
+  return typeof node.params.name === 'string' ? node.params.name.trim() : '';
+}
+
+function typeParamOf(node: GraphNode): PortType {
+  const raw = node.params.type;
+  return raw === 'bool' || raw === 'bytes' || raw === 'text' ? raw : 'int';
+}
+
+function resultTypeOf(node: GraphNode): PortType | 'none' {
+  const raw = node.params.resultType;
+  return raw === 'int' || raw === 'bool' || raw === 'bytes' || raw === 'text' ? raw : 'none';
 }
