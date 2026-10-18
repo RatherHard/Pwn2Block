@@ -21,7 +21,7 @@ export const VIEW_TITLES: Readonly<Record<ViewKind, string>> = {
   io: 'I/O 视图',
 };
 
-/** 标签栏上的短名（设计 §3.2：`[1 栈] 2 指令 3 寄存器 4 内存 5 I/O`）。 */
+/** 标签栏上的短名（设计 §3.2：`[栈] 指令 寄存器 内存 I/O`）。 */
 export const VIEW_TAB_LABELS: Readonly<Record<ViewKind, string>> = {
   stack: '栈',
   disasm: '指令',

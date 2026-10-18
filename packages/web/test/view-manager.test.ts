@@ -44,7 +44,7 @@ describe('视图面板（设计 §3.2）', () => {
     const manager = await mount('stack');
     expect(manager.renderRoot.querySelector('[role="tablist"]')).not.toBeNull();
     const list = tabs(manager);
-    expect(list.map((tab) => tab.textContent?.trim())).toEqual(['[1 栈]', '2 指令', '3 寄存器', '4 内存', '5 I/O']);
+    expect(list.map((tab) => tab.textContent?.trim())).toEqual(['[栈]', '指令', '寄存器', '内存', 'I/O']);
     expect(list.map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false', 'false']);
     expect(list.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1, -1]);
     const controls = list[0]?.getAttribute('aria-controls') ?? '';
@@ -74,7 +74,7 @@ describe('视图面板（设计 §3.2）', () => {
   it('无 I/O 题目不渲染 I/O 视图与标签', async () => {
     const manager = await mount('stack', noIo);
     expect(manager.renderRoot.querySelector('pwn2block-io-view')).toBeNull();
-    expect(tabs(manager).map((tab) => tab.textContent?.trim())).toEqual(['[1 栈]', '2 指令', '3 寄存器', '4 内存']);
+    expect(tabs(manager).map((tab) => tab.textContent?.trim())).toEqual(['[栈]', '指令', '寄存器', '内存']);
   });
 
   it('← → Home End 在标签栏上切换并移动焦点', async () => {
@@ -92,7 +92,7 @@ describe('视图面板（设计 §3.2）', () => {
       await manager.updateComplete;
     }
     expect(kinds).toEqual(['disasm', 'stack', 'io', 'stack', 'io']);
-    expect(manager.shadowRoot?.activeElement?.textContent?.trim()).toBe('[5 I/O]');
+    expect(manager.shadowRoot?.activeElement?.textContent?.trim()).toBe('[I/O]');
   });
 
   it('带修饰键的方向键不归标签栏：Alt+← 不切换、不拦截', async () => {

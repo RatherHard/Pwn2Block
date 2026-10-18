@@ -133,7 +133,7 @@ export class Pwn2BlockViewManager extends LitElement {
       <div class="box">
         <h2 class="box-title">视图</h2>
         <div role="tablist" aria-label="视图" @keydown=${this.onTabKey}>
-          ${tabs.map((kind, index) => this.renderTab(kind, index, kind === active))}
+          ${tabs.map((kind) => this.renderTab(kind, kind === active))}
         </div>
         ${repeat(tabs, (kind) => kind, (kind) => html`
           <div
@@ -151,8 +151,8 @@ export class Pwn2BlockViewManager extends LitElement {
     `;
   }
 
-  private renderTab(kind: ViewKind, index: number, selected: boolean) {
-    const text = `${index + 1} ${VIEW_TAB_LABELS[kind]}`;
+  private renderTab(kind: ViewKind, selected: boolean) {
+    const text = VIEW_TAB_LABELS[kind];
     return html`
       <button
         type="button"
