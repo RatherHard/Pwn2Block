@@ -104,6 +104,8 @@ export class Pwn2BlockTopBar extends LitElement {
         border-color: transparent;
         background: transparent;
       }
+      /* 上面的透明背景优先级高于 theme.ts 的 button.on，选中态要在这里重新反显，否则黑字落在黑底上。 */
+      .modes button.on,
       .modes button:hover:not(:disabled) {
         color: var(--p2b-bg);
         background: var(--p2b-fg);

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 const THEME_PATH = fileURLToPath(new URL('../src/theme.ts', import.meta.url));
 const MOUNT_PATH = fileURLToPath(new URL('../src/blocks/mount.ts', import.meta.url));
+const TOP_BAR_PATH = fileURLToPath(new URL('../src/components/top-bar.ts', import.meta.url));
 
 /** 引号字符串：值里不含同种引号，否则 `'x' / ''` 整段会被当成一个值。 */
 const QUOTED = String.raw`(?:'([^']+)'|"([^"]+)")`;
@@ -115,6 +116,11 @@ describe('TUI 样式清扫（设计 §1）', () => {
       expect(source, `theme.ts 命中 ${pattern}`).not.toMatch(pattern);
     }
     expect(source).toContain('color-scheme: dark');
+  });
+
+  it('顶栏模式按钮的选中态在 .modes 作用域里重新反显（透明背景会盖过 button.on）', () => {
+    const source = readSource(TOP_BAR_PATH);
+    expect(source).toMatch(/\.modes button\.on,\s*\.modes button:hover:not\(:disabled\) \{\s*color: var\(--p2b-bg\);\s*background: var\(--p2b-fg\);/);
   });
 
   it('mount.ts 不含装饰性 CSS、旧 token 或禁用标记', async () => {
