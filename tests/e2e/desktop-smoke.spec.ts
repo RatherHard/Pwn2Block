@@ -115,7 +115,7 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
   let sessionId = '';
   let initial: Projection;
   try {
-    await test.step('生产静态入口、六题列表与真实会话', async () => {
+    await test.step('生产静态入口、题目列表与真实会话', async () => {
       const [list, document] = await Promise.all([
         page.waitForResponse(res => res.url().endsWith('/api/challenges')),
         page.goto('/'),
@@ -127,7 +127,7 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       expect(list.status()).toBe(200);
       const challenges = await list.json() as { id: string }[];
       expect(challenges.map(item => item.id).sort()).toEqual(
-        ['callret', 'endian', 'localvar', 'pushpop', 'ret2win', 'stackframe'],
+        ['callret', 'endian', 'localvar', 'pushpop', 'ret2rop', 'ret2win', 'stackframe'],
       );
       await reachable(button('回到胜利'));
       await capture(page, info, '01-challenge-list');

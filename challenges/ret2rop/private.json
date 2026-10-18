@@ -1,0 +1,96 @@
+{
+  "registers": [
+    "RAX",
+    "RBX",
+    "RDX",
+    "RSI",
+    "RDI",
+    "RSP",
+    "RBP",
+    "RIP",
+    "FLAG"
+  ],
+  "roles": {
+    "sp": "RSP",
+    "bp": "RBP",
+    "ip": "RIP"
+  },
+  "initRegisters": {
+    "RSP": "0x7fffff00",
+    "RBP": "0x7fffff00",
+    "RIP": "0x400000"
+  },
+  "vmas": [
+    {
+      "id": "text",
+      "kind": "code",
+      "start": "0x400000",
+      "size": "0x1000",
+      "perm": "rx",
+      "hidden": false,
+      "init": [
+        {
+          "at": "0x400000",
+          "hex": "e80a004000000000000e5505075000000000000000bf000000000000000006ba000100000000000011c9c358c3131000000000000000c314c3151010000000000000754c00400000000000120e"
+        }
+      ]
+    },
+    {
+      "id": "stack",
+      "kind": "stack",
+      "start": "0x7fffe000",
+      "size": "0x2000",
+      "perm": "rw",
+      "hidden": false
+    }
+  ],
+  "win": {
+    "all": [
+      {
+        "reg_eq": {
+          "reg": "FLAG",
+          "value": "0x1"
+        }
+      },
+      {
+        "reg_eq": {
+          "reg": "RBX",
+          "value": "0x1010"
+        }
+      }
+    ]
+  },
+  "fail": [
+    {
+      "all": [
+        {
+          "exited": {}
+        },
+        {
+          "not": {
+            "reg_eq": {
+              "reg": "FLAG",
+              "value": "0x1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "all": [
+        {
+          "exited": {}
+        },
+        {
+          "not": {
+            "reg_eq": {
+              "reg": "RBX",
+              "value": "0x1010"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "flag": "env:FLAG_RET2ROP"
+}
