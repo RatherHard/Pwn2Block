@@ -59,11 +59,20 @@ export class Pwn2BlockTopBar extends LitElement {
         cursor: pointer;
         list-style: none;
       }
+      /*
+       * 开合箭头：只画右、下两条边的小方块，转 -45° 朝右（收起）、转 45° 朝下（展开）。
+       * 两态是同一个图形，大小与垂直位置一致；字符箭头在字体里高低不一。
+       * summary 是 flex 容器，伪元素作为 flex 项，宽高生效。
+       */
       .menu > summary::after {
-        margin-left: 0.45rem;
-        color: var(--p2b-dim);
-        content: '⌄';
-        content: '⌄' / '';
+        flex: none;
+        width: 0.38em;
+        height: 0.38em;
+        margin-left: 0.6rem;
+        border-right: var(--p2b-border) solid var(--p2b-dim);
+        border-bottom: var(--p2b-border) solid var(--p2b-dim);
+        content: '';
+        transform: rotate(-45deg);
       }
       .menu > summary:hover,
       .menu[open] > summary {
@@ -72,8 +81,7 @@ export class Pwn2BlockTopBar extends LitElement {
         background: var(--p2b-bg);
       }
       .menu[open] > summary::after {
-        content: '⌃';
-        content: '⌃' / '';
+        transform: translateY(-0.12em) rotate(45deg);
       }
       .menu-body {
         position: absolute;

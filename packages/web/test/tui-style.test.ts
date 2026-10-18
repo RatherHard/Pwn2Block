@@ -123,6 +123,13 @@ describe('TUI 样式清扫（设计 §1）', () => {
     expect(source).toMatch(/\.modes button\.on,\s*\.modes button:hover:not\(:disabled\) \{\s*color: var\(--p2b-bg\);\s*background: var\(--p2b-fg\);/);
   });
 
+  it('运行菜单的开合箭头用同一个两边框图形旋转，不用高低不一的字符箭头', () => {
+    const source = readSource(TOP_BAR_PATH);
+    expect(source).not.toMatch(/[⌄⌃›]/u);
+    expect(source).toMatch(/\.menu > summary::after \{[^}]*border-right:[^}]*border-bottom:[^}]*transform: rotate\(-45deg\);/);
+    expect(source).toMatch(/\.menu\[open\] > summary::after \{[^}]*rotate\(45deg\)/);
+  });
+
   it('mount.ts 不含装饰性 CSS、旧 token 或禁用标记', async () => {
     const source = readSource(MOUNT_PATH);
     for (const pattern of BANNED_PATTERNS) {
