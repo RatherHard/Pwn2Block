@@ -1,7 +1,7 @@
 # 前端 TUI 化与交互简化设计
 
 日期：2026-10-17
-来源：[docs/前端优化需求.md](../../前端优化需求.md)
+来源：[docs/archive/frontend-2026-10-18/前端优化需求.md](../../archive/frontend-2026-10-18/前端优化需求.md)
 范围：只改 `packages/web` 与相关文档；不改 `shared`、`engine`、`server`，不改 API 形状。
 
 ## 0. 已确认的决策
