@@ -47,6 +47,7 @@ import {
 import { sharedStyles, terminalTheme } from '../theme';
 import './briefing-panel';
 import './output-view';
+import './graph-panel';
 import './payload-panel';
 import './top-bar';
 import './verdict-panel';
@@ -438,6 +439,13 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   private renderPayloadPanel(state: ControllerState, challenge: PublicChallenge) {
+    // 受控入口：`?editor=graph` 换上新画布，积木保持原样，便于两套编辑方式对照（07 §P2/P9）。
+    if (graphEditorRequested()) {
+      return html`<pwn2block-graph-panel
+        .challenge=${challenge}
+        .store=${this.activeStore}
+      ></pwn2block-graph-panel>`;
+    }
     return html`<pwn2block-payload-panel
       .challenge=${challenge}
       .sessionId=${state.sessionId}
@@ -689,6 +697,17 @@ export class Pwn2BlockApp extends LitElement {
     const { mode } = (event as CustomEvent<{ mode: PageMode }>).detail;
     this.controller?.setMode(mode);
   };
+}
+
+/**
+ * 是否走节点画布入口（07 §P2 的受控入口）。
+ *
+ * 只认地址栏的 `?editor=graph`：默认仍是积木，换题不会意外切换编辑器；等 P9 迁移完成后
+ * 这条判断连同积木面板一起删掉。
+ */
+function graphEditorRequested(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('editor') === 'graph';
 }
 
 customElements.define('pwn2block-app', Pwn2BlockApp);
