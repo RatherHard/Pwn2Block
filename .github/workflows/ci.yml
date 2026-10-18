@@ -36,6 +36,12 @@ jobs:
         run: pnpm typecheck
       - name: Lint
         run: pnpm lint
+      # P6：运行器自测只用标准库，ubuntu-latest 自带 python3，所以这条在 CI 里是真跑的。
+      # 服务端那组真实解释器用例由 `pnpm test` 驱动；docker 后端用例在守护进程或镜像缺席时
+      # 整组跳过——跳过不等于通过，报告里必须写明。
+      - name: Python 运行器单元测试
+        working-directory: packages/python-runner
+        run: python3 -m unittest discover -s . -p "test_*.py" -v
       # 必须在测试之前构建：`packages/server/test/c04-static.test.ts` 里有两条**真实产物**用例
       # （对 `packages/web/dist` 实际发请求），产物缺席时整组跳过。先构建才能让静态托管与发布
       # 边界在 CI 里真的被执行，而不是被 skip 掉当成通过。

@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:python": "python -m unittest discover -s packages/python-runner -p \"test_*.py\"",
     "typecheck": "tsc -p tsconfig.json && tsc -p packages/web/tsconfig.json",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
