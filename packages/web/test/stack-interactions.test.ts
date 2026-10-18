@@ -85,7 +85,7 @@ it('保留非零对齐偏移时，地址跳转仍让目标字节出现在第一�
   const field = input(view, '跳转到地址', '0x1001');
   field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
   await view.updateComplete;
-  const first = BigInt(view.renderRoot.querySelector('tbody th')?.textContent?.trim() ?? '0');
+  const first = BigInt(view.renderRoot.querySelector('.row .addr')?.textContent?.trim() ?? '0');
   expect(first <= 0x1001n && first + 8n > 0x1001n).toBe(true);
   expect(view.renderRoot.querySelector<HTMLInputElement>('[aria-label="行首对齐偏移"]')?.value).toBe('7');
 });
