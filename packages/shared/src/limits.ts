@@ -72,5 +72,8 @@ export const SESSION_IDLE_MS = 30 * 60 * 1000;
 /** 单 fd 虚拟文件大小上限，防止题目包塞入超大文件。 */
 export const MAX_FILE_BYTES = 64 * 1024;
 
+/** 题目伪代码（`pseudocode.c`）的字符数上限：它随公开包整份下发，不能无限大。 */
+export const MAX_PSEUDOCODE_CHARS = 20_000;
+
 /** 默认监听端口。 */
 export const DEFAULT_PORT = 8787;

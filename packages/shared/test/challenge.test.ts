@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_PSEUDOCODE_CHARS,
   TEST_FLAG_SENTINEL,
   checkChallengePair,
+  normalizePseudocode,
   parsePrivatePackage,
   parsePublicPackage,
   ret2winPrivate,
@@ -274,9 +276,67 @@ describe('flag 真值泄露检查（S05 语义）', () => {
     expect(issuesOf(result).some((text) => text.includes('flag 真值'))).toBe(true);
   });
 
+  it('伪代码包含 flag 真值（大小写变体也算）或占位符时拒绝加载，文案不回显内容', () => {
+    for (const pseudocode of [`puts("${flagValue.toUpperCase()}");`, 'char *f = "ENV:FLAG_X";']) {
+      const result = checkChallengePair(ret2winPublic, ret2winPrivate, { flagValue, pseudocode });
+      expect(result.ok).toBe(false);
+      expect(issuesOf(result).every((text) => text.startsWith('pseudocode.c: '))).toBe(true);
+      expect(issuesOf(result).join('\n')).not.toContain(flagValue.toUpperCase());
+    }
+  });
+
+  it('字面 flag 也不能出现在伪代码里', () => {
+    const result = checkChallengePair(ret2winPublic, privWith({ flag: 'flag{literal}' }), {
+      pseudocode: 'puts("flag{literal}");',
+    });
+    expect(issuesOf(result)).toEqual(['pseudocode.c: 伪代码包含 flag 真值，拒绝加载']);
+  });
+
   it('flag 以字面量写死时也能正常解析（本地题目包）', () => {
     const result = checkChallengePair(ret2winPublic, privWith({ flag: 'flag{literal}' }), {});
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.definition.flagRef).toEqual({ kind: 'literal', value: 'flag{literal}' });
+  });
+});
+
+describe('伪代码（pseudocode.c）并入公开包', () => {
+  it('没有伪代码时公开包不带 pseudocode 字段', () => {
+    const result = checkChallengePair(ret2winPublic, ret2winPrivate, { flagValue });
+    expect(result.ok && 'pseudocode' in result.definition.pub).toBe(false);
+  });
+
+  it('规范化后并入：去 BOM、CRLF / CR 转 LF、去末尾空白，行首缩进保留', () => {
+    const result = checkChallengePair(ret2winPublic, ret2winPrivate, {
+      flagValue,
+      pseudocode: '\uFEFF  int main() {\r\n    vuln();\r}\r\n\n',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.definition.pub.pseudocode).toBe('  int main() {\n    vuln();\n}');
+  });
+
+  it('public.json 里直接写 pseudocode 字段被拒绝', () => {
+    const result = checkChallengePair(pubWith({ pseudocode: 'int main();' }), ret2winPrivate, { flagValue });
+    expect(issuesOf(result)).toEqual([
+      'pseudocode: 伪代码写在 pseudocode.c，public.json 里不要写 pseudocode 字段',
+    ]);
+  });
+
+  it('只有空白的文件被拒绝', () => {
+    const result = checkChallengePair(ret2winPublic, ret2winPrivate, { flagValue, pseudocode: ' \r\n\t\n' });
+    expect(issuesOf(result)).toEqual(['pseudocode.c: 伪代码文件为空：这道题不需要伪代码就删掉这个文件']);
+  });
+
+  it('长度以规范化后的字符数计：恰好上限通过，多一个字符被拒绝', () => {
+    const atLimit = 'x'.repeat(MAX_PSEUDOCODE_CHARS);
+    expect(checkChallengePair(ret2winPublic, ret2winPrivate, { flagValue, pseudocode: `${atLimit}\n` }).ok)
+      .toBe(true);
+    const result = checkChallengePair(ret2winPublic, ret2winPrivate, { flagValue, pseudocode: `${atLimit}x` });
+    expect(issuesOf(result)).toEqual([
+      `pseudocode.c: 伪代码有 ${MAX_PSEUDOCODE_CHARS + 1} 个字符，超过 ${MAX_PSEUDOCODE_CHARS} 的上限`,
+    ]);
+  });
+
+  it('normalizePseudocode 不改动已规范的文本', () => {
+    expect(normalizePseudocode('a\n\tb')).toBe('a\n\tb');
   });
 });

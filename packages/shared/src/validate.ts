@@ -22,6 +22,7 @@ import { ERROR_CODES } from './errors';
 import { asciiToBytes, containsBytesIgnoringAsciiCase, hexToBytes, parseHex } from './hex';
 import { MAX_VISIBLE_BYTES, PAGE_SIZE } from './limits';
 import type { VmaId } from './primitives';
+import { mergePseudocode, validatePseudocodeNoFlag } from './pseudocode';
 
 /**
  * 题目包校验（03 §2.2）。服务端加载与 `challenge:check` 共用这一份实现——
@@ -38,6 +39,8 @@ export interface ChallengeLoadContext {
   readonly presetItems?: readonly EncodingItem[];
   /** flag 真值（部署时由环境变量注入）。缺失时该题拒绝加载（06 §6）。 */
   readonly flagValue?: string;
+  /** `pseudocode.c` 原文，由调用方读文件后传入；文件不存在时不传。 */
+  readonly pseudocode?: string;
 }
 
 export type FlagRef =
@@ -393,7 +396,9 @@ export function checkChallengePair(
   privateRaw: unknown,
   ctx: ChallengeLoadContext = {},
 ): ChallengeCheckResult {
-  const pubResult = parsePublicPackage(publicRaw);
+  const merged = mergePseudocode(publicRaw, ctx.pseudocode);
+  if (!merged.ok) return { ok: false, issues: merged.issues };
+  const pubResult = parsePublicPackage(merged.raw);
   if (!pubResult.ok) return { ok: false, issues: pubResult.issues };
   const privResult = parsePrivatePackage(privateRaw);
   if (!privResult.ok) return { ok: false, issues: privResult.issues };
@@ -456,6 +461,10 @@ export function checkChallengePair(
 
   const flagValue = flagRef?.kind === 'env' ? flagRef.resolved : ctx.flagValue;
   issues.push(...validateFlagNotLeaked(priv, flagValue));
+  // 伪代码是公开面：字面 flag 也要查，不只查环境变量注入的真值。
+  issues.push(
+    ...validatePseudocodeNoFlag(pub.pseudocode, flagRef?.kind === 'literal' ? flagRef.value : flagValue),
+  );
 
   if (issues.length > 0 || !flagRef || !encodingResult.ok) {
     return { ok: false, issues };

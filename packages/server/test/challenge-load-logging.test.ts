@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { asciiToBytes, bytesToHex } from '@pwn2block/shared';
@@ -151,5 +151,44 @@ describe('D6 题目加载告警（真实日志流）', () => {
     const server = start({ challengeDir: join(root, 'absent') });
     expect((await server.inject('/api/challenges')).json()).toEqual([]);
     expect(logs()).toEqual([]);
+  });
+});
+
+describe('pseudocode.c：并入公开包下发', () => {
+  const pseudocodePath = (): string => join(root, 'ret2win', 'pseudocode.c');
+
+  it('文件存在时规范化后随详情下发（去 BOM、CRLF 转 LF、去末尾空白）', async () => {
+    writeFileSync(pseudocodePath(), '\uFEFFvoid vuln() {\r\n  char buf[8];\r\n}\r\n\r\n', 'utf8');
+    const server = start();
+    expect((await server.inject('/api/challenges/ret2win')).json()).toEqual({
+      ...testPublic(), pseudocode: 'void vuln() {\n  char buf[8];\n}',
+    });
+    expect(logs()).toEqual([]);
+  });
+
+  it.each([
+    ['含 flag 真值', `puts("${TEST_FLAG_VALUE.toUpperCase()}");`],
+    ['含 flag 占位符', 'char *flag = "env:FLAG_RET2WIN";'],
+    ['只有空白', '  \n\n'],
+  ])('%s：拒绝加载，内容不进日志', async (_name, text) => {
+    writeFileSync(pseudocodePath(), text, 'utf8');
+    const server = start();
+    await expectUnavailable(server);
+    expectWarning('package_validation_failed');
+    expect(output).not.toContain(TEST_FLAG_VALUE.toUpperCase());
+  });
+
+  it('public.json 里直接写 pseudocode 字段：拒绝加载，伪代码只能来自文件', async () => {
+    writeChallenge(root, 'ret2win', { ...testPublic(), pseudocode: 'int main();' }, testPrivate());
+    const server = start();
+    await expectUnavailable(server);
+    expectWarning('package_validation_failed');
+  });
+
+  it('文件存在却读不了：固定原因码 pseudocode_read_failed', async () => {
+    mkdirSync(pseudocodePath());
+    const server = start();
+    await expectUnavailable(server);
+    expectWarning('pseudocode_read_failed');
   });
 });

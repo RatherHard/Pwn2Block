@@ -1,6 +1,11 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ChallengeIdSchema, flagEnvVarName, type ChallengeIssue } from '@pwn2block/shared';
+import {
+  ChallengeIdSchema,
+  PSEUDOCODE_FILE_NAME,
+  flagEnvVarName,
+  type ChallengeIssue,
+} from '@pwn2block/shared';
 import { challengeDir, challengesDir, repoRoot } from './paths';
 
 /**
@@ -8,6 +13,7 @@ import { challengeDir, challengesDir, repoRoot } from './paths';
  *
  * - `public.json`（题目公开面）、`private.json`（判题真值）**必须存在**；
  * - `program.asm`（伪汇编源）、`solution.md`（参考解法）按需读取，供 `asm` / `solve` 用；
+ * - `pseudocode.c`（给学习者看的伪代码）可选，与 `solution.md` 一样要求 UTF-8 + LF；
  * - flag 真值只从环境变量取：`process.env[FLAG_<ID大写>]`，取不到就是 `undefined`，
  *   交给 `checkChallengePair` 报「缺失即拒绝加载」，工具绝不往文件里写 flag（06 §6）。
  *
@@ -19,6 +25,7 @@ export const CHALLENGE_FILE_NAMES = {
   private: 'private.json',
   asm: 'program.asm',
   solution: 'solution.md',
+  pseudocode: PSEUDOCODE_FILE_NAME,
 } as const;
 
 export interface ChallengeFiles {
@@ -32,6 +39,8 @@ export interface ChallengeFiles {
   readonly programAsm?: string;
   /** `solution.md` 原文；文件不存在时为 `undefined`。 */
   readonly solutionMarkdown?: string;
+  /** `pseudocode.c` 原文；文件不存在时为 `undefined`，题目就没有伪代码标签页。 */
+  readonly pseudocode?: string;
   /** 环境变量注入的 flag 真值；缺失时为 `undefined`。 */
   readonly flagValue?: string;
 }
@@ -74,12 +83,12 @@ function readOptionalText(path: string): string | undefined {
   }
 }
 
-type ReadSolutionResult =
+type ReadStrictTextResult =
   | { readonly ok: true; readonly text: string | undefined }
   | { readonly ok: false; readonly message: string };
 
-/** 检查完整参考解法的字节与行尾，不猜测合法 UTF-8 文本是否已经乱码。 */
-function readSolutionText(path: string): ReadSolutionResult {
+/** 读可选文本（参考解法、伪代码）：检查字节与行尾，不猜测合法 UTF-8 文本是否已经乱码。 */
+function readStrictText(path: string): ReadStrictTextResult {
   let bytes: Buffer;
   try {
     bytes = readFileSync(path);
@@ -136,9 +145,13 @@ export function readChallengeFiles(
   if (!privateResult.ok) issues.push(issue(CHALLENGE_FILE_NAMES.private, privateResult.message));
   if (!publicResult.ok || !privateResult.ok) return { ok: false, id, issues };
 
-  const solutionResult = readSolutionText(join(dir, CHALLENGE_FILE_NAMES.solution));
+  const solutionResult = readStrictText(join(dir, CHALLENGE_FILE_NAMES.solution));
   if (!solutionResult.ok) {
     return { ok: false, id, issues: [issue(CHALLENGE_FILE_NAMES.solution, solutionResult.message)] };
+  }
+  const pseudocodeResult = readStrictText(join(dir, CHALLENGE_FILE_NAMES.pseudocode));
+  if (!pseudocodeResult.ok) {
+    return { ok: false, id, issues: [issue(CHALLENGE_FILE_NAMES.pseudocode, pseudocodeResult.message)] };
   }
 
   return {
@@ -152,6 +165,7 @@ export function readChallengeFiles(
       privateRaw: privateResult.value,
       programAsm: readOptionalText(join(dir, CHALLENGE_FILE_NAMES.asm)),
       solutionMarkdown: solutionResult.text,
+      pseudocode: pseudocodeResult.text,
       flagValue: readFlagValue(id, options.env ?? process.env),
     },
   };

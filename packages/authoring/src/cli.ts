@@ -29,7 +29,8 @@ export const USAGE = `用法：pnpm challenge:<command> [<id>|--all] [选项]
   asm <id>      编译 program.asm，把 hex 写回 private.json 里对应 VMA 的 init
                 （内容没变时不写盘；汇编错误一律非零退出，不写半成品字节）
   check <id>    校验 public.json / private.json：Schema、VMA 布局、编码表、谓词、
-                跨包引用、flag 缺失；检查 solution.md 的 UTF-8 与 LF 行尾
+                跨包引用、flag 缺失；检查 solution.md 的 UTF-8 与 LF 行尾；
+                有 pseudocode.c 时检查编码、长度上限，且不得含 flag 占位符或真值
   check --all   校验 challenges/ 下全部题目；目录为空时提示并返回 0
   solve <id>    把 solution.md 里的 payload 当成一次提交回放，断言 verdict 等于 expectedVerdict
   solve --all   对 challenges/ 下全部题目执行 solve；目录为空时提示并返回 0

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ChallengeIdSchema,
   ChallengeSummarySchema,
+  PSEUDOCODE_FILE_NAME,
   PrivateChallengeSchema,
   PublicChallengeSchema,
   checkChallengePair,
@@ -25,6 +26,7 @@ import type {
  * - **加载失败的题目不出现在列表里**（08 §3 D1）；它的 id 记下来，请求它时回 503
  *   `challenge_unavailable`，而不是假装不存在。
  * - `private.json` 只在这里被读，内容永不进入任何 HTTP 响应（01 §6 第 1 条）。
+ * - 可选的 `pseudocode.c` 并入公开包的 `pseudocode` 字段，随 `GET /api/challenges/:id` 下发。
  */
 
 export interface LoadedChallenge {
@@ -47,7 +49,7 @@ export interface ChallengeLoadFailure {
   readonly challengeId: string | null;
   readonly reason:
     | 'public_read_failed' | 'public_json_invalid'
-    | 'private_read_failed' | 'private_json_invalid'
+    | 'private_read_failed' | 'private_json_invalid' | 'pseudocode_read_failed'
     | 'id_mismatch' | 'public_schema_invalid' | 'private_schema_invalid'
     | 'flag_missing' | 'preset_unavailable' | 'package_validation_failed';
 }
@@ -173,11 +175,36 @@ function loadOne(dir: string, dirName: string, options: ChallengeLoadOptions): L
     };
   }
 
-  return validateLoadedPair(dirName, pubRaw.value, privRaw.value, options);
+  const pseudocode = readOptionalText(join(dir, dirName, PSEUDOCODE_FILE_NAME));
+  if (!pseudocode.ok) {
+    return {
+      ok: false,
+      id: dirName,
+      reason: 'pseudocode_read_failed',
+      issues: [issue(PSEUDOCODE_FILE_NAME, `题目 ${dirName} 的 ${PSEUDOCODE_FILE_NAME} 读取失败`)],
+    };
+  }
+
+  return validateLoadedPair(dirName, pubRaw.value, privRaw.value, pseudocode.text, options);
+}
+
+/** 可选文件：不存在算正常（`text` 为 `undefined`），存在却读不了才算失败。 */
+function readOptionalText(file: string):
+  | { readonly ok: true; readonly text: string | undefined }
+  | { readonly ok: false } {
+  try {
+    return { ok: true, text: readFileSync(file, 'utf8') };
+  } catch (error) {
+    return isMissingPath(error) ? { ok: true, text: undefined } : { ok: false };
+  }
 }
 
 function validateLoadedPair(
-  dirName: string, publicRaw: unknown, privateRaw: unknown, options: ChallengeLoadOptions,
+  dirName: string,
+  publicRaw: unknown,
+  privateRaw: unknown,
+  pseudocode: string | undefined,
+  options: ChallengeLoadOptions,
 ): LoadResult {
   const pubLight = PublicChallengeSchema.safeParse(publicRaw);
   const declaredId: string = pubLight.success ? pubLight.data.id : dirName;
@@ -194,7 +221,7 @@ function validateLoadedPair(
   const presetItems = readPresetItems(options, presetName);
   const privLight = PrivateChallengeSchema.safeParse(privateRaw);
   const flagValue = privLight.success ? resolveFlag(privLight.data, options.env) : undefined;
-  const checked = checkChallengePair(publicRaw, privateRaw, { presetItems, flagValue });
+  const checked = checkChallengePair(publicRaw, privateRaw, { presetItems, flagValue, pseudocode });
   if (!checked.ok) {
     // 按加载阶段分类，绝不输出可能夹带私有值的 issue.path/message。
     const reason = !pubLight.success ? 'public_schema_invalid'

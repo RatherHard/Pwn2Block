@@ -15,6 +15,7 @@ export * from './limits';
 export * from './placeholders';
 export * from './primitives';
 export * from './projection';
+export * from './pseudocode';
 export * from './solution';
 export * from './validate';
 export * from './vm';

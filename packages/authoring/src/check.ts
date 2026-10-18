@@ -224,6 +224,7 @@ export function loadChallengeDefinition(id: string, options: CheckOptions = {}):
   const checked = checkChallengePair(files.publicRaw, files.privateRaw, {
     presetItems,
     flagValue: files.flagValue,
+    pseudocode: files.pseudocode,
   });
 
   const issues = [...gateIssues, ...presetIssues, ...(checked.ok ? [] : checked.issues)];

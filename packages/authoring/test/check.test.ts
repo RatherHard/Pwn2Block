@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { flagEnvVarName, ret2winPrivate, ret2winPublic } from '@pwn2block/shared';
+import { MAX_PSEUDOCODE_CHARS, flagEnvVarName, ret2winPrivate, ret2winPublic } from '@pwn2block/shared';
 import { checkAllChallenges, checkChallenge, loadChallengeDefinition } from '../src/check';
 import { readChallengeFiles } from '../src/challenge-files';
 import { clearPresetCache } from '../src/presets';
@@ -372,5 +372,47 @@ describe('challenge-files：四件套读取', () => {
     if (!result.ok) return;
     expect(result.files.programAsm).toBeUndefined();
     expect(result.files.solutionMarkdown).toBeUndefined();
+  });
+});
+
+describe('check：pseudocode.c（可选，随公开包下发）', () => {
+  function ret2winRepoWithPseudocode(text: string | Buffer): string {
+    const root = makeRet2winRepo();
+    writeFileSync(join(root, 'challenges', 'ret2win', 'pseudocode.c'), text);
+    return root;
+  }
+
+  it('没有 pseudocode.c 时为 undefined，check 照常通过', () => {
+    const result = loadChallengeDefinition('ret2win', { root: makeRet2winRepo(), env: ret2winEnv });
+    expect(result.ok && result.files.pseudocode).toBeUndefined();
+    expect(result.ok && result.definition.pub.pseudocode).toBeUndefined();
+  });
+
+  it('合法的伪代码并入公开包', () => {
+    const root = ret2winRepoWithPseudocode('void vuln() {\n  gets(buf);\n}\n');
+    const result = loadChallengeDefinition('ret2win', { root, env: ret2winEnv });
+    expect(result.ok && result.definition.pub.pseudocode).toBe('void vuln() {\n  gets(buf);\n}');
+  });
+
+  it.each([
+    ['flag 占位符', 'char *flag = "env:FLAG_RET2WIN";', '伪代码里不能出现 flag 占位符 env:FLAG_…：它会原样下发给学习者'],
+    ['flag 真值', `puts("${SENTINEL}");`, '伪代码包含 flag 真值，拒绝加载'],
+    ['超长', 'x'.repeat(MAX_PSEUDOCODE_CHARS + 1), `伪代码有 ${MAX_PSEUDOCODE_CHARS + 1} 个字符，超过 ${MAX_PSEUDOCODE_CHARS} 的上限`],
+  ])('含%s时报 pseudocode.c', (_name, text, message) => {
+    const report = checkChallenge('ret2win', { root: ret2winRepoWithPseudocode(text), env: ret2winEnv });
+    expect(report.issues).toEqual([{ path: 'pseudocode.c', message }]);
+  });
+
+  it('与 solution.md 一样要求 LF 和合法 UTF-8', () => {
+    const crlf = checkChallenge('ret2win', { root: ret2winRepoWithPseudocode('int a;\r\n'), env: ret2winEnv });
+    expect(crlf.issues).toEqual([
+      { path: 'pseudocode.c', message: '行尾必须使用 LF：检测到 CRLF 或单独 CR，请转换为 LF 后重试' },
+    ]);
+    const badBytes = checkChallenge('ret2win', {
+      root: ret2winRepoWithPseudocode(Buffer.from([0x69, 0x6e, 0x74, 0xff])),
+      env: ret2winEnv,
+    });
+    expect(badBytes.issues[0]?.path).toBe('pseudocode.c');
+    expect(badBytes.ok).toBe(false);
   });
 });

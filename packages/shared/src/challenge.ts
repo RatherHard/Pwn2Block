@@ -7,6 +7,7 @@ import {
   MAX_CONTAINS_BYTES,
   MAX_FILE_BYTES,
   MAX_PREDICATE_DEPTH,
+  MAX_PSEUDOCODE_CHARS,
   MAX_REGISTERS,
   MAX_SYSCALL_COUNT,
 } from './limits';
@@ -219,6 +220,11 @@ export const PublicChallengeSchema = z.strictObject({
   authorBlocks: z.array(AuthorBlockSchema).max(32).optional(),
   hints: z.array(HintSchema).max(16).optional(),
   errorNotes: z.record(z.string(), z.string().min(1).max(500)).optional(),
+  /**
+   * 出题人写的伪代码，只读展示。题目包里写在单独的 `pseudocode.c`，
+   * 由 `mergePseudocode` 并入；`public.json` 里直接写这个字段会被拒绝。
+   */
+  pseudocode: z.string().min(1).max(MAX_PSEUDOCODE_CHARS).optional(),
 });
 export type PublicChallenge = z.infer<typeof PublicChallengeSchema>;
 
