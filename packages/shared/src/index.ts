@@ -19,3 +19,4 @@ export * from './pseudocode';
 export * from './solution';
 export * from './validate';
 export * from './vm';
+export * from './workflow';
