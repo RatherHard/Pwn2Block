@@ -18,7 +18,8 @@ import type {
 } from '@pwn2block/shared';
 import { execControl, isControlKind, type ExecSink, type FlowSignal } from './control';
 import { paramsOf } from './document';
-import { createEvalContext, evalNodeValue, resolveInput, type EvalContext } from './evaluate';
+import { createEvalContext, evalNodeValue, makePreview, resolveInput, type EvalContext } from './evaluate';
+import { execFlowModule } from './modules';
 import type {
   CompileGraphInput,
   CompileOutcome,
@@ -137,6 +138,30 @@ async function execSequence(
         execSequence: (members, nested) => execSequence(ctx, members, nested, sink, cancel),
       });
       if (flow !== undefined) return flow;
+      continue;
+    }
+
+    // 模块调用：把模块体展开进当前序列，动作与来源照常追加（06 §7）。
+    if (node.kind === NODE.moduleCall) {
+      const value = await execFlowModule(ctx, node, path, {
+        sink,
+        execSequence: (members, nested) => execSequence(ctx, members, nested, sink, cancel),
+      });
+      if (value !== undefined) {
+        ctx.produced.set(node.id, value);
+        ctx.previews.set(node.id, makePreview(node.id, value, undefined));
+      }
+      continue;
+    }
+
+    // 模块结果：模块体最后一条，把值交给调用方读取（不是动作）。
+    if (node.kind === NODE.moduleReturn) {
+      const value = await resolveInput(ctx, node, spec, 'value');
+      if (value.ok) {
+        ctx.produced.set(node.id, value.value);
+        ctx.previews.set(node.id, makePreview(node.id, value.value, undefined));
+        trace(sink, nodeId, path, `模块结果：${ctx.previews.get(nodeId)?.summary ?? ''}`, ctx);
+      }
       continue;
     }
 
@@ -333,6 +358,7 @@ function originOf(
     nodeId,
     path,
     ...(rounds === undefined ? {} : { rounds }),
+    ...(ctx.moduleStack.length === 0 ? {} : { modules: [...ctx.moduleStack] }),
   };
 }
 

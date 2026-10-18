@@ -2,10 +2,11 @@ import { z } from 'zod';
 import {
   MAX_BYTE_CONSTRUCTION_BYTES,
   WORKFLOW_MAX_CONNECTIONS,
+  WORKFLOW_MAX_MODULES,
   WORKFLOW_MAX_NODES,
   WORKFLOW_MAX_REGION_ITEMS,
 } from '../limits';
-import { WORKFLOW_FORMAT, WORKFLOW_VERSION, type GraphDocument } from './types';
+import { MODULE_KINDS, PORT_TYPES, WORKFLOW_FORMAT, WORKFLOW_VERSION, type GraphDocument } from './types';
 
 /**
  * 图文档的 Schema（07 §P1）。
@@ -50,6 +51,31 @@ export const NodeLayoutSchema = z.strictObject({
   collapsed: z.boolean().optional(),
 });
 
+export const ModulePortSchema = z.strictObject({
+  name: z.string().regex(PORT_NAME_RE, '端口名只能是字母、数字和下划线'),
+  type: z.enum(PORT_TYPES),
+  default: ParamValueSchema.optional(),
+});
+
+/** 模块体是一张独立的小图：节点、连线、序列与布局都与主图同构。 */
+const ModuleBodySchema = {
+  nodes: z.array(GraphNodeSchema).max(WORKFLOW_MAX_NODES),
+  connections: z.array(GraphConnectionSchema).max(WORKFLOW_MAX_CONNECTIONS),
+  main: z.array(z.string().regex(NODE_ID_RE)).max(WORKFLOW_MAX_REGION_ITEMS),
+  layout: z.record(z.string(), NodeLayoutSchema).default({}),
+};
+
+export const GraphModuleSchema = z.strictObject({
+  id: z.string().regex(NODE_ID_RE, '模块 id 只能是字母、数字、下划线和连字符'),
+  name: z.string().min(1).max(40),
+  summary: z.string().max(200),
+  kind: z.enum(MODULE_KINDS),
+  version: z.number().int().min(1).max(1000),
+  inputs: z.array(ModulePortSchema).max(16),
+  output: ModulePortSchema.optional(),
+  ...ModuleBodySchema,
+});
+
 export const GraphDocumentSchema = z.strictObject({
   format: z.literal(WORKFLOW_FORMAT),
   version: z.number().int().min(1),
@@ -57,6 +83,7 @@ export const GraphDocumentSchema = z.strictObject({
   connections: z.array(GraphConnectionSchema).max(WORKFLOW_MAX_CONNECTIONS),
   main: z.array(z.string().regex(NODE_ID_RE)).max(WORKFLOW_MAX_REGION_ITEMS),
   layout: z.record(z.string(), NodeLayoutSchema).default({}),
+  modules: z.array(GraphModuleSchema).max(WORKFLOW_MAX_MODULES).default([]),
 });
 
 export type ParsedGraphDocument = z.infer<typeof GraphDocumentSchema>;

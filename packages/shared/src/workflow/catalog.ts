@@ -1,5 +1,6 @@
 import { NODE } from './kinds';
 import { CONTROL_SPECS } from './catalog-control';
+import { MODULE_SPECS, declaredInputs } from './catalog-modules';
 import type { ArchBits } from '../primitives';
 import type { AuthorBlock } from '../challenge';
 import type {
@@ -531,6 +532,7 @@ const START: NodeKindSpec = {
 export const NODE_SPECS: readonly NodeKindSpec[] = [
   START,
   ...CONTROL_SPECS,
+  ...MODULE_SPECS,
   FILL,
   ADDRESS,
   CONCAT,
@@ -693,20 +695,9 @@ function asPortType(raw: ParamValue | undefined, fallback: PortType): PortType {
 }
 
 /** Python 节点的命名输入：`name:类型` 一行一个。 */
+/** Python 节点的命名输入：与模块调用节点共用同一套解析。 */
 export function pythonInputs(params: ParamValues): readonly InputPortSpec[] {
-  const raw = params.inputs;
-  const entries: readonly string[] = Array.isArray(raw)
-    ? raw.filter((entry): entry is string => typeof entry === 'string')
-    : typeof raw === 'string'
-      ? raw.split(/[\n,]/)
-      : [];
-  const ports: InputPortSpec[] = [];
-  for (const entry of entries) {
-    const [name, type] = entry.split(':').map((part: string) => part.trim());
-    if (name === undefined || name === '' || !/^[a-z][a-z0-9_]{0,15}$/.test(name)) continue;
-    ports.push({ name, label: name, type: asPortType(type, 'bytes'), required: true });
-  }
-  return ports;
+  return declaredInputs(params);
 }
 
 /** 出题人积木的输入端口由 `authorBlocks` 声明决定；未声明时只留 `id` 参数。 */

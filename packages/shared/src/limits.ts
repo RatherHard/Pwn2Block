@@ -105,6 +105,9 @@ export const WORKFLOW_EVAL_STEP_LIMIT = 4096;
 /** 模块调用深度上限（06 §7：支持有限嵌套，不支持递归）。 */
 export const WORKFLOW_MODULE_DEPTH_LIMIT = 4;
 
+/** 一份存档里允许定义的模块数上限；与节点上限同属「不接受恶意存档」的护栏。 */
+export const WORKFLOW_MAX_MODULES = 64;
+
 /** 单次 Python 求值的墙钟上限。超时按失败处理，不返回部分结果。 */
 export const PYTHON_EVAL_TIMEOUT_MS = 2_000;
 

@@ -80,6 +80,38 @@ export interface GraphConnection {
  * `main` 是顶层执行序列；容器节点（条件分支、循环）把自己的语句放在 `regions` 里，
  * 因此不需要执行边，也不会出现「任意回边」。
  */
+export const MODULE_KINDS = ['data', 'flow'] as const;
+export type ModuleKind = (typeof MODULE_KINDS)[number];
+
+/** 模块端口：命名、类型、默认可选（06 §7）。 */
+export interface ModulePort {
+  readonly name: string;
+  readonly type: PortType;
+  /** 调用方没接线时用的默认值；没有默认值就是必填。 */
+  readonly default?: ParamValue;
+}
+
+/**
+ * 一个模块定义（06 §7）。
+ *
+ * `id` 稳定、`version` 固定：调用节点记住自己用的版本，新版本不会悄悄改掉已有实例。
+ * 模块体是一张独立的图（自己的节点、连线、序列、布局），与主图共享节点种类。
+ */
+export interface GraphModule {
+  readonly id: string;
+  readonly name: string;
+  readonly summary: string;
+  readonly kind: ModuleKind;
+  readonly version: number;
+  readonly inputs: readonly ModulePort[];
+  /** 数据模块必须有；流程模块可以没有（只做事、不带结果）。 */
+  readonly output?: ModulePort;
+  readonly nodes: readonly GraphNode[];
+  readonly connections: readonly GraphConnection[];
+  readonly main: readonly string[];
+  readonly layout: Readonly<Record<string, NodeLayout>>;
+}
+
 export interface GraphDocument {
   readonly format: typeof WORKFLOW_FORMAT;
   readonly version: number;
@@ -87,6 +119,8 @@ export interface GraphDocument {
   readonly connections: readonly GraphConnection[];
   readonly main: readonly string[];
   readonly layout: Readonly<Record<string, NodeLayout>>;
+  /** 用户在当前图里定义的模块；调用节点按 id + 版本引用它们。 */
+  readonly modules?: readonly GraphModule[];
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +170,13 @@ export const WORKFLOW_ISSUE_CODES = [
   'undeclared_variable',
   'duplicate_variable',
   'variable_type_mismatch',
+  'module_missing',
+  'module_duplicate',
+  'module_kind_mismatch',
+  'module_ports_mismatch',
+  'module_recursion',
+  'module_depth',
+  'module_has_action',
 ] as const;
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
 

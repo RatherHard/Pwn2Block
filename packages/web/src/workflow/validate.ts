@@ -5,12 +5,14 @@ import {
   nodeOutput,
   nodeSpec,
   WORKFLOW_MAX_CONNECTIONS,
+  WORKFLOW_MODULE_DEPTH_LIMIT,
   WORKFLOW_MAX_NESTING,
   WORKFLOW_MAX_NODES,
   WORKFLOW_MAX_REGION_ITEMS,
 } from '@pwn2block/shared';
 import type {
   GraphDocument,
+  GraphModule,
   GraphNode,
   InputPortSpec,
   NodeKindSpec,
@@ -83,6 +85,7 @@ export function validateGraph(document: GraphDocument, context: WorkflowContext)
   checkCycles(document, report);
   checkMissingInputs(document, portContext, lookup, report);
   checkUnused(document, lookup, report);
+  checkModules(document, portContext, report);
 
   const errors = issues.filter((issue) => issue.severity === 'error');
   return {
@@ -629,4 +632,166 @@ function typeParamOf(node: GraphNode): PortType {
 function resultTypeOf(node: GraphNode): PortType | 'none' {
   const raw = node.params.resultType;
   return raw === 'int' || raw === 'bool' || raw === 'bytes' || raw === 'text' ? raw : 'none';
+}
+// ---------------------------------------------------------------------------
+// 模块（06 §7；07 §P5）
+// ---------------------------------------------------------------------------
+
+/**
+ * 模块校验：定义唯一、调用能找到**固定版本**、端口与输出一致、调用图无递归且不过深。
+ *
+ * 模块体不重复整张图的全部校验（它没有 start），但会检查节点 id 唯一、序列引用存在、
+ * 数据模块里没有动作/控制；模块内部的端口类型问题由运行时与调用端口比对兜住。
+ */
+function checkModules(document: GraphDocument, portContext: PortContext, report: Report): void {
+  const modules = document.modules ?? [];
+  const seen = new Set<string>();
+  for (const module of modules) {
+    const key = moduleKey(module);
+    if (seen.has(key)) report('module_duplicate', module.id, `模块 ${key} 重复定义：同一 id 与版本只能有一份`);
+    seen.add(key);
+    checkModuleBody(module, report);
+  }
+
+  checkCallNodes(document.nodes, modules, portContext, report, true);
+  for (const module of modules) checkCallNodes(module.nodes, modules, portContext, report, false);
+  checkCallGraph(document, modules, report);
+}
+
+function checkModuleBody(module: GraphModule, report: Report): void {
+  const ids = new Set<string>();
+  for (const node of module.nodes) {
+    if (ids.has(node.id)) report('duplicate_id', node.id, `模块 ${module.id} 里节点 ${node.id} 重复`);
+    ids.add(node.id);
+    const spec = nodeSpec(node.kind);
+    if (spec === undefined) {
+      report('unknown_kind', node.id, `模块 ${module.id} 里有未知节点 ${node.kind}`);
+      continue;
+    }
+    if (module.kind === 'data' && spec.exec && node.kind !== NODE.moduleReturn) {
+      report('module_has_action', node.id, `数据模块 ${module.id} 里不能放「${spec.label}」：数据模块只做计算`);
+    }
+  }
+  for (const id of module.main) {
+    if (!ids.has(id)) report('unknown_node', id, `模块 ${module.id} 的序列引用了不存在的节点 ${id}`);
+  }
+  const returns = module.main.filter((id) => module.nodes.find((node) => node.id === id)?.kind === NODE.moduleReturn);
+  const last = module.main[module.main.length - 1];
+  if (module.output !== undefined) {
+    if (returns.length !== 1 || returns[0] !== last) {
+      report('missing_region_result', last ?? module.id, `模块 ${module.id} 声明了结果：最后一条必须是「模块结果」`);
+    }
+    const returnNode = module.nodes.find((node) => node.id === last);
+    if (returnNode !== undefined && returnNode.kind === NODE.moduleReturn) {
+      const type = typeof returnNode.params.valueType === 'string' ? returnNode.params.valueType : 'bytes';
+      if (type !== module.output.type) {
+        report('module_ports_mismatch', returnNode.id, `模块 ${module.id} 的结果类型与「模块结果」节点不一致`);
+      }
+    }
+  } else if (returns.length > 0) {
+    report('module_ports_mismatch', returns[0] ?? module.id, `模块 ${module.id} 没有声明结果，不该放「模块结果」`);
+  }
+}
+
+function checkCallNodes(
+  nodes: readonly GraphNode[],
+  modules: readonly GraphModule[],
+  portContext: PortContext,
+  report: Report,
+  topLevel: boolean,
+): void {
+  for (const node of nodes) {
+    if (node.kind === NODE.moduleReturn) {
+      if (topLevel) report('result_outside_control', node.id, '「模块结果」只能放在模块体里，且是最后一条');
+      continue;
+    }
+    if (node.kind !== NODE.moduleData && node.kind !== NODE.moduleCall) continue;
+    const spec = nodeSpec(node.kind);
+    if (spec === undefined) continue;
+    const id = typeof node.params.moduleId === 'string' ? node.params.moduleId.trim() : '';
+    const version = typeof node.params.moduleVersion === 'number' ? node.params.moduleVersion : 1;
+    if (id === '') {
+      report('module_missing', node.id, '模块调用没有选择模块');
+      continue;
+    }
+    const module = modules.find((candidate) => candidate.id === id && candidate.version === version);
+    if (module === undefined) {
+      const anyVersion = modules.some((candidate) => candidate.id === id);
+      report(
+        'module_missing',
+        node.id,
+        anyVersion ? `模块 ${id} 没有版本 ${version}：请显式升级这个调用` : `找不到模块 ${id}`,
+      );
+      continue;
+    }
+    const expected = node.kind === NODE.moduleData ? 'data' : 'flow';
+    if (module.kind !== expected) {
+      report('module_kind_mismatch', node.id, `模块 ${id} 与调用节点的种类不一致`);
+      continue;
+    }
+    const declared = nodeInputs(spec, paramsOf(node, spec), portContext);
+    const wanted = module.inputs;
+    const same =
+      declared.length === wanted.length &&
+      declared.every((port, index) => port.name === wanted[index]?.name && port.type === wanted[index]?.type);
+    if (!same) {
+      report('module_ports_mismatch', node.id, `模块 ${id} 的输入与调用节点声明的端口不一致`);
+    }
+    const output = nodeOutput(spec, paramsOf(node, spec));
+    const expectedType = module.output?.type;
+    if (expectedType === undefined) {
+      if (output !== undefined) report('module_ports_mismatch', node.id, `模块 ${id} 没有结果，调用节点不该有输出`);
+    } else if (output?.type !== expectedType) {
+      report('module_ports_mismatch', node.id, `模块 ${id} 的结果是 ${expectedType}，调用节点声明的不是它`);
+    }
+  }
+}
+
+/** 调用图：同一模块出现在自己的调用链上就是递归；链长超过深度上限也要报。 */
+function checkCallGraph(document: GraphDocument, modules: readonly GraphModule[], report: Report): void {
+  const callsOf = (nodes: readonly GraphNode[]): readonly GraphNode[] =>
+    nodes.filter((node) => node.kind === NODE.moduleCall || node.kind === NODE.moduleData);
+  const edges = new Map<string, readonly GraphNode[]>();
+  for (const module of modules) edges.set(moduleKey(module), callsOf(module.nodes));
+
+  const depthOf = new Map<string, number>();
+  const visiting = new Set<string>();
+  const depth = (key: string): number => {
+    const cached = depthOf.get(key);
+    if (cached !== undefined) return cached;
+    if (visiting.has(key)) return WORKFLOW_MODULE_DEPTH_LIMIT + 1;
+    visiting.add(key);
+    let deepest = 0;
+    for (const call of edges.get(key) ?? []) {
+      const target = callTarget(call, modules);
+      if (target === undefined) continue;
+      if (target === key) {
+        report('module_recursion', call.id, `模块 ${key} 递归调用了自己`);
+        continue;
+      }
+      deepest = Math.max(deepest, 1 + depth(target));
+    }
+    visiting.delete(key);
+    depthOf.set(key, deepest);
+    return deepest;
+  };
+
+  for (const call of callsOf(document.nodes)) {
+    const target = callTarget(call, modules);
+    if (target === undefined) continue;
+    if (1 + depth(target) > WORKFLOW_MODULE_DEPTH_LIMIT) {
+      report('module_depth', call.id, `模块嵌套超过 ${WORKFLOW_MODULE_DEPTH_LIMIT} 层`);
+    }
+  }
+}
+
+function moduleKey(module: GraphModule): string {
+  return `${module.id}@${module.version}`;
+}
+
+function callTarget(call: GraphNode, modules: readonly GraphModule[]): string | undefined {
+  const id = typeof call.params.moduleId === 'string' ? call.params.moduleId.trim() : '';
+  const version = typeof call.params.moduleVersion === 'number' ? call.params.moduleVersion : 1;
+  const found = modules.find((module) => module.id === id && module.version === version);
+  return found === undefined ? undefined : moduleKey(found);
 }

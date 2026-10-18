@@ -1,4 +1,5 @@
 import {
+  NODE,
   bytesToHex,
   encodeBool,
   encodeBytes,
@@ -13,6 +14,7 @@ import type { EncodedValue, GraphConnection, GraphNode, NodeKindSpec } from '@pw
 import { computeNode, type EvalHelpers } from './compute-nodes';
 import { cacheKeyOf, createEvalContext, report, type EvalContext, type ValueResult } from './context';
 import { edgeKeyOf, paramsOf } from './document';
+import { evalDataModule } from './modules';
 import { inlineValue } from './params';
 import type { NodePreview, PreviewSegment, WorkflowValue } from './types';
 
@@ -55,6 +57,8 @@ export async function evalNodeValue(
   if (nodeOutput(spec, paramsOf(node, spec)) === undefined) {
     return report(ctx, 'eval_failed', nodeId, `节点 ${spec.label} 没有数据输出，不能当作值使用`);
   }
+
+  if (node.kind === NODE.moduleData) return evalDataModule(ctx, node);
 
   if (spec.exec) {
     const produced = ctx.produced.get(nodeId);

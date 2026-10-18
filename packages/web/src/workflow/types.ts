@@ -87,6 +87,8 @@ export interface WorkflowOrigin {
   readonly path: readonly string[];
   /** 生成这条动作时各循环的轮次（循环节点 id → 从 0 开始的轮次）。 */
   readonly rounds?: Readonly<Record<string, number>>;
+  /** 生成这条动作时所在的模块调用链（`id@版本`，由内到外由外层到内层）。 */
+  readonly modules?: readonly string[];
 }
 
 /** 来源表格式版本：与产物不一致时按「来源未知」处理，不猜。 */

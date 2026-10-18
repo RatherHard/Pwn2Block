@@ -37,9 +37,9 @@ export interface Scope {
 }
 
 export interface EvalContext {
-  readonly document: GraphDocument;
+  document: GraphDocument;
   readonly workflow: WorkflowContext;
-  readonly lookup: GraphLookup;
+  lookup: GraphLookup;
   readonly portContext: PortContext;
   /** 缓存键 → 已求出的值（含循环轮次与作用域）。 */
   readonly values: Map<string, WorkflowValue>;
@@ -63,6 +63,8 @@ export interface EvalContext {
   failed: boolean;
   /** 变量声明/赋值次数：变化的变量会换掉缓存键。 */
   revision: number;
+  /** 当前模块调用栈（`id@版本`）：检测递归、限制嵌套深度，也写进动作来源。 */
+  readonly moduleStack: string[];
 }
 
 export function createEvalContext(
@@ -88,6 +90,7 @@ export function createEvalContext(
     pythonCalls: 0,
     failed: false,
     revision: 0,
+    moduleStack: [],
   };
 }
 

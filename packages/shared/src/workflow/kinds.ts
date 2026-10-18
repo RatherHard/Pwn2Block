@@ -45,6 +45,10 @@ export const NODE = {
   varDeclare: 'var.declare',
   varGet: 'var.get',
   varSet: 'var.set',
+  // 模块（06 §7）
+  moduleData: 'module.data',
+  moduleCall: 'module.call',
+  moduleReturn: 'module.return',
 } as const;
 
 export type NodeKind = (typeof NODE)[keyof typeof NODE];

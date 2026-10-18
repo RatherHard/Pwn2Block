@@ -1,5 +1,12 @@
 import { WORKFLOW_FORMAT, WORKFLOW_VERSION, defaultParams, nodeSpec } from '@pwn2block/shared';
-import type { GraphConnection, GraphDocument, GraphNode, ParamValues, PythonEvalRequest } from '@pwn2block/shared';
+import type {
+  GraphConnection,
+  GraphDocument,
+  GraphModule,
+  GraphNode,
+  ParamValues,
+  PythonEvalRequest,
+} from '@pwn2block/shared';
 import type { PythonEvalResult, WorkflowContext } from '../src/workflow/types';
 
 /**
@@ -37,6 +44,8 @@ export interface WorkflowSpec {
   readonly nodes: readonly GraphNode[];
   readonly edges?: readonly GraphConnection[];
   readonly main: readonly string[];
+  /** 模块定义：调用节点按 id + 版本引用。 */
+  readonly modules?: readonly GraphModule[];
 }
 
 /** 组装一份完整文档；`start` 节点自动补在最前面（每个流程恰好一个入口）。 */
@@ -55,6 +64,7 @@ export function workflow(spec: WorkflowSpec): GraphDocument {
     connections: spec.edges ?? [],
     main: spec.main,
     layout,
+    ...(spec.modules === undefined ? {} : { modules: spec.modules }),
   };
 }
 

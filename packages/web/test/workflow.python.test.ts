@@ -140,7 +140,7 @@ describe('Python 节点', () => {
 describe('定位序列工具', () => {
   it('内置「查找序列偏移」与共享工具同语义', async () => {
     const needle = 'baaa';
-    const expected = cyclicFind(new TextEncoder().encode(needle), ALPHABETS.lower);
+    const expected = cyclicFind(new TextEncoder().encode(needle), ALPHABETS.lower) ?? -1;
     expect(expected).toBe(4);
     const bytes = new TextEncoder().encode(needle);
     const document = workflow({
