@@ -24,11 +24,12 @@ import { compileGraph } from '../workflow/compile';
 import { checkParam } from '../workflow/params';
 import { lookupGraph } from '../workflow/document';
 import { extractModule } from '../graph/extract';
-import { groupSelection, ungroup } from '../graph/editor';
+import { groupSelection, setPortMode, ungroup } from '../graph/editor';
 import { upgradeModule, upgradeTargetOf } from '../graph/module-upgrade';
 import { exportDocument, importDocument } from '../graph/transfer';
 import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
 import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
+import type { GraphNode as WorkspaceNodeLike } from '@pwn2block/shared';
 import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import {
   addNode,
@@ -407,7 +408,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
               ? nothing
               : html`<button @click=${() => this.setEditor(moveOut(this.editor, [node.id]))}>移出容器</button>`}
           </div>`}
-      ${specs.map((param) => this.renderParam(node.id, param, challenge))}
+      ${specs.map((param) => this.renderParam(node.id, param, challenge))} ${this.renderSegments(node)}
       ${upgrade === undefined
         ? nothing
         : html`<div class="row">
@@ -434,6 +435,8 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const error = reason === undefined ? nothing : html`<span class="bad">${reason}</span>`;
     const update = (next: ParamValue) =>
       this.setEditor(setParam(this.editor, nodeId, param.name, next, this.portContext(challenge)));
+
+    const modeSwitch = param.port === undefined ? nothing : this.renderPortMode(nodeId, param.name);
 
     if (param.kind === 'select' || param.kind === 'type') {
       const options =
@@ -475,7 +478,51 @@ export class Pwn2BlockGraphPanel extends LitElement {
         .value=${String(value)}
         @change=${(event: Event) => update(coerce(param, (event.target as HTMLInputElement).value))}
       />
-      ${error}
+      ${error} ${modeSwitch}
+    </div>`;
+  }
+
+  /** 组装预览：逐段显示偏移、长度与来源，编译前就能看出各段落在哪。 */
+  private renderSegments(node: WorkspaceNodeLike) {
+    if (node.kind !== NODE.assemble) return nothing;
+    const preview = this.artifact?.previews.find((item) => item.nodeId === node.id);
+    const segments = preview?.segments;
+    if (segments === undefined || segments.length === 0) return nothing;
+    const lookup = lookupGraph(this.editor.document);
+    return html`<table class="segments">
+      <thead><tr><th>段</th><th>偏移</th><th>长度</th><th>来源</th></tr></thead>
+      <tbody>
+        ${segments.map((segment) => {
+          const incoming = lookup.incoming.get(`${node.id}\u0000${segment.port}`);
+          return html`<tr>
+            <td><code>${segment.port}</code></td>
+            <td>+${String(segment.offset)}</td>
+            <td>${String(segment.length)}</td>
+            <td>${incoming === undefined ? '手填' : incoming.source}</td>
+          </tr>`;
+        })}
+      </tbody>
+    </table>`;
+  }
+
+  /** 一个端口的来源切换：手填会断线，接线要求必须有线（缺线由编译报 missing_input）。 */
+  private renderPortMode(nodeId: string, port: string) {
+    const node = this.editor.document.nodes.find((candidate) => candidate.id === nodeId);
+    if (node === undefined) return nothing;
+    const lookup = lookupGraph(this.editor.document);
+    const incoming = lookup.incoming.get(`${nodeId}\u0000${port}`);
+    const mode = node.params[`${port}Mode`];
+    const current = mode === 'inline' || mode === 'port' ? mode : incoming === undefined ? 'inline' : 'port';
+    return html`<div class="row">
+      <span class="hint">${incoming === undefined ? '手填值' : `接线自 ${incoming.source}`}</span>
+      <button
+        ?disabled=${current === 'inline'}
+        @click=${() => this.setEditor(setPortMode(this.editor, nodeId, port, 'inline'))}
+      >手填</button>
+      <button
+        ?disabled=${current === 'port'}
+        @click=${() => this.setEditor(setPortMode(this.editor, nodeId, port, 'port'))}
+      >接线</button>
     </div>`;
   }
 

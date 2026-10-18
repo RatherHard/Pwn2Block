@@ -556,6 +556,26 @@ export function moveOut(state: GraphEditorState, nodeIds: readonly string[]): Gr
   return document === state.document ? state : apply(state, document, 'semantic', nodeIds);
 }
 
+/** 切换输入端口的来源：手填时断开该端口的连线，接线时要求必须接上（07 §P3）。 */
+export function setPortMode(
+  state: GraphEditorState,
+  nodeId: string,
+  port: string,
+  mode: 'inline' | 'port',
+): GraphEditorState {
+  const key = `${port}Mode`;
+  const nodes = state.document.nodes.map((node) =>
+    node.id === nodeId ? { ...node, params: { ...node.params, [key]: mode } } : node,
+  );
+  const connections =
+    mode === 'inline'
+      ? state.document.connections.filter(
+          (connection) => !(connection.to.node === nodeId && connection.to.port === port),
+        )
+      : state.document.connections;
+  return apply(state, { ...state.document, nodes, connections }, 'semantic');
+}
+
 /** 分组：把选中的节点框在一起。只改布局，不碰执行顺序与编译产物。 */
 export function groupSelection(state: GraphEditorState): EditResult {
   const members = state.selection.filter(

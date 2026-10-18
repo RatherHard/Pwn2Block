@@ -181,6 +181,7 @@ export const WORKFLOW_ISSUE_CODES = [
   'undeclared_variable',
   'duplicate_variable',
   'variable_type_mismatch',
+  'port_mode_conflict',
   'module_missing',
   'module_duplicate',
   'module_kind_mismatch',

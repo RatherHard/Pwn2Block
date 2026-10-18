@@ -160,7 +160,12 @@ export async function resolveInput(
     return report(ctx, 'unknown_port', node.id, `节点 ${spec.label} 没有输入端口 ${portName}`);
   }
 
-  const edge = connectionInto(ctx, node.id, portName);
+  // 参数可以显式选择「手填」或「接线」（07 §P3）：手填时不看连线，接线时必须有线。
+  const mode = node.params[`${portName}Mode`];
+  const edge = mode === 'inline' ? undefined : connectionInto(ctx, node.id, portName);
+  if (mode === 'port' && edge === undefined) {
+    return report(ctx, 'missing_input', node.id, `节点 ${spec.label} 的「${portName}」选择了接线，但没有连线`);
+  }
   if (edge !== undefined) {
     const upstream = await evalNodeValue(ctx, edge.from.node);
     if (!upstream.ok) return upstream;

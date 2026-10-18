@@ -363,9 +363,28 @@ function checkMissingInputs(
     if (spec === undefined) continue;
     const inputs = nodeInputs(spec, paramsOf(node, spec), portContext);
     for (const input of inputs) {
-      if (!input.required) continue;
       const key = `${node.id}\u0000${input.name}`;
-      if (lookup.incoming.has(key)) continue;
+      const mode = node.params[`${input.name}Mode`];
+      const wired = lookup.incoming.has(key);
+      if (mode === 'inline') {
+        if (wired) {
+          report('port_mode_conflict', node.id, `节点 ${spec.label} 的「${input.label}」设为手填，但仍接着线，连线会被忽略`, {
+            port: input.name,
+            severity: 'warning',
+          });
+        }
+        continue;
+      }
+      if (mode === 'port') {
+        if (!wired) {
+          report('missing_input', node.id, `节点 ${spec.label} 的「${input.label}」选择了接线，但还没有连线`, {
+            port: input.name,
+          });
+        }
+        continue;
+      }
+      if (!input.required) continue;
+      if (wired) continue;
       report('missing_input', node.id, `节点 ${spec.label} 缺少输入「${input.label}」`, { port: input.name });
     }
   }
