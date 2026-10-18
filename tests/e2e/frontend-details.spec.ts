@@ -120,8 +120,8 @@ test('当前视图标签写入 p2b:view-tab，跨刷新与题目共用，非法�
   await tab(/寄存器/).click();
   await expect(page.locator('pwn2block-view-manager #panel-registers')).toBeVisible();
   await expect.poll(() => page.evaluate<string | null>(`localStorage.getItem('p2b:view-tab')`)).toBe('registers');
+  // history 路由：刷新直接回到题目页。
   await page.reload();
-  await page.getByRole('button', { name: '回到胜利', exact: true }).click();
   await sessionReady(page);
   await expect(tab(/寄存器/), '刷新后恢复上次的标签').toHaveAttribute('aria-selected', 'true');
   await page.getByRole('button', { name: '返回题目列表', exact: true }).click();
@@ -130,7 +130,7 @@ test('当前视图标签写入 p2b:view-tab，跨刷新与题目共用，非法�
   await sessionReady(page);
   await expect(tab(/寄存器/), '换一道题仍是同一个标签').toHaveAttribute('aria-selected', 'true');
   await page.evaluate(`localStorage.setItem('p2b:view-tab', 'bogus')`);
-  await page.reload();
+  await page.goto('/');
   await page.getByRole('button', { name: '回到胜利', exact: true }).click();
   await sessionReady(page);
   await expect(tab(/栈/), '非法存储值回退到栈').toHaveAttribute('aria-selected', 'true');

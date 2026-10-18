@@ -27,6 +27,7 @@ import { highlightBlockId } from '../viewmodel/highlight';
 import { viewTabDelta } from '../viewmodel/keymap';
 import { displayedView, type FrameProjection } from '../viewmodel/replay';
 import { roleValue } from '../viewmodel/roles';
+import { parseRoute, routeOfState, routePath, sameRoute, type Route } from '../viewmodel/route';
 import {
   preSessionStatusBar,
   statusBar,
@@ -232,6 +233,8 @@ export class Pwn2BlockApp extends LitElement {
   private readonly fallbackViews = createViewManagerState();
   private offState?: () => void;
   private started = false;
+  /** 地址栏最近一次对齐到的页面；`undefined` 表示页面还没定下来过（见 `syncLocation`）。 */
+  private settledRoute?: Route;
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     // 嵌套影子根会把 event.target 重定向为组件宿主，真实输入框在 composedPath 首项。
@@ -264,14 +267,70 @@ export class Pwn2BlockApp extends LitElement {
     this.offState = controller.subscribe((state) => {
       this.state = state;
     });
+    window.addEventListener('popstate', this.onPopState);
     if (!this.started) {
       this.started = true;
-      controller.start();
+      const route = parseRoute(window.location.pathname);
+      controller.start(route.kind === 'challenge' ? route.id : undefined);
     }
+  }
+
+  override updated(): void {
+    this.syncLocation();
+  }
+
+  /**
+   * 页面切换后把地址栏对齐到当前页面（history 路由，见 viewmodel/route.ts）。
+   * 页面第一次定下来时用 replaceState（`/foo` 这类地址被规范成 `/`，不多留一条历史）；
+   * 之后的切换用 pushState，浏览器后退就能回到上一页。
+   */
+  private syncLocation(): void {
+    const state = this.state;
+    if (state === undefined) return;
+    const route = routeOfState(state);
+    if (route === undefined) return;
+    const path = routePath(route);
+    if (path !== window.location.pathname) {
+      if (this.settledRoute === undefined) window.history.replaceState(null, '', path);
+      else window.history.pushState(null, '', path);
+    }
+    this.settledRoute = route;
+  }
+
+  /** 浏览器前进 / 后退：按新地址切页；请求在飞时不切，把地址改回当前页面。 */
+  private readonly onPopState = (): void => {
+    const controller = this.controller;
+    const state = this.state;
+    if (controller === undefined || state === undefined) return;
+    const target = parseRoute(window.location.pathname);
+    const current = routeOfState(state);
+    if (current !== undefined && sameRoute(target, current)) return;
+    // 题目列表都没拿到（启动失败）：按新地址从头再来一次。
+    if (state.phase === 'unavailable' && state.challenge === undefined && !state.busy && state.queued === 0) {
+      controller.start(target.kind === 'challenge' ? target.id : undefined);
+      return;
+    }
+    if (!this.leaveChallenge()) {
+      if (current !== undefined) window.history.pushState(null, '', routePath(current));
+      return;
+    }
+    if (target.kind === 'challenge') controller.choose(target.id);
+  };
+
+  /**
+   * 离开当前题目回到列表：先存画布，再让控制器暂存会话。已经在列表页时直接成功；
+   * 请求在飞或排队时返回 false。换题也先走这一步，旧题的会话才会被保留而不是被结束。
+   */
+  private leaveChallenge(): boolean {
+    const state = this.state;
+    if (state === undefined || state.busy || state.queued > 0) return false;
+    if (state.challenge !== undefined) this.panel()?.saveArchive();
+    return this.controller?.browseChallenges() ?? false;
   }
 
   override disconnectedCallback(): void {
     window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('popstate', this.onPopState);
     this.offState?.();
     this.offState = undefined;
     super.disconnectedCallback();
@@ -438,7 +497,7 @@ export class Pwn2BlockApp extends LitElement {
     return panel.restoreArchive();
   }
 
-  /** 首屏：题目列表来自 `GET /api/challenges`（多题时在这里选，只有一题时控制器直接开局）。 */
+  /** 首屏：题目列表来自 `GET /api/challenges`，`/` 总是停在列表；`/challenges/<id>` 由控制器直接开局。 */
   private renderBoot(state: ControllerState) {
     switch (state.phase) {
       case 'loading':
@@ -462,6 +521,14 @@ export class Pwn2BlockApp extends LitElement {
                 <span class="lead"> ${item.id}</span>
               </li>`,
             )}
+          </ul>
+        </section>`;
+      case 'missing':
+        return html`<section class="boot" aria-label="题目不存在">
+          <h2>题目不存在</h2>
+          <p class="lead">服务器上没有这道题，链接可能写错了，或者题目已经下线。</p>
+          <ul>
+            <li><button type="button" @click=${this.onChooseChallenge}>返回题目列表</button></li>
           </ul>
         </section>`;
       case 'unavailable':
@@ -582,9 +649,7 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   private readonly onChooseChallenge = (): void => {
-    if (this.state?.busy || (this.state?.queued ?? 0) > 0) return;
-    this.panel()?.saveArchive();
-    this.controller?.browseChallenges();
+    if (!this.leaveChallenge()) return;
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLButtonElement>('.boot button')?.focus());
   };
 

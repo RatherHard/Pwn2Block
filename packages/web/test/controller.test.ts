@@ -25,12 +25,52 @@ import {
 import { makeChallenge, makeProjection } from './helpers';
 
 describe('会话控制器：首屏与选题（04 §1、§5）', () => {
-  it('只有一道题时直接开局：列表 → 题目 → 会话，投影进页面状态', async () => {
+  it('列表路由即使只有一道题也停在列表，不自动开局', async () => {
+    const api = createFakeApi();
+    const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker });
+    controller.start();
+    await until(() => controller.state.phase === 'choosing', '进入选题');
+    await flush();
+    expect(controller.state.phase).toBe('choosing');
+    expect(methods(api)).toEqual(['listChallenges']);
+  });
+
+  it('题目路由的 id 不在列表里：进入 missing，不请求题目，返回列表后可正常选题', async () => {
+    const api = createFakeApi();
+    const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker });
+    controller.start('no-such-one');
+    await until(() => controller.state.phase === 'missing', '题目不存在');
+    expect(methods(api)).toEqual(['listChallenges']);
+    expect(controller.state.challenge).toBeUndefined();
+    expect(controller.state.challenges).toHaveLength(1);
+
+    controller.choose('also-missing');
+    expect(controller.state.phase).toBe('missing');
+    expect(controller.browseChallenges()).toBe(true);
+    expect(controller.state.phase).toBe('choosing');
+    controller.choose('ret2win');
+    await until(() => controller.state.phase === 'ready', '会话就绪');
+    expect(methods(api)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
+  });
+
+  it('题目路由加载列表失败后重试，仍按原目标开局', async () => {
+    const api = createFakeApi();
+    api.failNext(new ApiClientError('internal', '连接不上服务端', { network: true }));
+    const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker });
+    controller.start('ret2win');
+    await until(() => controller.state.notice?.action === 'retry', '网络提示');
+    expect(controller.browseChallenges()).toBe(false);
+    controller.retry();
+    await until(() => controller.state.phase === 'ready', '重试后开局');
+    expect(controller.state.challengeId).toBe('ret2win');
+  });
+
+  it('题目路由直接开局：列表 → 题目 → 会话，投影进页面状态', async () => {
     const api = createFakeApi();
     const tracker = createFakeTracker();
     const controller = createSessionController({ api: api.client, tracker: tracker.tracker });
 
-    controller.start();
+    controller.start('ret2win');
     expect(controller.state.phase).toBe('loading');
     await until(() => controller.state.phase === 'ready', '会话就绪');
 
@@ -628,7 +668,7 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
     const api = createFakeApi();
     const tracker = createFakeTracker();
     const controller = createSessionController({ api: api.client, tracker: tracker.tracker, store, canvas });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.phase === 'ready', '会话就绪');
     return { api, tracker, controller, store };
   }
@@ -695,7 +735,7 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
         },
       },
     });
-    controller.start();
+    controller.start('ret2win');
     // `open()` 会**先同步**发布 `phase: 'opening'`，所以等它等于没等；`challenge` 只在
     // `getChallenge` 回来之后才有，用它当「第一相位到了」的信号。
     await until(() => controller.state.challenge !== undefined, '第一相位（画布阶段）');
@@ -735,7 +775,7 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
         },
       },
     });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.challenge !== undefined, '第一相位（画布阶段）');
     api.failNext(new ApiClientError('internal', '连接不上服务端', { network: true }));
     release?.();
@@ -765,7 +805,7 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
       store,
       canvas,
     });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.phase === 'ready', '会话就绪');
 
     // 端口被调用时，会话请求（sessionState）必须还没发出去。
@@ -784,7 +824,7 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
       store,
       canvas: { restore: async () => '本地保存的程序恢复失败（画布保持原样）：坏存档' },
     });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.phase === 'ready', '会话就绪');
     expect(controller.state.notice?.text).toContain('恢复失败');
     expect(controller.state.sessionId).toBe(FAKE_SESSION_ID);
@@ -801,7 +841,7 @@ describe('会话控制器：本地保存与「刷新后接回会话」（D5 批�
         },
       },
     });
-    controller2.start();
+    controller2.start('ret2win');
     await until(() => controller2.state.phase === 'ready', '会话就绪');
     expect(controller2.state.notice?.text).toContain('画布没挂上');
   });
@@ -859,7 +899,7 @@ describe('会话控制器：启动路径的失败出口（A 的巡检缺陷，04
       return originalCreate(challengeId);
     };
     const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.notice?.action === 'retry', '限流提示');
 
     expect(methods(api)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
@@ -881,7 +921,7 @@ describe('会话控制器：启动路径的失败出口（A 的巡检缺陷，04
       return originalCreate(challengeId);
     };
     const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.notice?.action === 'retry', '网络提示');
 
     expect(methods(api)).toEqual(['listChallenges', 'getChallenge', 'createSession']);
@@ -899,7 +939,7 @@ describe('会话控制器：启动路径的失败出口（A 的巡检缺陷，04
     const api = createFakeApi();
     api.failNext(OFFLINE);
     const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.notice?.action === 'retry', '网络提示');
 
     expect(controller.state.notice?.text).toContain('网络错误');
@@ -948,7 +988,7 @@ describe('会话控制器：启动路径的失败出口（A 的巡检缺陷，04
       tracker: createFakeTracker().tracker,
       store,
     });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.notice?.action === 'retry', '限流提示');
 
     expect(methods(api)).toEqual(['listChallenges', 'getChallenge', 'sessionState', 'createSession']);
@@ -973,7 +1013,7 @@ describe('会话控制器：视图标签（设计 §3.1）', () => {
     // 无 syscalls / fds 的题目：没有 I/O 标签。
     const api = createFakeApi({ challenge: makeChallenge() });
     const controller = createSessionController({ api: api.client, tracker: createFakeTracker().tracker, store });
-    controller.start();
+    controller.start('ret2win');
     await until(() => controller.state.phase === 'ready', '会话就绪');
     return controller;
   }

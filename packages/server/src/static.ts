@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance } from 'fastify';
+import { CHALLENGE_ID_RE } from '@pwn2block/shared';
 
 /**
  * 前端构建产物的静态托管（07 §7：单进程同时提供 API 与静态产物）。
@@ -11,9 +12,11 @@ import type { FastifyInstance } from 'fastify';
  * - **只服务 `staticRoot` 内的文件**，默认根是仓库根的 `packages/web/dist`。仓库根、`challenges/`、
  *   `packages/**`、`docs/**` 都在根之外，任何路径都取不到（穿越防护由 `@fastify/static` 提供，
  *   真实 HTTP 用例见 `test/c04-static.test.ts`）。
- * - **不做 SPA 回退**：这个前端是单页但**没有客户端路由**（`web/index.html` 直接挂载），
- *   所以 `index: 'index.html'` 已够用，未命中路径一律 404。回退会把 `/private.json`、
- *   `/packages/**` 这类探测变成 200 HTML，把发布边界掩盖掉。
+ * - **只为前端路由回退，不做通配 SPA 回退**：前端用 history 路由，`/` 是题目列表，
+ *   `/challenges/<id>` 是题目页。只有后者在 id 符合题目 id 形状时回 `index.html`，
+ *   其余未命中路径一律 404。通配回退会把 `/private.json`、`/packages/**` 这类探测变成
+ *   200 HTML，把发布边界掩盖掉。回退不查题目是否存在：题目列表本来就公开，
+ *   「题目不存在」由前端比对列表后显示。
  * - `list: false`：不提供目录列表，目录请求按未命中处理。
  * - `dotfiles: 'ignore'`：点文件按「不存在」处理，`/.env` 得到 404，而不是 403 或文件内容。
  * - `allowedPath` 再挡一层黑名单文件名，让「取不到私有材料」不完全依赖部署纪律。
@@ -70,4 +73,10 @@ export function registerStatic(
     dotfiles: 'ignore',
     allowedPath: (pathname) => !isDeniedStaticPath(pathname),
   });
+
+  // 题目页的 history 路由：只有合法形状的 id 回 `index.html`，其余照旧 404。
+  // 根不存在时 `sendFile` 自己落成 404，与其它静态请求一致。
+  app.get<{ Params: { id: string } }>('/challenges/:id', (request, reply) =>
+    CHALLENGE_ID_RE.test(request.params.id) ? reply.sendFile('index.html') : reply.callNotFound(),
+  );
 }

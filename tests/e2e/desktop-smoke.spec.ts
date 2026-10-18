@@ -259,10 +259,10 @@ test('桌面冒烟：布局、键盘、积木、调试、回放与刷新', async
       // 程序指针随会话记录一起恢复：单步后再后退一步，指令回退但动作指针仍停在 1/1。
       const pointer = (await page.locator('pwn2block-app .status').textContent())?.match(/动作 \d+\/\d+/)?.[0];
       expect(pointer, '刷新前状态栏应有动作指针').toBeDefined();
-      await page.reload();
+      // history 路由：刷新直接回到题目页，不用再点一次题目。
       const [restored] = await Promise.all([
         page.waitForResponse(res => new URL(res.url()).pathname === `/api/sessions/${sessionId}`),
-        button('回到胜利').click(),
+        page.reload(),
       ]);
       expect(restored.status()).toBe(200);
       await expect.poll(() => canvasStructure(page), {

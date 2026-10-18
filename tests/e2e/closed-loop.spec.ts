@@ -1135,10 +1135,9 @@ test.describe('刷新恢复（真浏览器 · localStorage 跨刷新）', () => 
     });
 
     await test.step('刷新（page.reload）后重新进题：画布与字段从存档装回来', async () => {
+      // history 路由：地址停在题目页，刷新直接回到这道题，恢复就发生在这一步。
+      expect(new URL(page.url()).pathname).toBe(`/challenges/${CHALLENGE_ID}`);
       await page.reload();
-      // 刷新后回到题目列表——真实用户也是再点一次同一道题，恢复就发生在这一步。
-      await expect(runButton(CHALLENGE_TITLE)).toBeVisible();
-      await runButton(CHALLENGE_TITLE).click();
       // 会话接回来、画布装回并自动编译之后，「运行」可用，状态栏给出 1 个动作。
       await expect(payloadButton('运行'), '会话应当接回来了（「运行」可用）').toBeEnabled({ timeout: 20_000 });
       await expect(statusBar()).toContainText('动作 0/1');

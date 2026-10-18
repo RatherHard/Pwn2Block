@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type * as Blockly from 'blockly';
 import { ret2winPublic } from '@pwn2block/shared';
 // 副作用导入：注册自定义元素（只在类型位置用到类名时，编译期会把 import 整条删掉）。
@@ -139,6 +139,11 @@ function chainAfterStart(workspace: Blockly.WorkspaceSvg, types: readonly string
   return blocks;
 }
 
+// 多数用例从题目页地址进入（history 路由：`/challenges/<id>` 才直接开局，`/` 停在列表）。
+beforeEach(() => {
+  window.history.replaceState(null, '', '/challenges/ret2win');
+});
+
 afterEach(() => {
   for (const app of apps.splice(0)) app.remove();
   // 本地保存走的是 jsdom 的真实 `localStorage`（D5 批次 2），用例之间必须清干净：
@@ -225,6 +230,7 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
   });
 
   it('多道题时停在选题界面，点题目才创建会话', async () => {
+    window.history.replaceState(null, '', '/');
     const api = createFakeApi({
       challenges: [
         { id: 'a', title: '题目 A' },
@@ -249,6 +255,124 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
     await settle(app);
     expect(app.renderRoot.querySelector('pwn2block-payload-panel')).not.toBeNull();
     expect(api.calls.find((call) => call.method === 'createSession')?.challengeId).toBe('b');
+  });
+});
+
+describe('history 路由：题目列表与题目页分开', () => {
+  const TWO = [
+    { id: 'ret2win', title: '回到胜利' },
+    { id: 'b', title: '题目 B' },
+  ] as const;
+
+  function bootButton(app: Pwn2BlockApp, label: string): HTMLButtonElement {
+    const button = [...app.renderRoot.querySelectorAll<HTMLButtonElement>('.boot button')].find(
+      (each) => each.textContent?.trim() === label,
+    );
+    if (button === undefined) throw new Error(`没找到按钮：${label}`);
+    return button;
+  }
+
+  function backButton(app: Pwn2BlockApp): HTMLButtonElement {
+    const button = buttonsOf(app.renderRoot.querySelector('pwn2block-top-bar')).find(
+      (each) => each.textContent?.trim() === '返回题目列表',
+    );
+    if (button === undefined) throw new Error('没找到「返回题目列表」');
+    return button;
+  }
+
+  /** jsdom 的 history.back() 不派发 popstate：改地址后手动派发，等价于浏览器前进 / 后退。 */
+  function navigate(path: string): void {
+    window.history.replaceState(null, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }
+
+  it('`/` 即使只有一道题也停在列表；点题目后地址变成 /challenges/<id>', async () => {
+    window.history.replaceState(null, '', '/');
+    const api = createFakeApi();
+    const app = startApp(api);
+    await until(() => app.renderRoot.textContent?.includes('选择题目') ?? false, '列表出现');
+    await settle(app);
+    expect(api.calls.map((call) => call.method)).toEqual(['listChallenges']);
+    expect(window.location.pathname).toBe('/');
+
+    const before = window.history.length;
+    bootButton(app, '回到胜利').click();
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '进入题目');
+    await settle(app);
+    expect(window.location.pathname).toBe('/challenges/ret2win');
+    expect(window.history.length).toBe(before + 1);
+  });
+
+  it('直接打开 /challenges/<id> 落到题目页，地址不变、不多留历史', async () => {
+    const before = window.history.length;
+    const { app } = await mountApp(createFakeApi({ challenges: TWO }));
+    expect(app.renderRoot.querySelector('pwn2block-payload-panel')).not.toBeNull();
+    expect(window.location.pathname).toBe('/challenges/ret2win');
+    expect(window.history.length).toBe(before);
+  });
+
+  it('「返回题目列表」把地址改回 /；后退回到题目页并接回会话', async () => {
+    const api = createFakeApi({ challenges: TWO });
+    const { app } = await mountApp(api);
+    backButton(app).click();
+    await until(() => app.renderRoot.textContent?.includes('选择题目') ?? false, '回到列表');
+    await settle(app);
+    expect(window.location.pathname).toBe('/');
+
+    navigate('/challenges/ret2win');
+    await until(() => app.renderRoot.querySelector('pwn2block-view-manager') !== null, '后退回到题目');
+    await settle(app);
+    expect(window.location.pathname).toBe('/challenges/ret2win');
+  });
+
+  it('在题目页按前进 / 后退换到另一道题：旧题先回列表暂存，再打开新题', async () => {
+    const api = createFakeApi({ challenges: TWO });
+    const { app } = await mountApp(api);
+    navigate('/challenges/b');
+    await until(() => api.calls.filter((call) => call.method === 'createSession').length === 2, '新题建会话');
+    await settle(app);
+    expect(api.calls.filter((call) => call.method === 'createSession').map((call) => call.challengeId)).toEqual([
+      'ret2win',
+      'b',
+    ]);
+    // 换题是暂存，不结束旧题的会话。
+    expect(api.calls.map((call) => call.method)).not.toContain('endSession');
+    expect(window.location.pathname).toBe('/challenges/b');
+
+    navigate('/');
+    await until(() => app.renderRoot.textContent?.includes('选择题目') ?? false, '回到列表');
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('题目 id 不在列表里：显示「题目不存在」，不请求题目，按钮回到列表', async () => {
+    window.history.replaceState(null, '', '/challenges/no-such-one');
+    const api = createFakeApi({ challenges: TWO });
+    const app = startApp(api);
+    await until(() => app.renderRoot.textContent?.includes('题目不存在') ?? false, '题目不存在');
+    await settle(app);
+    expect(api.calls.map((call) => call.method)).toEqual(['listChallenges']);
+    expect(window.location.pathname).toBe('/challenges/no-such-one');
+
+    bootButton(app, '返回题目列表').click();
+    await until(() => app.renderRoot.textContent?.includes('选择题目') ?? false, '回到列表');
+    await settle(app);
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('请求在飞时后退不切页，地址改回当前题目', async () => {
+    const api = createFakeApi({ challenges: TWO });
+    const { app } = await mountApp(api);
+    let release!: () => void;
+    api.gate(new Promise<void>((resolve) => { release = resolve; }));
+    // 让控制器自己处于「请求在飞」：点运行菜单的「重置」，响应被闸门扣住。
+    clickRun(app, '重置');
+    await until(() => app.state?.busy === true, '请求在飞');
+    navigate('/');
+    await settle(app);
+    expect(window.location.pathname).toBe('/challenges/ret2win');
+    expect(app.renderRoot.querySelector('pwn2block-payload-panel')).not.toBeNull();
+    release();
+    await until(() => app.state?.busy === false, '请求结束');
   });
 });
 

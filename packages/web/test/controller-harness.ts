@@ -47,7 +47,7 @@ export async function open(options: FakeApiOptions = {}): Promise<Harness> {
   const api = createFakeApi(options);
   const tracker = createFakeTracker();
   const controller = createSessionController({ api: api.client, tracker: tracker.tracker });
-  controller.start();
+  controller.start('ret2win');
   await until(() => controller.state.phase === 'ready', '会话就绪');
   return { api, tracker, controller };
 }

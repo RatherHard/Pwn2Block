@@ -59,8 +59,11 @@ import {
   type ViewManagerState,
 } from './views';
 
-/** 启动进度；unavailable 表示启动失败，是否保留工作台由已取得的 challenge 决定。 */
-export type ControllerPhase = 'loading' | 'choosing' | 'opening' | 'ready' | 'unavailable';
+/**
+ * 启动进度；unavailable 表示启动失败，是否保留工作台由已取得的 challenge 决定。
+ * missing 表示地址里的题目不在服务器的题目列表里（history 路由的深链接）。
+ */
+export type ControllerPhase = 'loading' | 'choosing' | 'missing' | 'opening' | 'ready' | 'unavailable';
 
 export interface Notice {
   readonly tone: StatusTone;
@@ -117,7 +120,7 @@ interface DebugSnapshot {
 }
 
 type Intent =
-  | { readonly kind: 'list' }
+  | { readonly kind: 'list'; readonly target?: string }
   | { readonly kind: 'open'; readonly id: string }
   | { readonly kind: 'run'; readonly command: RunCommand };
 
@@ -156,11 +159,15 @@ export interface CanvasPort {
 export interface SessionController {
   readonly state: ControllerState;
   subscribe(listener: (state: ControllerState) => void): () => void;
-  /** 首屏：`GET /api/challenges` → 选题 → 创建会话。 */
-  start(): void;
+  /**
+   * 首屏：`GET /api/challenges`。不带 `target` 停在题目列表；带 `target`（地址里的题目 id）
+   * 时列表里有就直接打开，没有就进入 `missing`。
+   */
+  start(target?: string): void;
+  /** 打开列表里的一道题；id 不在列表里时进入 `missing`，不拿它去请求后端。 */
   choose(challengeId: string): void;
-  /** 返回列表保留按题保存的会话，后续选回时接回进度。 */
-  browseChallenges(): void;
+  /** 返回列表保留按题保存的会话，后续选回时接回进度；请求在飞或排队时不切换，返回 false。 */
+  browseChallenges(): boolean;
   /** 「重新开始」：丢弃失效会话，用同一道题创建新会话。 */
   restart(): void;
   /** 重试上一次失败的操作（列表加载 / 打开题目 / 上一条命令）。 */
@@ -744,8 +751,8 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     enqueue(() => openSession(id));
   }
 
-  function start(): void {
-    lastIntent = { kind: 'list' };
+  function start(target?: string): void {
+    lastIntent = target === undefined ? { kind: 'list' } : { kind: 'list', target };
     patch({ phase: 'loading', notice: undefined });
     enqueue(async () => {
       // 列表加载失败（网络不通 / 被限流）同样要有出口：`handleStartupFailure` 会给出带
@@ -771,14 +778,54 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
         return;
       }
       publish({ ...state, challenges });
-      const first = challenges[0];
-      // 只有一道题时直接开局，省掉一次没有意义的点击；多题走选题界面。
-      if (challenges.length === 1 && first !== undefined) {
-        open(first.id);
+      // 列表路由始终停在列表，即使只有一道题；题目路由才直接开局。
+      if (target === undefined) {
+        patch({ phase: 'choosing' });
         return;
       }
-      patch({ phase: 'choosing' });
+      // 这里还在队列任务里，`showList` 会因「请求在飞」拒绝切换，所以直接发布。
+      if (!challenges.some((item) => item.id === target)) {
+        patch({ phase: 'missing' });
+        return;
+      }
+      open(target);
     });
+  }
+
+  function choose(id: string): void {
+    if (state.challenges.some((item) => item.id === id)) {
+      open(id);
+      return;
+    }
+    showList('missing');
+  }
+
+  /**
+   * 回到列表页（`choosing`）或「题目不存在」页（`missing`）。
+   *
+   * 离开一道题是暂存而非结束会话：每道题复用其保存的会话，失效后仍走既有的新建路径。
+   * 请求在飞或排队时不切换，否则迟到响应会覆盖列表页或下一题；返回值表示是否切换成功。
+   */
+  function showList(phase: 'choosing' | 'missing'): boolean {
+    if (queue.inFlight || queue.queued > 0) return false;
+    // 列表还没拿到（加载中 / 加载失败）时没有列表可回，交给 `start()` / `retry()`。
+    const listed = state.phase === 'choosing' || state.phase === 'missing';
+    if (state.challenge === undefined && !listed) return false;
+    if (state.challenge !== undefined) {
+      persistResume();
+      sessionId = undefined;
+      cursorStack = [];
+      debugSnapshot = undefined;
+      pendingResume = undefined;
+      tracker.clear();
+    }
+    lastIntent = { kind: 'list' };
+    publish({
+      phase, challenges: state.challenges, history: EMPTY_HISTORY,
+      artifact: tracker.state, cursor: 0, results: [], busy: false, queued: 0, sessionExpired: false,
+      running: false,
+    });
+    return true;
   }
 
   function run(command: RunCommand): void {
@@ -814,26 +861,10 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
 
     start,
 
-    choose(challengeId: string): void {
-      open(challengeId);
-    },
+    choose,
 
-    browseChallenges(): void {
-      // 不能在请求中卸载画布，否则迟到响应会覆盖选题页或下一题。
-      if (queue.inFlight || queue.queued > 0 || state.challenge === undefined) return;
-      persistResume();
-      // 这里是暂存而非结束会话。每道题复用其保存的会话，失效后仍走既有的新建路径。
-      sessionId = undefined;
-      cursorStack = [];
-      debugSnapshot = undefined;
-      pendingResume = undefined;
-      tracker.clear();
-      lastIntent = { kind: 'list' };
-      publish({
-        phase: 'choosing', challenges: state.challenges, history: EMPTY_HISTORY,
-        artifact: tracker.state, cursor: 0, results: [], busy: false, queued: 0, sessionExpired: false,
-        running: false,
-      });
+    browseChallenges(): boolean {
+      return showList('choosing');
     },
 
     restart(): void {
@@ -873,7 +904,7 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       if (intent === undefined) return;
       switch (intent.kind) {
         case 'list':
-          start();
+          start(intent.target);
           return;
         case 'open':
           open(intent.id);

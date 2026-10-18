@@ -205,6 +205,45 @@ describe('静态产物可达（07 §7）', () => {
   });
 });
 
+describe('前端 history 路由的回退（只限题目页）', () => {
+  it('`/challenges/<合法 id>` 回 index.html，不查题目是否存在', async () => {
+    await withApp(optionsWith(), async (app) => {
+      for (const url of [`/challenges/${CHALLENGE_ID}`, '/challenges/no-such-one', '/challenges/a?from=link']) {
+        const response = await app.inject({ method: 'GET', url });
+        expect(response.statusCode, url).toBe(200);
+        expect(response.headers['content-type']).toContain('text/html');
+        expect(response.body).toContain(INDEX_MARKER);
+      }
+    });
+  });
+
+  it('id 形状不合法、多一段路径或不是题目页的地址仍是 404，不回 HTML', async () => {
+    await withApp(optionsWith(), async (app) => {
+      for (const url of [
+        '/challenges',
+        '/challenges/',
+        '/challenges/Bad_Id',
+        '/challenges/..%2fprivate.json',
+        '/challenges/private.json',
+        `/challenges/${CHALLENGE_ID}/private.json`,
+        `/challenges/${CHALLENGE_ID}/`,
+        '/challenge/ret2win',
+        '/some/page',
+      ]) {
+        const response = await app.inject({ method: 'GET', url, headers: { accept: 'text/html' } });
+        expect(response.statusCode, url).toBe(404);
+        expectBlocked(response);
+      }
+    });
+  });
+
+  it('静态根不存在时题目页地址同样 404，不把服务带崩', async () => {
+    await withApp(optionsWith({ staticRoot: join(base, '还没构建的产物目录') }), async (app) => {
+      expectBlocked(await app.inject({ method: 'GET', url: `/challenges/${CHALLENGE_ID}` }));
+    });
+  });
+});
+
 describe('`/api/**` 优先于静态（04 §5）', () => {
   it('产物目录里存在同名 `api/**` 文件时，API 路由仍然优先', async () => {
     const fake = makeFakeRuntime();
@@ -245,7 +284,7 @@ describe('`/api/**` 优先于静态（04 §5）', () => {
       ];
 
       for (const probe of probes) {
-        // 客户端声明要 HTML 也不改变结论：这个前端没有客户端路由，不存在回退。
+        // 客户端声明要 HTML 也不改变结论：前端路由的回退只限 `/challenges/<id>`，不覆盖 `/api/**`。
         const response = await app.inject({ ...probe, headers: { accept: 'text/html' } });
         expectBlocked(response);
       }
