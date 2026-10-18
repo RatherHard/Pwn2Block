@@ -25,6 +25,7 @@ import { checkParam } from '../workflow/params';
 import { lookupGraph } from '../workflow/document';
 import { extractModule } from '../graph/extract';
 import { groupSelection, setPortMode, ungroup } from '../graph/editor';
+import { moduleViewState, withModuleBody } from '../graph/module-view';
 import { upgradeModule, upgradeTargetOf } from '../graph/module-upgrade';
 import { exportDocument, importDocument } from '../graph/transfer';
 import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
@@ -214,6 +215,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private loadedFor = '';
   private pythonCapability: PythonCapability | undefined;
   private capabilityLoaded = false;
+  /** 编辑模块体时保存主图；`editingModuleId` 为空表示当前就在主图。 */
+  private mainEditor?: GraphEditorState;
+  private editingModuleId?: string;
   /** 当前编译的取消句柄：语义编辑或重新编译都会取消上一次。 */
   private abort: AbortController | undefined;
 
@@ -242,22 +246,29 @@ export class Pwn2BlockGraphPanel extends LitElement {
     return html`
       <header>
         <strong>节点画布</strong>
+        <span class="breadcrumb">
+          ${this.editingModuleId === undefined
+            ? '主图'
+            : html`<button class="crumb" @click=${() => this.exitModule()}>主图</button> / ${this.moduleLabel()}`}
+        </span>
         <button
           part="compile"
-          ?disabled=${state.document.main.length === 0}
+          ?disabled=${this.editingModuleId !== undefined || state.document.main.length === 0}
           @click=${() => this.compile()}
         >编译</button>
-        <button ?disabled=${state.past.length === 0} @click=${() => this.setEditor(undo(state))}>撤销</button>
-        <button ?disabled=${state.future.length === 0} @click=${() => this.setEditor(redo(state))}>重做</button>
-        ${state.selection.length < 2
+        <button ?disabled=${!this.canUndo()} @click=${() => this.undoEdit()}>撤销</button>
+        <button ?disabled=${!this.canRedo()} @click=${() => this.redoEdit()}>重做</button>
+        ${this.editingModuleId !== undefined || state.selection.length < 2
           ? nothing
           : html`<button @click=${() => this.run((editor) => groupSelection(editor))}>分组</button>`}
-        ${state.selection.length === 0
+        ${this.editingModuleId !== undefined || state.selection.length === 0
           ? nothing
           : html`<button @click=${() => this.extractSelection()}>提取为模块</button>`}
         <button @click=${() => this.canvas()?.fit()}>适应窗口</button>
-        <button @click=${() => this.exportGraph()}>导出</button>
-        <label class="import">导入<input type="file" accept="application/json,.json" @change=${(event: Event) => this.importGraph(event)} /></label>
+        ${this.editingModuleId === undefined
+          ? html`<button @click=${() => this.exportGraph()}>导出</button>
+              <label class="import">导入<input type="file" accept="application/json,.json" @change=${(event: Event) => this.importGraph(event)} /></label>`
+          : nothing}
         ${this.renderPythonStatus()}
         <span class=${stale ? 'bad' : 'ok'}>${this.status}</span>
       </header>
@@ -334,7 +345,8 @@ export class Pwn2BlockGraphPanel extends LitElement {
     return html`<section class="modules">
       <h3>模块</h3>
       ${modules.map(
-        (module) => html`<button
+        (module) => html`<span class="module-row">
+        <button
           title="${module.kind === 'flow' ? '流程模块' : '数据模块'} · ${usage.get(module.id) ?? 0} 处调用"
           data-module=${module.id}
           @click=${() =>
@@ -350,7 +362,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
                 },
               }),
             )}
-        >${module.name} v${module.version}</button>`,
+        >${module.name} v${module.version}</button>
+        <button data-edit-module=${module.id} @click=${() => this.enterModule(module.id)}>编辑</button>
+        </span>`,
       )}
     </section>`;
   }
@@ -559,10 +573,44 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private persist(): void {
     const challenge = this.challenge;
     if (challenge === undefined) return;
-    this.storage().setItem(`${STORAGE_PREFIX}${challenge.id}`, JSON.stringify(this.editor.document));
+    const document = this.mainEditor?.document ?? this.editor.document;
+    this.storage().setItem(`${STORAGE_PREFIX}${challenge.id}`, JSON.stringify(document));
   }
 
   private setEditor(next: GraphEditorState): void {
+    if (this.mainEditor !== undefined && this.editingModuleId !== undefined) {
+      // 只改选中：画布与检查器要立刻反映，但不写回主图、不涨语义版本。
+      if (next.document === this.editor.document) {
+        this.editor = next;
+        this.requestUpdate();
+        return;
+      }
+      const semanticChanged = next.semanticRevision !== this.editor.semanticRevision;
+      if (semanticChanged) this.abort?.abort();
+      const merged = withModuleBody(
+        this.mainEditor,
+        this.editingModuleId,
+        next.document,
+        semanticChanged ? 'semantic' : 'layout',
+      );
+      if (!merged.ok) {
+        this.say(merged.message);
+        return;
+      }
+      this.mainEditor = merged.state;
+      const view = moduleViewState(merged.state, this.editingModuleId, next.selection);
+      if (view === undefined) {
+        this.exitModule();
+        return;
+      }
+      this.editor = view;
+      this.persist();
+      if (semanticChanged) {
+        this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
+      }
+      this.requestUpdate();
+      return;
+    }
     const semanticChanged = next.semanticRevision !== this.editor.semanticRevision;
     // 语义变了，正在跑的 Python 求值已经没有意义：取消，别让迟到结果覆盖新产物（07 §P7）。
     if (semanticChanged) this.abort?.abort();
@@ -571,6 +619,78 @@ export class Pwn2BlockGraphPanel extends LitElement {
     if (semanticChanged) {
       this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
     }
+    this.requestUpdate();
+  }
+
+  /** 进入模块体：画布切到模块自己的节点，面包屑显示模块名。 */
+  private enterModule(moduleId: string): void {
+    const view = moduleViewState(this.editor, moduleId);
+    if (view === undefined) {
+      this.say(`找不到模块 ${moduleId}`);
+      return;
+    }
+    this.mainEditor = this.editor;
+    this.editingModuleId = moduleId;
+    this.editor = view;
+    this.artifact = undefined;
+    this.issues = [];
+    this.status = '编辑模块体：返回主图后整体编译';
+    this.requestUpdate();
+  }
+
+  /** 返回主图：模块体已经逐次写回，直接把主图放回画布。 */
+  private exitModule(): void {
+    if (this.mainEditor === undefined) return;
+    this.editor = this.mainEditor;
+    this.mainEditor = undefined;
+    this.editingModuleId = undefined;
+    this.artifact = undefined;
+    this.issues = [];
+    this.status = '已返回主图，记得重新编译';
+    this.requestUpdate();
+  }
+
+  private moduleLabel(): string {
+    const id = this.editingModuleId;
+    if (id === undefined) return '主图';
+    const module = (this.mainEditor?.document.modules ?? []).find((candidate) => candidate.id === id);
+    return module === undefined ? id : `${module.name} v${module.version}`;
+  }
+
+  private canUndo(): boolean {
+    return (this.mainEditor ?? this.editor).past.length > 0;
+  }
+
+  private canRedo(): boolean {
+    return (this.mainEditor ?? this.editor).future.length > 0;
+  }
+
+  /** 模块体里的撤销/重做作用在主图上，然后把模块视图重新算出来。 */
+  private undoEdit(): void {
+    const base = this.mainEditor;
+    if (base !== undefined && this.editingModuleId !== undefined) {
+      this.mainEditor = undo(base);
+      this.refreshModuleView();
+      return;
+    }
+    this.setEditor(undo(this.editor));
+  }
+
+  private redoEdit(): void {
+    const base = this.mainEditor;
+    if (base !== undefined && this.editingModuleId !== undefined) {
+      this.mainEditor = redo(base);
+      this.refreshModuleView();
+      return;
+    }
+    this.setEditor(redo(this.editor));
+  }
+
+  private refreshModuleView(): void {
+    if (this.mainEditor === undefined || this.editingModuleId === undefined) return;
+    const view = moduleViewState(this.mainEditor, this.editingModuleId, this.editor.selection);
+    if (view !== undefined) this.editor = view;
+    this.persist();
     this.requestUpdate();
   }
 

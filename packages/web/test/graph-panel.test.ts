@@ -214,9 +214,9 @@ describe('画布面板：模块列表', () => {
         version: 2,
         inputs: [{ name: 'a', type: 'int' }],
         output: { name: 'out', type: 'int' },
-        nodes: [],
+        nodes: [wfNode('get', NODE.varGet, { name: 'a', type: 'int' })],
         connections: [],
-        main: [],
+        main: ['get'],
         layout: {},
       },
     ],
@@ -230,5 +230,30 @@ describe('画布面板：模块列表', () => {
     await settle(panel);
     const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
     expect(canvas?.shadowRoot?.querySelector('[data-node="data"]')).not.toBeNull();
+  });
+
+  it('进入模块体：面包屑显示模块名，编辑写回主图，返回后主图恢复', async () => {
+    const { panel, store } = await mount(moduleDoc);
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-edit-module="inc"]')?.click();
+    await settle(panel);
+    const header = panel.shadowRoot?.querySelector('header');
+    expect(header?.textContent ?? '').toContain('主图');
+    expect(header?.textContent ?? '').toContain('自增 v2');
+
+    const bodyCanvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
+    expect(bodyCanvas?.shadowRoot?.querySelector('[data-node="get"]')).not.toBeNull();
+    expect(bodyCanvas?.shadowRoot?.querySelector('[data-node="run"]')).toBeNull();
+
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]')?.click();
+    await settle(panel);
+    const saved = JSON.parse(store.getItem(`pwn2block.graph.${ret2winPublic.id}`) ?? '{}') as {
+      modules?: { nodes?: { kind: string }[] }[];
+    };
+    expect(saved.modules?.[0]?.nodes?.some((node) => node.kind === 'data.fill')).toBe(true);
+
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button.crumb')?.click();
+    await settle(panel);
+    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
+    expect(canvas?.shadowRoot?.querySelector('[data-node="run"]')).not.toBeNull();
   });
 });

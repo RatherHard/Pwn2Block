@@ -608,8 +608,12 @@ function nextGroupId(document: GraphDocument, groups: readonly GraphGroup[]): st
 }
 
 /** 用一份新文档替换当前文档（提取模块、导入等整块编辑共用入口）。 */
-export function withDocument(state: GraphEditorState, document: GraphDocument): GraphEditorState {
-  return apply(state, document, 'semantic');
+export function withDocument(
+  state: GraphEditorState,
+  document: GraphDocument,
+  kind: 'semantic' | 'layout' = 'semantic',
+): GraphEditorState {
+  return apply(state, document, kind);
 }
 
 /** 从主序列和所有区域里摘掉这些 id（移动前的清理）。 */
