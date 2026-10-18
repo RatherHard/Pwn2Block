@@ -1,6 +1,8 @@
 import { LitElement, css, html, nothing, svg } from 'lit';
-import type { GraphConnection, PortContext, PortType, WorkflowIssue } from '@pwn2block/shared';
+import type { GraphConnection, PortContext, WorkflowIssue } from '@pwn2block/shared';
 import { nodeInputs, nodeOutput, nodeRegions, nodeSpec } from '@pwn2block/shared';
+import { SIMPLIFY_ZOOM, collapsedContainers, collapsedSummary, hiddenByCollapse, isContainer } from '../graph/collapse';
+import { PORT_COLORS, PORT_LABELS } from '../graph/port-style';
 import type { GraphEditorState, PortRef } from '../graph/editor';
 import {
   NODE_WIDTH,
@@ -48,21 +50,8 @@ export type GraphEdit =
       readonly nodeIds: readonly string[];
       readonly container: string;
       readonly region: string;
-    };
-
-const PORT_COLORS: Readonly<Record<PortType, string>> = {
-  int: 'var(--p2b-code)',
-  bool: 'var(--p2b-hidden)',
-  bytes: 'var(--p2b-data)',
-  text: 'var(--p2b-ip)',
-};
-
-const PORT_LABELS: Readonly<Record<PortType, string>> = {
-  int: '整数',
-  bool: '布尔',
-  bytes: '字节',
-  text: '文本',
-};
+    }
+  | { readonly type: 'collapse'; readonly nodeId: string; readonly collapsed: boolean };
 
 interface DragState {
   readonly kind: 'node' | 'pan' | 'box' | 'connect' | 'reorder';
@@ -188,6 +177,16 @@ export class Pwn2BlockGraphCanvas extends LitElement {
     this.requestUpdate();
   }
 
+  /** 设置缩放：界面按钮与验收脚本用，围绕画布中心。 */
+  setZoom(zoom: number): void {
+    const rect = this.getBoundingClientRect();
+    const center = { x: rect.width / 2, y: rect.height / 2 };
+    const next = clampZoom(zoom);
+    const world = screenToWorld(center, this.viewport);
+    this.viewport = { zoom: next, x: center.x - world.x * next, y: center.y - world.y * next };
+    this.requestUpdate();
+  }
+
   /** 聚焦某个节点（检查器点「定位」时用）。 */
   focusNode(nodeId: string): void {
     const box = this.boxes().find((candidate) => candidate.id === nodeId);
@@ -210,7 +209,9 @@ export class Pwn2BlockGraphCanvas extends LitElement {
       .filter((issue) => issue.severity === 'error' && issue.nodeId !== '')
       .map((issue) => issue.nodeId);
     const boxes: NodeBox[] = [];
+    const hidden = hiddenByCollapse(state.document);
     for (const node of state.document.nodes) {
+      if (hidden.has(node.id)) continue;
       const placement = state.document.layout[node.id] ?? { x: 40, y: 40 };
       const live = this.liveMoves[node.id];
       const box = nodeBox(
@@ -227,7 +228,9 @@ export class Pwn2BlockGraphCanvas extends LitElement {
   private frames(): ReturnType<typeof regionFrames> {
     const state = this.state;
     if (state === undefined) return [];
+    const collapsed = collapsedContainers(state.document);
     const containers = state.document.nodes.flatMap((node) => {
+      if (collapsed.has(node.id)) return [];
       const spec = nodeSpec(node.kind);
       if (spec === undefined) return [];
       const regions = nodeRegions(spec, node.params);
@@ -498,6 +501,12 @@ export class Pwn2BlockGraphCanvas extends LitElement {
     const nodeElement = target?.closest('[data-node]');
     const nodeId = nodeElement?.getAttribute('data-node');
     if (nodeId === null || nodeId === undefined) return;
+    const node = this.state?.document.nodes.find((candidate) => candidate.id === nodeId);
+    if (node !== undefined && isContainer(node)) {
+      const collapsed = this.state?.document.layout[nodeId]?.collapsed === true;
+      this.emitEdit({ type: 'collapse', nodeId, collapsed: !collapsed });
+      return;
+    }
     this.dispatchEvent(
       new CustomEvent('p2b-graph-open', { detail: { nodeId }, bubbles: true, composed: true }),
     );
@@ -686,7 +695,10 @@ export class Pwn2BlockGraphCanvas extends LitElement {
   private renderNode(box: NodeBox, highlighted: { node: string; port: string } | undefined) {
     const preview = this.previewOf(box.id);
     const error = this.issueOf(box.id);
-    const subtitle = error ?? preview?.summary ?? box.subtitle;
+    const node = this.state?.document.nodes.find((candidate) => candidate.id === box.id);
+    const collapsed = node !== undefined && this.state?.document.layout[box.id]?.collapsed === true;
+    const simplified = this.viewport.zoom < SIMPLIFY_ZOOM;
+    const subtitle = collapsed && node !== undefined ? collapsedSummary(node) : (error ?? preview?.summary ?? box.subtitle);
     return svg`<g
       data-node=${box.id}
       transform="translate(${box.x} ${box.y})"
@@ -720,7 +732,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
           <rect class="port" data-node=${box.id} data-port=${port.port} data-kind="in" data-flow="data"
             x=${-PORT_SIZE / 2} y=${y - PORT_SIZE / 2} width=${PORT_SIZE} height=${PORT_SIZE}
             fill=${PORT_COLORS[port.type]} stroke=${active ? 'var(--p2b-focus)' : 'none'} stroke-width="2" />
-          <text class="label" x="8" y=${y + 4}>${truncate(port.port, 14)}</text>
+          ${simplified ? nothing : svg`<text class="label" x="8" y=${y + 4}>${truncate(port.port, 14)}</text>`}
         </g>`;
       })}
       ${box.outputs.map((port) => {
@@ -729,10 +741,10 @@ export class Pwn2BlockGraphCanvas extends LitElement {
           <rect class="port" data-node=${box.id} data-port=${port.port} data-kind="out" data-flow="data"
             x=${NODE_WIDTH - PORT_SIZE / 2} y=${y - PORT_SIZE / 2} width=${PORT_SIZE} height=${PORT_SIZE}
             fill=${PORT_COLORS[port.type]} />
-          <text class="label" x=${NODE_WIDTH - 8} y=${y + 4} text-anchor="end">${truncate(port.port, 14)}</text>
+          ${simplified ? nothing : svg`<text class="label" x=${NODE_WIDTH - 8} y=${y + 4} text-anchor="end">${truncate(port.port, 14)}</text>`}
         </g>`;
       })}
-      <text class="subtitle" x="8" y=${box.height - 6}>${truncate(subtitle, 34)}</text>
+      ${simplified && !collapsed ? nothing : svg`<text class="subtitle" x="8" y=${box.height - 6}>${truncate(subtitle, 34)}</text>`}
     </g>`;
   }
 
@@ -742,7 +754,9 @@ export class Pwn2BlockGraphCanvas extends LitElement {
   ): unknown {
     const anchors = new Map<string, PortAnchor[]>();
     for (const box of placement.values()) anchors.set(box.id, [...allPorts(box)]);
+    const hidden = hiddenByCollapse(state.document);
     return state.document.connections.map((connection, index) => {
+      if (hidden.has(connection.from.node) || hidden.has(connection.to.node)) return nothing;
       const from = anchors.get(connection.from.node)?.find(
         (port) => port.kind === 'out' && port.port === connection.from.port,
       );

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { NODE } from '@pwn2block/shared';
 import type { PortContext } from '@pwn2block/shared';
-import { addNode, connect, createEditor } from '../src/graph/editor';
+import { addNode, connect, createEditor, setCollapsed } from '../src/graph/editor';
 import type { GraphEditorState } from '../src/graph/editor';
 import type { GraphEdit, Pwn2BlockGraphCanvas } from '../src/components/graph-canvas';
 import '../src/components/graph-canvas';
@@ -164,5 +164,47 @@ describe('画布与编辑器一致', () => {
     expect(canvas.shadowRoot?.querySelector('[data-node="feed"]')).not.toBeNull();
     expect(WORKFLOW_CONTEXT.allowedActions).toContain('feed');
     expect(typeof connect).toBe('function');
+  });
+});
+
+describe('容器折叠与缩放简化', () => {
+  function containerState(): GraphEditorState {
+    return createEditor(
+      workflow({
+        nodes: [
+          wfNode('if', NODE.if, {}, { then: ['write'], else: [] }),
+          wfNode('write', NODE.write, { addr: 0x400000 }),
+        ],
+        edges: [],
+        main: ['if'],
+      }),
+    );
+  }
+
+  it('折叠后子节点与区域框都不画，摘要写条数', async () => {
+    const canvas = await mount(setCollapsed(containerState(), 'if', true));
+    expect(canvas.shadowRoot?.querySelector('[data-node="write"]')).toBeNull();
+    expect(canvas.shadowRoot?.querySelector('[data-region="if"]')).toBeNull();
+    expect(canvas.shadowRoot?.textContent ?? '').toContain('已折叠 · 1 条语句');
+  });
+
+  it('容器上双击派发折叠事件', async () => {
+    const canvas = await mount(containerState());
+    const events: GraphEdit[] = [];
+    canvas.addEventListener('p2b-graph-edit', (event) =>
+      events.push((event as CustomEvent<GraphEdit>).detail),
+    );
+    canvas.shadowRoot
+      ?.querySelector('[data-node="if"]')
+      ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(events).toContainEqual({ type: 'collapse', nodeId: 'if', collapsed: true });
+  });
+
+  it('缩小到阈值以下只留骨架，隐藏副标题', async () => {
+    const canvas = await mount(editorWithPayload());
+    expect(canvas.shadowRoot?.textContent ?? '').toContain('字节');
+    canvas.setZoom(0.4);
+    await canvas.updateComplete;
+    expect(canvas.shadowRoot?.querySelector('.subtitle')).toBeNull();
   });
 });

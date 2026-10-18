@@ -544,6 +544,11 @@ export function moveOut(state: GraphEditorState, nodeIds: readonly string[]): Gr
   return document === state.document ? state : apply(state, document, 'semantic', nodeIds);
 }
 
+/** 用一份新文档替换当前文档（提取模块、导入等整块编辑共用入口）。 */
+export function withDocument(state: GraphEditorState, document: GraphDocument): GraphEditorState {
+  return apply(state, document, 'semantic');
+}
+
 /** 从主序列和所有区域里摘掉这些 id（移动前的清理）。 */
 function removeFromSequences(document: GraphDocument, ids: readonly string[]): GraphDocument {
   const doomed = new Set(ids);
@@ -558,4 +563,20 @@ function removeFromSequences(document: GraphDocument, ids: readonly string[]): G
         },
   );
   return { ...document, nodes, main: document.main.filter((id) => !doomed.has(id)) };
+}
+
+/**
+ * 折叠/展开容器：只改布局，不涨语义版本，也不作废已编译的产物（06 §3）。
+ *
+ * 折叠后子节点在画布上隐藏，但执行序列不变；`layout.collapsed` 是纯显示状态。
+ */
+export function setCollapsed(state: GraphEditorState, nodeId: string, collapsed: boolean): GraphEditorState {
+  const node = state.document.nodes.find((candidate) => candidate.id === nodeId);
+  if (node === undefined) return state;
+  const spec = nodeSpec(node.kind);
+  if (spec === undefined || nodeRegions(spec, node.params).length === 0) return state;
+  const current = state.document.layout[nodeId] ?? { x: 40, y: 40 };
+  if ((current.collapsed ?? false) === collapsed) return state;
+  const layout = { ...state.document.layout, [nodeId]: { ...current, collapsed } };
+  return apply(state, { ...state.document, layout }, 'layout');
 }

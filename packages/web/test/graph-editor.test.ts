@@ -9,6 +9,7 @@ import {
   moveInto,
   moveNodes,
   moveOut,
+  setCollapsed,
   paste,
   pruneConnections,
   redo,
@@ -296,5 +297,32 @@ describe('编辑器：容器', () => {
     if (!result.ok) throw new Error(result.message);
     const node = result.state.document.nodes.find((candidate) => candidate.kind === NODE.repeat);
     expect(node?.regions?.body).toEqual([]);
+  });
+});
+
+describe('容器折叠（只改布局）', () => {
+  function withIf() {
+    return createEditor(
+      workflow({
+        nodes: [wfNode('if', NODE.if, {}, { then: [], else: [] }), wfNode('run', NODE.run)],
+        main: ['if', 'run'],
+      }),
+    );
+  }
+
+  it('折叠只涨 layoutRevision，不涨语义版本', () => {
+    const state = withIf();
+    const folded = setCollapsed(state, 'if', true);
+    expect(folded.semanticRevision).toBe(state.semanticRevision);
+    expect(folded.layoutRevision).toBe(state.layoutRevision + 1);
+    expect(folded.document.layout.if?.collapsed).toBe(true);
+    expect(undo(folded).document.layout.if?.collapsed).toBeUndefined();
+  });
+
+  it('非容器与重复折叠不改状态', () => {
+    const state = withIf();
+    expect(setCollapsed(state, 'run', true)).toBe(state);
+    const folded = setCollapsed(state, 'if', true);
+    expect(setCollapsed(folded, 'if', true)).toBe(folded);
   });
 });
