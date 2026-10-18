@@ -23,6 +23,8 @@ import { compileGraph } from '../workflow/compile';
 import { checkParam } from '../workflow/params';
 import { lookupGraph } from '../workflow/document';
 import { extractModule } from '../graph/extract';
+import { upgradeModule, upgradeTargetOf } from '../graph/module-upgrade';
+import { exportDocument, importDocument } from '../graph/transfer';
 import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
 import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
 import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
@@ -248,6 +250,8 @@ export class Pwn2BlockGraphPanel extends LitElement {
           ? nothing
           : html`<button @click=${() => this.extractSelection()}>提取为模块</button>`}
         <button @click=${() => this.canvas()?.fit()}>适应窗口</button>
+        <button @click=${() => this.exportGraph()}>导出</button>
+        <label class="import">导入<input type="file" accept="application/json,.json" @change=${(event: Event) => this.importGraph(event)} /></label>
         ${this.renderPythonStatus()}
         <span class=${stale ? 'bad' : 'ok'}>${this.status}</span>
       </header>
@@ -335,6 +339,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const container = placement?.container;
     const isContainer = spec !== undefined && nodeRegions(spec, node.params).length > 0;
     const collapsed = this.editor.document.layout[node.id]?.collapsed === true;
+    const upgrade = upgradeTargetOf(this.editor.document, node);
     return html`<aside class="inspector" aria-label="检查器">
       <h3>${spec?.label ?? node.kind}</h3>
       <p><code>${node.id}</code></p>
@@ -348,6 +353,12 @@ export class Pwn2BlockGraphPanel extends LitElement {
               : html`<button @click=${() => this.setEditor(moveOut(this.editor, [node.id]))}>移出容器</button>`}
           </div>`}
       ${specs.map((param) => this.renderParam(node.id, param, challenge))}
+      ${upgrade === undefined
+        ? nothing
+        : html`<div class="row">
+            <button @click=${() => this.upgrade(node.id)}>升级到 v${upgrade.version}</button>
+            <span class="hint">输入与结果类型不变才能升级</span>
+          </div>`}
       <div class="row">
         <button @click=${() => this.canvas()?.focusNode(node.id)}>定位</button>
         ${isContainer
@@ -466,6 +477,43 @@ export class Pwn2BlockGraphPanel extends LitElement {
     }
     this.setEditor(result.state);
     this.say(`已提取为模块 ${result.moduleId}`);
+  }
+
+  /** 显式升级模块调用：不做自动升级，失败时保留原版本。 */
+  private upgrade(nodeId: string): void {
+    const result = upgradeModule(this.editor, nodeId);
+    if (!result.ok) {
+      this.say(result.message);
+      return;
+    }
+    this.setEditor(result.state);
+    this.say('已升级到新版本');
+  }
+
+  /** 导出当前图：只含文档，不含产物与预览。 */
+  private exportGraph(): void {
+    const blob = new Blob([exportDocument(this.editor.document)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'pwn2block-graph.json';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** 导入先校验再替换；失败时原图不动，只报原因。 */
+  private async importGraph(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file === undefined) return;
+    const result = importDocument(this.editor, await file.text());
+    if (!result.ok) {
+      this.say(result.message);
+      return;
+    }
+    this.setEditor(result.state);
+    this.say('已导入图，原图可撤销恢复');
   }
 
   private say(message: string): void {

@@ -67,22 +67,16 @@ export function extractModule(
       }
     }
   }
-  const unsupported = selected
-    .map((id) => document.nodes.find((node) => node.id === id))
-    .find((node) => {
-      const spec = node === undefined ? undefined : nodeSpec(node.kind);
-      return node !== undefined && spec !== undefined && spec.exec;
-    });
-  if (unsupported !== undefined) {
-    return refuse(`「${labelOf(unsupported)}」是动作或控制结构：目前只能提取纯数据节点`);
-  }
+  const hasExec = selected.some((id) => {
+    const node = document.nodes.find((candidate) => candidate.id === id);
+    const spec = node === undefined ? undefined : nodeSpec(node.kind);
+    return spec?.exec === true;
+  });
+  const kind = hasExec ? 'flow' : 'data';
 
   const boundary = splitBoundary(document, inside);
   if (boundary.inputs.some((edge) => edge.type === undefined)) {
     return refuse('选区的输入端口类型不明：检查连线是否完整');
-  }
-  if (boundary.outputs.length === 0) {
-    return refuse('选区没有对外的数据输出：模块需要一个结果，先把结果接到外面的节点');
   }
   if (boundary.outputs.length > 1) {
     return refuse('选区有多个外部消费者：模块只有一个结果，先让它们共用同一个输出');
@@ -102,11 +96,13 @@ export function extractModule(
     name: options.name ?? moduleId,
     path,
     indices,
+    kind,
   });
   const rewritten = rewriteMain(document, selected, path, {
     moduleId,
+    kind,
     inputs: boundary.inputs,
-    output: boundary.outputs[0] as BoundaryEdge,
+    ...(boundary.outputs[0] === undefined ? {} : { output: boundary.outputs[0] }),
   });
   return { ok: true, state: withDocument(state, { ...rewritten, modules: [...(document.modules ?? []), built] }), moduleId };
 }
@@ -190,6 +186,7 @@ interface ModuleSeed {
   readonly name: string;
   readonly path: readonly string[];
   readonly indices: readonly number[];
+  readonly kind: 'data' | 'flow';
 }
 
 function buildModule(
@@ -217,37 +214,37 @@ function buildModule(
     }
     connections.push({ from: { node: `in_${name}`, port: 'out' }, to: { node: edge.node, port: portNameOf(edge) } });
   }
-  const output = boundary.outputs[0] as BoundaryEdge;
-  const returnId = 'out';
-  nodes.push({
-    id: returnId,
-    kind: NODE.moduleReturn,
-    params: { valueType: output.type ?? 'bytes' } satisfies ParamValues,
-  });
-  connections.push({ from: { node: output.node, port: output.port }, to: { node: returnId, port: 'value' } });
-
+  const output = boundary.outputs[0];
   const layout = { ...document.layout };
-  let offset = 0;
   const main = [...selected];
+  let offset = 0;
   for (const id of main) {
     layout[id] = layout[id] ?? { x: 40 + offset * 260, y: 40 };
     offset += 1;
   }
-  layout[returnId] = { x: 40 + offset * 260, y: 40 };
-  for (const edge of boundary.inputs) {
-    layout[`in_${edge.port}`] = { x: 40 + offset * 260, y: 40 + offset * 20 };
+  if (output !== undefined) {
+    nodes.push({
+      id: 'out',
+      kind: NODE.moduleReturn,
+      params: { valueType: output.type ?? 'bytes' } satisfies ParamValues,
+    });
+    connections.push({ from: { node: output.node, port: output.port }, to: { node: 'out', port: 'value' } });
+    main.push('out');
+    layout.out = { x: 40 + offset * 260, y: 40 };
   }
   return {
     id: seed.id,
     name: seed.name,
     summary: `从 ${seed.path.join('/')} 提取`,
-    kind: 'data',
+    kind: seed.kind,
     version: 1,
     inputs: boundary.inputs.map((edge) => ({ name: edge.port, type: (edge.type ?? 'bytes') as GraphModule['inputs'][number]['type'] })),
-    output: { name: 'out', type: (output.type ?? 'bytes') as GraphModule['inputs'][number]['type'] },
+    ...(output === undefined
+      ? {}
+      : { output: { name: 'out', type: (output.type ?? 'bytes') as GraphModule['inputs'][number]['type'] } }),
     nodes,
     connections,
-    main: [...main, returnId],
+    main,
     layout,
   };
 }
@@ -258,17 +255,22 @@ function rewriteMain(
   path: readonly string[],
   call: {
     readonly moduleId: string;
+    readonly kind: 'data' | 'flow';
     readonly inputs: readonly BoundaryEdge[];
-    readonly output: BoundaryEdge;
+    readonly output?: BoundaryEdge;
   },
 ): GraphDocument {
+  const output = call.output;
   const callNode: GraphNode = {
     id: freeNodeId(document, 'extracted'),
-    kind: NODE.moduleData,
+    kind: call.kind === 'data' ? NODE.moduleData : NODE.moduleCall,
     params: {
       moduleId: call.moduleId,
       moduleVersion: 1,
-      outputType: call.output.type ?? 'bytes',
+      ...(output === undefined
+        ? { hasOutput: 'no' }
+        : { hasOutput: 'yes', outputType: output.type ?? 'bytes' }),
+      ...(call.kind === 'data' && output !== undefined ? { outputType: output.type ?? 'bytes' } : {}),
       inputs: call.inputs.map((edge) => `${edge.port}:${edge.type ?? 'bytes'}`),
     },
   };
@@ -288,7 +290,9 @@ function rewriteMain(
       from: { node: edge.fromNode as string, port: edge.fromPort as string },
       to: { node: callNode.id, port: edge.port },
     })),
-    { from: { node: callNode.id, port: 'out' }, to: { node: call.output.toNode as string, port: call.output.toPort as string } },
+    ...(output === undefined
+      ? []
+      : [{ from: { node: callNode.id, port: 'out' }, to: { node: output.toNode as string, port: output.toPort as string } }]),
   ];
   if (path.length === 1) {
     return { ...document, nodes, connections, main: nextSequence };

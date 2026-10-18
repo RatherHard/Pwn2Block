@@ -80,12 +80,46 @@ describe('提取为模块', () => {
     expect(result.message).toContain('多个外部消费者');
   });
 
-  it('拒绝含动作的选区，避免把动作塞进数据模块', () => {
-    const state = editorOf([wfNode('push', NODE.push)], [], ['push']);
+  it('含动作的选区提取为流程模块（没有结果也可以）', async () => {
+    const state = editorOf(
+      [intOf('n', 5), wfNode('push', NODE.push)],
+      [wfEdge('n', 'push', 'value')],
+      ['n', 'push'],
+    );
+    const before = await actionsOf(state.document);
     const result = extractModule(state, ['push']);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.message).toContain('动作或控制结构');
+    if (!result.ok) throw new Error(result.message);
+    const module = result.state.document.modules?.[0];
+    expect(module?.kind).toBe('flow');
+    expect(module?.output).toBeUndefined();
+    expect(module?.inputs).toEqual([{ name: 'value', type: 'int' }]);
+    expect(await actionsOf(result.state.document)).toEqual(before);
+    const call = result.state.document.nodes.find((node) => node.id === result.state.document.main[1]);
+    expect(call?.kind).toBe(NODE.moduleCall);
+    expect(call?.params.hasOutput).toBe('no');
+  });
+
+  it('流程模块可以带一个结果，并接到原来的消费者', async () => {
+    const state = editorOf(
+      [
+        intOf('n', 41),
+        wfNode('inc', NODE.arith, { op: 'ADD', b: 1 }),
+        wfNode('push', NODE.push),
+        wfNode('copy', NODE.arith, { op: 'ADD', b: 0 }),
+      ],
+      [wfEdge('n', 'inc', 'a'), wfEdge('inc', 'push', 'value'), wfEdge('inc', 'copy', 'a')],
+      ['n', 'inc', 'push', 'copy'],
+    );
+    const before = await actionsOf(state.document);
+    const result = extractModule(state, ['inc', 'push']);
+    if (!result.ok) throw new Error(result.message);
+    const module = result.state.document.modules?.[0];
+    expect(module?.kind).toBe('flow');
+    expect(module?.output).toEqual({ name: 'out', type: 'int' });
+    expect(await actionsOf(result.state.document)).toEqual(before);
+    const call = result.state.document.nodes.find((node) => node.kind === NODE.moduleCall);
+    expect(call?.params.hasOutput).toBe('yes');
+    expect(call?.params.outputType).toBe('int');
   });
 
   it('容器没选全时拒绝', () => {
