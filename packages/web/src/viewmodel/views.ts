@@ -7,7 +7,7 @@
  */
 import type { Projection, PublicChallenge } from '@pwn2block/shared';
 
-export const VIEW_KINDS = ['stack', 'disasm', 'registers', 'memory', 'io'] as const;
+export const VIEW_KINDS = ['stack', 'disasm', 'registers', 'memory', 'io', 'pseudocode'] as const;
 export type ViewKind = (typeof VIEW_KINDS)[number];
 
 /** 当前标签不可用、或存储里读不出合法值时的回退标签。 */
@@ -19,15 +19,17 @@ export const VIEW_TITLES: Readonly<Record<ViewKind, string>> = {
   registers: '寄存器视图',
   memory: '自由视图',
   io: 'I/O 视图',
+  pseudocode: '伪代码视图',
 };
 
-/** 标签栏上的短名（设计 §3.2：`[栈] 指令 寄存器 内存 I/O`）。 */
+/** 标签栏上的短名（设计 §3.2：`[栈] 指令 寄存器 内存 I/O 伪代码`）。 */
 export const VIEW_TAB_LABELS: Readonly<Record<ViewKind, string>> = {
   stack: '栈',
   disasm: '指令',
   registers: '寄存器',
   memory: '内存',
   io: 'I/O',
+  pseudocode: '伪代码',
 };
 
 export interface ViewManagerState {
@@ -48,12 +50,15 @@ export function isViewKind(value: unknown): value is ViewKind {
  *
  * 保留“投影里已经有 I/O 状态就算数”的兼容分支：调用方拿不到公开包时（例如回放旧帧）
  * 也不会把明明有 stdin / stdout 的题目判成没有 I/O 视图。
+ *
+ * `pseudocode` 只在公开包带了伪代码（出题人提供了 `pseudocode.c`）时出现。
  */
 export function availableViews(projection: Projection, challenge?: PublicChallenge): readonly ViewKind[] {
   const kinds: ViewKind[] = ['stack', 'disasm', 'registers', 'memory'];
   const declares = challenge !== undefined && (challenge.syscalls !== undefined || challenge.fds !== undefined);
   const hasStreams = projection.stdin !== undefined || projection.stdout !== undefined;
   if (declares || hasStreams) kinds.push('io');
+  if (challenge?.pseudocode !== undefined) kinds.push('pseudocode');
   return kinds;
 }
 

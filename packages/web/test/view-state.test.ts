@@ -15,6 +15,7 @@ import { makeProjection } from './helpers';
 
 const all = VIEW_KINDS;
 const noIo = ['stack', 'disasm', 'registers', 'memory'] as const;
+const withIo = [...noIo, 'io'] as const;
 
 function memoryStore(): KeyValueStore {
   const data = new Map<string, string>();
@@ -27,10 +28,10 @@ function memoryStore(): KeyValueStore {
 }
 
 describe('视图标签状态（设计 §3.1）', () => {
-  it('缺省标签是栈，标签名依次为 栈 指令 寄存器 内存 I/O', () => {
+  it('缺省标签是栈，标签名依次为 栈 指令 寄存器 内存 I/O 伪代码', () => {
     expect(createViewManagerState()).toEqual({ active: 'stack' });
     expect(createViewManagerState('disasm')).toEqual({ active: 'disasm' });
-    expect(VIEW_KINDS.map((kind) => VIEW_TAB_LABELS[kind])).toEqual(['栈', '指令', '寄存器', '内存', 'I/O']);
+    expect(VIEW_KINDS.map((kind) => VIEW_TAB_LABELS[kind])).toEqual(['栈', '指令', '寄存器', '内存', 'I/O', '伪代码']);
   });
 
   it('selectView 只接受可用标签', () => {
@@ -43,8 +44,10 @@ describe('视图标签状态（设计 §3.1）', () => {
   it('cycleView 首尾循环并跳过 I/O', () => {
     expect(cycleView({ active: 'memory' }, 1, noIo)).toEqual({ active: 'stack' });
     expect(cycleView({ active: 'stack' }, -1, noIo)).toEqual({ active: 'memory' });
-    expect(cycleView({ active: 'memory' }, 1, all)).toEqual({ active: 'io' });
-    expect(cycleView({ active: 'io' }, 1, all)).toEqual({ active: 'stack' });
+    expect(cycleView({ active: 'memory' }, 1, withIo)).toEqual({ active: 'io' });
+    expect(cycleView({ active: 'io' }, 1, withIo)).toEqual({ active: 'stack' });
+    expect(cycleView({ active: 'io' }, 1, all)).toEqual({ active: 'pseudocode' });
+    expect(cycleView({ active: 'pseudocode' }, 1, all)).toEqual({ active: 'stack' });
     expect(cycleView({ active: 'stack' }, 1, noIo)).toEqual({ active: 'disasm' });
   });
 
@@ -90,8 +93,15 @@ describe('视图标签状态（设计 §3.1）', () => {
       'io',
     ]);
     // 兼容分支：调用方只有投影时，投影里已有 I/O 状态也算数。
-    const withIo = makeProjection({ stdin: { hex: '4141', pos: 0 } });
-    expect(availableViews(withIo)).toContain('io');
+    const ioProjection = makeProjection({ stdin: { hex: '4141', pos: 0 } });
+    expect(availableViews(ioProjection)).toContain('io');
+  });
+
+  it('伪代码标签只在公开包带了 pseudocode 时出现，排在最后', () => {
+    expect(availableViews(SAMPLE_PROJECTION_START, SAMPLE_PUBLIC_CHALLENGE)).not.toContain('pseudocode');
+    expect(availableViews(SAMPLE_PROJECTION_START, { ...SAMPLE_PUBLIC_CHALLENGE, pseudocode: 'int main();' }))
+      .toEqual([...withIo, 'pseudocode']);
+    expect(normalizeActive({ active: 'pseudocode' }, withIo)).toEqual({ active: 'stack' });
   });
 });
 

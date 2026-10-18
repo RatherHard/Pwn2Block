@@ -21,6 +21,7 @@ import { sharedStyles, terminalTheme } from '../theme';
 import './disasm-view';
 import './io-view';
 import './memory-view';
+import './pseudocode-view';
 import './registers-view';
 import './stack-view';
 import type { ViewContext } from './view-context';
@@ -179,10 +180,12 @@ export class Pwn2BlockViewManager extends LitElement {
         return html`<pwn2block-memory-view .context=${this.context}></pwn2block-memory-view>`;
       case 'io':
         return html`<pwn2block-io-view .context=${this.context}></pwn2block-io-view>`;
+      case 'pseudocode':
+        return html`<pwn2block-pseudocode-view .context=${this.context}></pwn2block-pseudocode-view>`;
     }
   }
 
-  /** 按固定顺序列出本题可用的视图；I/O 不可用时不出现。 */
+  /** 按固定顺序列出本题可用的视图；I/O、伪代码不可用时不出现。 */
   private tabs(): readonly ViewKind[] {
     return VIEW_KINDS.filter((kind) => this.available.includes(kind));
   }

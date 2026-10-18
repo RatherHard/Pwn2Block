@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import '../src/components/view-manager';
 import { createViewContext } from '../src/viewmodel/context';
 import { EMPTY_DIFF } from '../src/viewmodel/diff';
-import { VIEW_KINDS, type ViewKind } from '../src/viewmodel/views';
+import type { ViewKind } from '../src/viewmodel/views';
 import { SAMPLE_PROJECTION_START, SAMPLE_PUBLIC_CHALLENGE } from '../src/fixtures/sample';
 
 const context = createViewContext({
@@ -13,14 +13,16 @@ const context = createViewContext({
   diff: EMPTY_DIFF,
 });
 const noIo: readonly ViewKind[] = ['stack', 'disasm', 'registers', 'memory'];
+/** 样例题（ret2win）的可用视图：有 I/O，没有伪代码。 */
+const sampleViews: readonly ViewKind[] = [...noIo, 'io'];
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
-async function mount(active: ViewKind, available: readonly ViewKind[] = VIEW_KINDS) {
+async function mount(active: ViewKind, available: readonly ViewKind[] = sampleViews, ctx = context) {
   const manager = document.createElement('pwn2block-view-manager');
-  manager.context = context;
+  manager.context = ctx;
   manager.views = { active };
   manager.available = available;
   document.body.append(manager);
@@ -126,6 +128,33 @@ describe('视图面板（设计 §3.2）', () => {
     expect(panelOf(manager, 'pwn2block-stack-view').hidden).toBe(false);
     expect(tabs(manager).some((tab) => tab.textContent?.includes('I/O'))).toBe(false);
     expect(tabs(manager)[0]?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('有伪代码时最后多一个「伪代码」标签，按纯文本只读显示', async () => {
+    const pseudocode = 'int main() {\n  char *s = "<b>&amp;</b>";\n}';
+    const withCode = createViewContext({
+      projection: SAMPLE_PROJECTION_START,
+      challenge: { ...SAMPLE_PUBLIC_CHALLENGE, pseudocode },
+      archBits: 64,
+      diff: EMPTY_DIFF,
+    });
+    const manager = await mount('pseudocode', [...sampleViews, 'pseudocode'], withCode);
+    expect(tabs(manager).map((tab) => tab.textContent?.trim())).toEqual(['栈', '指令', '寄存器', '内存', 'I/O', '[伪代码]']);
+    expect(tabs(manager)[5]?.title).toBe('伪代码视图');
+    const view = manager.renderRoot.querySelector('pwn2block-pseudocode-view');
+    if (!view) throw new Error('缺少伪代码视图');
+    await view.updateComplete;
+    expect(panelOf(manager, 'pwn2block-pseudocode-view').hidden).toBe(false);
+    const pre = view.renderRoot.querySelector('pre');
+    expect(pre?.textContent).toBe(pseudocode);
+    expect(pre?.querySelector('b')).toBeNull();
+  });
+
+  it('没有伪代码的题目不渲染伪代码视图；存了 pseudocode 时显示栈', async () => {
+    const manager = await mount('pseudocode');
+    expect(manager.renderRoot.querySelector('pwn2block-pseudocode-view')).toBeNull();
+    expect(tabs(manager).some((tab) => tab.textContent?.includes('伪代码'))).toBe(false);
+    expect(panelOf(manager, 'pwn2block-stack-view').hidden).toBe(false);
   });
 
   it('底部图例一行', async () => {
