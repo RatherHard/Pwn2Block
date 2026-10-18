@@ -23,6 +23,7 @@
 | 4 | `stackframe` | 栈帧 |
 | 5 | `localvar` | 局部变量覆盖 |
 | 6 | `ret2win` | 回到胜利 |
+| 7 | `ret2rop` | 把 gadget 串成链 |
 
 ## 快速开始
 
