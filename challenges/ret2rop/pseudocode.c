@@ -1,64 +1,61 @@
 /*
- * ret2rop —— challenges/ret2rop/program.asm 的 C 伪代码。
+ * ret2rop 的 C 伪代码，对应 program.asm。
  *
- * 这不是能编译的源码：它用 C 的形状描述 VM 里那段伪汇编在做什么。
- * 寄存器直接用 VM 里的名字（RAX / RBX / RSP / RBP），方便对照寄存器视图。
+ * 寄存器写成全局变量：rax、rbx、rsp 就是寄存器视图里的 RAX、RBX、RSP。
+ * 栈按 8 字节一格看，所以 rsp 是 uint64_t *，*rsp 就是栈顶那一格。
  *
- *   程序入口 main ──call──▶ vuln ──read(0, buf, 0x100)──▶ leave; ret
- *          ▲                                                │
- *          └─────────── 正常返回就走 syscall 60（不判胜） ◀──┘
- *
- * text 段里还躺着三个 gadget 和 target：main 不会主动调用它们，
- * 它们只会在你构造的那条链上，被一个接一个的 ret「弹」进去。
+ * main 只调用 vuln。三个 gadget 和 target 没有人调用，
+ * 只能靠栈上排好的地址，被一个接一个的 return 跳进去。
  */
 
-/* 三个 gadget：每段只有一两条指令，而且都以 ret 结尾。 */
+#include <stdint.h>
+#include <stdlib.h>     /* exit：syscall 60 */
+#include <unistd.h>     /* read：syscall 0 */
 
+void win(void);         /* syscall 99：FLAG = 1 并退出，判胜 */
+
+uint64_t rax, rbx;
+uint64_t *rsp;
+
+/*
+ * 每个 gadget 都以 return（ret）结尾：执行完不回到调用者，
+ * 而是跳到栈顶那一格写的地址，也就是链上的下一段。
+ */
+
+/* pop rax; ret */
 void gadget_pop_rax(void)
 {
-    /* pop rax      ：rax = [rsp]；rsp += 8 */
+    rax = *rsp++;       /* 弹出栈顶一格：链上紧跟在本 gadget 地址后面的那个值 */
 }
 
+/* add rax, 0x10; ret */
 void gadget_add_rax_10(void)
 {
-    /* add rax, 0x10：rax += 0x10 */
+    rax += 0x10;
 }
 
+/* mov rbx, rax; ret */
 void gadget_mov_rbx_rax(void)
 {
-    /* mov rbx, rax ：rbx = rax */
+    rbx = rax;
 }
 
-/* target 只认一个结果：RBX 是不是 0x1010。 */
 void target(void)
 {
-    if (rbx != 0x1010) {
-        syscall(60);        /* 退出：判负 */
-    }
-    syscall(99);            /* FLAG = 1 并退出：判胜 */
+    if (rbx == 0x1010)
+        win();
+    exit(0);
 }
 
 void vuln(void)
 {
-    char buf[0x50];         /* 栈视图里标着「buf」的那一段 */
+    char buf[0x50];     /* 栈上依次是 buf、saved rbp、ret addr */
 
-    /*
-     * read(0, buf, 0x100)：想读 0x100 字节，却只给 buf 留了 0x50 字节。
-     * 多出来的字节顺着栈往高地址写，会依次盖住 saved rbp 和返回地址。
-     */
-    ssize_t n = read(0, buf, 0x100);
-    (void)n;
-
-    /*
-     * leave：rsp = rbp，再把 [rbp] 弹回 rbp；
-     * ret  ：把 [rsp] 那 8 个字节当作下一条指令的地址跳过去。
-     * 从这一条 ret 开始，栈上的字节就是控制流。
-     */
-}
+    read(0, buf, 0x100);    /* 最多读 0x100 字节，buf 只有 0x50：多出的部分盖住后面两格 */
+}                           /* leave; ret：跳到 ret addr 那一格写的地址 */
 
 int main(void)
 {
     vuln();
-    syscall(60);            /* vuln 正常返回就到这里：退出，不判胜 */
-    return 0;
+    exit(0);            /* vuln 正常返回就到这里：退出，不判胜 */
 }
