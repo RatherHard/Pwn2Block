@@ -23,6 +23,18 @@ export const terminalTheme = css`
     --p2b-stack: #56b6c2;
     --p2b-data: #61afef;
     --p2b-focus: #ffffff;
+    /*
+     * 伪代码语法着色（视图「伪代码」）。它与上面的「值区域」色分属两条轴：值区域的颜色
+     * 说明这块数据落在哪个 VMA，这里的颜色只说明这是代码里的哪类词，同一屏里不会混用。
+     * 因此另起一套 token 名，调其中一侧不会波及另一侧。
+     */
+    --p2b-syn-comment: #7f848e;
+    --p2b-syn-preprocessor: #56b6c2;
+    --p2b-syn-string: #98c379;
+    --p2b-syn-number: #d19a66;
+    --p2b-syn-keyword: #c678dd;
+    --p2b-syn-type: #e5c07b;
+    --p2b-syn-function: #61afef;
     --p2b-font: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace;
     --p2b-size: 14px;
     --p2b-topbar-h: 2.5rem;

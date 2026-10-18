@@ -3,6 +3,7 @@
  *
  * 组件只做排版与事件转发；可测逻辑放这里，组件渲染留给 D5 的 Playwright（05 §7）。
  */
+export * from './c-syntax';
 export * from './context';
 export * from './controller';
 export * from './diff';

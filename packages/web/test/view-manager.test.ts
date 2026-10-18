@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
+import type { CSSResult } from 'lit';
 import '../src/components/view-manager';
+import { Pwn2BlockPseudocodeView } from '../src/components/pseudocode-view';
+import { terminalTheme } from '../src/theme';
+import { C_TOKEN_KINDS } from '../src/viewmodel/c-syntax';
 import { createViewContext } from '../src/viewmodel/context';
 import { EMPTY_DIFF } from '../src/viewmodel/diff';
 import type { ViewKind } from '../src/viewmodel/views';
@@ -130,8 +134,8 @@ describe('视图面板（设计 §3.2）', () => {
     expect(tabs(manager)[0]?.getAttribute('aria-selected')).toBe('true');
   });
 
-  it('有伪代码时最后多一个「伪代码」标签，按纯文本只读显示', async () => {
-    const pseudocode = 'int main() {\n  char *s = "<b>&amp;</b>";\n}';
+  it('有伪代码时最后多一个「伪代码」标签，按 C 语法着色但文本不变', async () => {
+    const pseudocode = 'int main() {\n  char *s = "<b>&amp;</b>"; // 注入\n}';
     const withCode = createViewContext({
       projection: SAMPLE_PROJECTION_START,
       challenge: { ...SAMPLE_PUBLIC_CHALLENGE, pseudocode },
@@ -146,8 +150,26 @@ describe('视图面板（设计 §3.2）', () => {
     await view.updateComplete;
     expect(panelOf(manager, 'pwn2block-pseudocode-view').hidden).toBe(false);
     const pre = view.renderRoot.querySelector('pre');
+    // 着色是包在 span 里的，拼回来的文本必须与原文逐字相同。
     expect(pre?.textContent).toBe(pseudocode);
     expect(pre?.querySelector('b')).toBeNull();
+    expect([...(pre?.querySelectorAll('span') ?? [])].map((span) => span.className)).toEqual([
+      'syn-type',
+      'syn-function',
+      'syn-type',
+      'syn-string',
+      'syn-comment',
+    ]);
+    expect(pre?.querySelector('span.syn-string')?.textContent).toBe('"<b>&amp;</b>"');
+  });
+
+  it('每种着色类别都有配色：样式里有 .syn-<kind>，主题里有 --p2b-syn-<kind>', () => {
+    const viewStyles = (Pwn2BlockPseudocodeView.styles as readonly CSSResult[]).map((style) => style.cssText).join('\n');
+    for (const kind of C_TOKEN_KINDS) {
+      if (kind === 'plain') continue;
+      expect(viewStyles, `.syn-${kind} 没有样式`).toContain(`.syn-${kind}`);
+      expect(terminalTheme.cssText, `--p2b-syn-${kind} 没有定义`).toContain(`--p2b-syn-${kind}:`);
+    }
   });
 
   it('没有伪代码的题目不渲染伪代码视图；存了 pseudocode 时显示栈', async () => {
