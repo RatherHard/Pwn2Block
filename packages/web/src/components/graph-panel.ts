@@ -4,6 +4,7 @@ import {
   availableNodeSpecs,
   CURRENT_STAGE,
   nodeSpec,
+  nodeRegions,
   defaultParams,
   nodeParams,
   emptyGraphDocument,
@@ -21,6 +22,7 @@ import type {
 import { compileGraph } from '../workflow/compile';
 import { checkParam } from '../workflow/params';
 import { lookupGraph } from '../workflow/document';
+import { extractModule } from '../graph/extract';
 import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
 import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
 import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
@@ -34,6 +36,7 @@ import {
   moveNodes,
   moveOut,
   paste,
+  setCollapsed,
   redo,
   removeNodes,
   reorder,
@@ -241,6 +244,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
         >编译</button>
         <button ?disabled=${state.past.length === 0} @click=${() => this.setEditor(undo(state))}>撤销</button>
         <button ?disabled=${state.future.length === 0} @click=${() => this.setEditor(redo(state))}>重做</button>
+        ${state.selection.length === 0
+          ? nothing
+          : html`<button @click=${() => this.extractSelection()}>提取为模块</button>`}
         <button @click=${() => this.canvas()?.fit()}>适应窗口</button>
         ${this.renderPythonStatus()}
         <span class=${stale ? 'bad' : 'ok'}>${this.status}</span>
@@ -327,6 +333,8 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const lookup = lookupGraph(this.editor.document);
     const placement = lookup.placements.get(node.id);
     const container = placement?.container;
+    const isContainer = spec !== undefined && nodeRegions(spec, node.params).length > 0;
+    const collapsed = this.editor.document.layout[node.id]?.collapsed === true;
     return html`<aside class="inspector" aria-label="检查器">
       <h3>${spec?.label ?? node.kind}</h3>
       <p><code>${node.id}</code></p>
@@ -342,6 +350,11 @@ export class Pwn2BlockGraphPanel extends LitElement {
       ${specs.map((param) => this.renderParam(node.id, param, challenge))}
       <div class="row">
         <button @click=${() => this.canvas()?.focusNode(node.id)}>定位</button>
+        ${isContainer
+          ? html`<button @click=${() => this.setEditor(setCollapsed(this.editor, node.id, !collapsed))}>
+              ${collapsed ? '展开容器' : '折叠容器'}
+            </button>`
+          : nothing}
         <button @click=${() => this.run((state) => removeNodes(state, [node.id]))}>删除</button>
       </div>
     </aside>`;
@@ -444,6 +457,17 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.requestUpdate();
   }
 
+  /** 提取为模块：纯编辑命令，拒绝时把原因显示在状态区。 */
+  private extractSelection(): void {
+    const result = extractModule(this.editor, this.editor.selection);
+    if (!result.ok) {
+      this.say(result.message);
+      return;
+    }
+    this.setEditor(result.state);
+    this.say(`已提取为模块 ${result.moduleId}`);
+  }
+
   private say(message: string): void {
     this.message = message;
     this.requestUpdate();
@@ -492,6 +516,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
         return;
       case 'disconnect':
         this.setEditor(disconnect(this.editor, edit.edge));
+        return;
+      case 'collapse':
+        this.setEditor(setCollapsed(this.editor, edit.nodeId, edit.collapsed));
         return;
     }
   }
