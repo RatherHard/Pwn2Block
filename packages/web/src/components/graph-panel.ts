@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import {
   ACTION_NAMES,
+  NODE,
   availableNodeSpecs,
   CURRENT_STAGE,
   nodeSpec,
@@ -310,7 +311,43 @@ export class Pwn2BlockGraphPanel extends LitElement {
           )}
         </section>`,
       )}
+      ${this.renderModules()}
     </aside>`;
+  }
+
+  /** 已定义的模块：显示种类/版本/被调用次数，并可插入调用节点（模块体在提取时生成）。 */
+  private renderModules() {
+    const modules = this.editor.document.modules ?? [];
+    if (modules.length === 0) {
+      return nothing;
+    }
+    const usage = new Map<string, number>();
+    for (const node of this.editor.document.nodes) {
+      const id = typeof node.params.moduleId === 'string' ? node.params.moduleId : '';
+      if (id !== '') usage.set(id, (usage.get(id) ?? 0) + 1);
+    }
+    return html`<section class="modules">
+      <h3>模块</h3>
+      ${modules.map(
+        (module) => html`<button
+          title="${module.kind === 'flow' ? '流程模块' : '数据模块'} · ${usage.get(module.id) ?? 0} 处调用"
+          data-module=${module.id}
+          @click=${() =>
+            this.run((state) =>
+              addNode(state, {
+                kind: module.kind === 'flow' ? NODE.moduleCall : NODE.moduleData,
+                params: {
+                  moduleId: module.id,
+                  moduleVersion: module.version,
+                  ...(module.output === undefined ? { hasOutput: 'no' } : { hasOutput: 'yes', outputType: module.output.type }),
+                  ...(module.output === undefined ? {} : { outputType: module.output.type }),
+                  inputs: module.inputs.map((input) => `${input.name}:${input.type}`),
+                },
+              }),
+            )}
+        >${module.name} v${module.version}</button>`,
+      )}
+    </section>`;
   }
 
   private renderInspector(
@@ -461,10 +498,14 @@ export class Pwn2BlockGraphPanel extends LitElement {
   }
 
   private setEditor(next: GraphEditorState): void {
+    const semanticChanged = next.semanticRevision !== this.editor.semanticRevision;
     // 语义变了，正在跑的 Python 求值已经没有意义：取消，别让迟到结果覆盖新产物（07 §P7）。
-    if (next.semanticRevision !== this.editor.semanticRevision) this.abort?.abort();
+    if (semanticChanged) this.abort?.abort();
     this.editor = next;
     this.persist();
+    if (semanticChanged) {
+      this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
+    }
     this.requestUpdate();
   }
 
@@ -488,6 +529,20 @@ export class Pwn2BlockGraphPanel extends LitElement {
     }
     this.setEditor(result.state);
     this.say('已升级到新版本');
+  }
+
+  /** 把产物交给页面壳写进运行追踪器；来源用节点 id 表示（runner 的 blockId 口径）。 */
+  private publish(artifact: WorkflowArtifact): void {
+    this.dispatchEvent(
+      new CustomEvent('p2b-graph-compiled', {
+        detail: {
+          actions: artifact.actions,
+          origins: artifact.origins.map((origin) => ({ index: origin.index, blockId: origin.nodeId })),
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   /** 导出当前图：只含文档，不含产物与预览。 */
@@ -625,6 +680,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.artifact = outcome.artifact;
     this.issues = [...(outcome.warnings ?? [])];
     this.compiledRevision = revision;
+    this.publish(outcome.artifact);
     this.status = `编译成功：${outcome.artifact.actions.length} 个动作`;
     this.requestUpdate();
   }

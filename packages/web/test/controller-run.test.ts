@@ -30,6 +30,17 @@ describe('会话控制器：运行与分块（04 §5、05 §3）', () => {
     expect(controller.state.cursor).toBe(600);
   });
 
+  it('画布产物经 publish 写进同一追踪器，运行照旧 reset + 分片', async () => {
+    const { api, controller } = await open();
+    const actions = repeatedActions(3);
+    controller.publish(actions, actions.map((_, index) => ({ index, blockId: 'node-' + String(index) })));
+    expect(controller.state.artifact?.artifact?.actions).toHaveLength(3);
+    controller.run({ kind: 'run-all' });
+    await until(() => controller.state.cursor === 3 && !controller.state.running, '画布产物跑完');
+    expect(actionsCalls(api).map((call) => call.actions?.length)).toEqual([1, 3]);
+    expect(actionsCalls(api)[1]?.actions).toEqual(actions);
+  });
+
   it('513 个动作跨两片（512 + 1）：单批上限就是 MAX_ACTIONS_PER_REQUEST', async () => {
     const { api, tracker, controller } = await open();
     compileInto(tracker, controller, repeatedActions(513));

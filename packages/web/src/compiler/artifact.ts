@@ -47,6 +47,11 @@ export interface ArtifactTracker {
    */
   compile(program: NormalizedWorkspace, challenge: PublicChallenge): PayloadArtifact | undefined;
   /**
+   * 采用别处编译好的产物（画布路径）。动作与来源必须已对齐；成功时与 `compile` 一样
+   * 替换产物、`revision + 1`、`stale = false`。来源的 `blockId` 在画布路径里是节点 id。
+   */
+  adopt(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): PayloadArtifact;
+  /**
    * 标记产物已过期（编辑事件、程序化装载之后由调用方主动调用）。
    * 没有产物时是空操作：没有东西可供过期。
    */
@@ -96,6 +101,14 @@ export function createArtifactTracker(limits?: Partial<CompilerLimits>): Artifac
         originsVersion: result.originsVersion,
         revision,
       };
+      state = { artifact, errors: [], stale: false, revision };
+      return artifact;
+    },
+
+    adopt(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): PayloadArtifact {
+      assertOriginsAligned(actions, origins);
+      const revision = state.revision + 1;
+      const artifact: PayloadArtifact = { actions, origins, originsVersion: revision, revision };
       state = { artifact, errors: [], stale: false, revision };
       return artifact;
     },

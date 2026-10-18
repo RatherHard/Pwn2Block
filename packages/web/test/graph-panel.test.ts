@@ -174,3 +174,61 @@ describe('画布面板：编译', () => {
     expect(header?.querySelector('.bad')).not.toBeNull();
   });
 });
+
+describe('画布面板：把产物交给运行链路', () => {
+  it('编译成功后派发 p2b-graph-compiled，来源用节点 id', async () => {
+    const { panel } = await mount(feedGraph());
+    const events: { actions: readonly { type: string }[]; origins: readonly { index: number; blockId: string }[] }[] = [];
+    panel.addEventListener('p2b-graph-compiled', (event) =>
+      events.push((event as CustomEvent<(typeof events)[number]>).detail),
+    );
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[part="compile"]')?.click();
+    await vi.waitFor(() => {
+      expect(events.length).toBe(1);
+    });
+    expect(events[0]?.actions).toEqual([{ type: 'run', maxSteps: 100 }]);
+    expect(events[0]?.origins[0]?.blockId).toBe('run');
+  });
+
+  it('语义编辑派发 p2b-graph-edited，纯布局编辑不派发', async () => {
+    const { panel } = await mount();
+    let edited = 0;
+    panel.addEventListener('p2b-graph-edited', () => {
+      edited += 1;
+    });
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]')?.click();
+    await settle(panel);
+    expect(edited).toBe(1);
+  });
+});
+
+describe('画布面板：模块列表', () => {
+  const moduleDoc = {
+    ...workflow({ nodes: [wfNode('run', NODE.run, { maxSteps: 10 })], edges: [], main: ['run'] }),
+    modules: [
+      {
+        id: 'inc',
+        name: '自增',
+        summary: '',
+        kind: 'data',
+        version: 2,
+        inputs: [{ name: 'a', type: 'int' }],
+        output: { name: 'out', type: 'int' },
+        nodes: [],
+        connections: [],
+        main: [],
+        layout: {},
+      },
+    ],
+  };
+
+  it('列出已定义模块的版本与调用入口，点一下插入调用节点', async () => {
+    const { panel } = await mount(moduleDoc);
+    const button = panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-module="inc"]');
+    expect(button?.textContent ?? '').toContain('自增 v2');
+    button?.click();
+    await settle(panel);
+    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
+    expect(canvas?.shadowRoot?.querySelector('[data-node="data"]')).not.toBeNull();
+  });
+});

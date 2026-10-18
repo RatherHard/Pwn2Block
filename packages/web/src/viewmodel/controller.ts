@@ -27,7 +27,7 @@ import {
 } from '@pwn2block/shared';
 import { ApiClientError, isSessionExpired, type ApiClient } from '../api';
 import { createArtifactTracker, type ArtifactTracker, type PayloadCompileState } from '../compiler/artifact';
-import type { ActionOrigin, NormalizedWorkspace } from '../compiler/types';
+import type { ActionOrigin, CompiledAction, NormalizedWorkspace } from '../compiler/types';
 import { stepAction } from './program';
 import { createSerialQueue } from './queue';
 import { defaultPosition, displayedView } from './replay';
@@ -177,6 +177,11 @@ export interface SessionController {
   selectView(kind: ViewKind): void;
   cycleView(delta: -1 | 1): void;
   compile(program: NormalizedWorkspace): void;
+  /**
+   * 采用画布编译出的动作与来源：写入同一个追踪器，运行/单步/提交照旧走既有链路。
+   * 来源的 `blockId` 是画布节点 id。
+   */
+  publish(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): void;
   /** 积木被改动：产物过期，运行、单步与提交被禁用（05 §3）。 */
   noteEdit(): void;
   run(command: RunCommand): void;
@@ -929,7 +934,12 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
       patchViews((views, available) => cycleViewIn(views, delta, available));
     },
 
-    compile(program: NormalizedWorkspace): void {
+    publish(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): void {
+    tracker.adopt(actions, origins);
+    patch({ artifact: tracker.state, cursor: 0, results: [] });
+  },
+
+  compile(program: NormalizedWorkspace): void {
       const challenge = state.challenge;
       if (challenge === undefined) {
         notify('warn', '会话还没准备好：先选一道题再编译');

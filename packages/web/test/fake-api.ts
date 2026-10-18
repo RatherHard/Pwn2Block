@@ -176,6 +176,11 @@ export function createFakeTracker(): FakeTracker {
       };
       return state.artifact;
     },
+    adopt(actions, origins): PayloadArtifact {
+      produced = { actions, origins, originsVersion: state.revision + 1, revision: state.revision + 1 };
+      state = { artifact: produced, errors: [], stale: false, revision: state.revision + 1 };
+      return produced;
+    },
     noteEdit(): void {
       if (state.artifact === undefined || state.stale) return;
       state = { ...state, stale: true };

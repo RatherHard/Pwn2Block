@@ -138,10 +138,11 @@ describe('编译层：冻结的导出名（D 按它接线）', () => {
     expect(compiler.ByteBuildError).toBeTypeOf('function');
   });
 
-  it('跟踪器的四个成员一个不多一个不少（D 读 state，调 compile / noteEdit / clear）', () => {
+  it('跟踪器的五个成员一个不多一个不少（D 读 state，调 compile / adopt / noteEdit / clear）', () => {
     const tracker = createArtifactTracker();
-    expect(Object.keys(tracker).sort()).toEqual(['clear', 'compile', 'noteEdit', 'state']);
+    expect(Object.keys(tracker).sort()).toEqual(['adopt', 'clear', 'compile', 'noteEdit', 'state']);
     expect(typeof tracker.compile).toBe('function');
+    expect(typeof tracker.adopt).toBe('function');
     expect(typeof tracker.noteEdit).toBe('function');
     expect(typeof tracker.clear).toBe('function');
     expect(Object.keys(tracker.state).sort()).toEqual([

@@ -52,7 +52,7 @@ import './payload-panel';
 import './top-bar';
 import './verdict-panel';
 import './view-manager';
-import type { NormalizedWorkspace } from '../compiler/types';
+import type { ActionOrigin, CompiledAction, NormalizedWorkspace } from '../compiler/types';
 import type { Pwn2BlockPayloadPanel } from './payload-panel';
 import type { RunMenuCommand } from './run-menu';
 import type { ViewContext } from './view-context';
@@ -444,6 +444,8 @@ export class Pwn2BlockApp extends LitElement {
       return html`<pwn2block-graph-panel
         .challenge=${challenge}
         .store=${this.activeStore}
+        @p2b-graph-compiled=${this.onGraphCompiled}
+        @p2b-graph-edited=${() => this.controller?.noteEdit()}
       ></pwn2block-graph-panel>`;
     }
     return html`<pwn2block-payload-panel
@@ -668,6 +670,14 @@ export class Pwn2BlockApp extends LitElement {
   /** 两处「运行」菜单共用：命令原样交给控制器，门禁由控制器复查（05 §1 两处等价）。 */
   private onRun = (event: Event): void => {
     this.controller?.run((event as CustomEvent<RunMenuCommand>).detail);
+  };
+
+  private onGraphCompiled = (event: Event): void => {
+    const detail = (event as CustomEvent<{
+      readonly actions: readonly CompiledAction[];
+      readonly origins: readonly ActionOrigin[];
+    }>).detail;
+    this.controller?.publish(detail.actions, detail.origins);
   };
 
   private onCompile = (event: Event): void => {
