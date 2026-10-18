@@ -1,153 +1,124 @@
 {
   "id": "ret2rop",
-  "title": "把 gadget 串成链",
-  "briefing": "**考点**：`ret2text` 只改一个返回地址，跳到一个现成的函数；`ret2rop` 更进一步——用 `ret` 把一串 **gadget**（以 `ret` 结尾的小片段）接起来，让程序按你排好的顺序执行。\n\n## 程序在做什么\n\n程序从 `main`（0x400000）开始：\n\n1. `call vuln` 先把返回地址压进栈（就是 `main` 里 `syscall 60` 那条的地址），再跳进 `vuln`；\n2. `vuln` 建立栈帧，用 `read(0, buf, 0x100)` 往栈上的 `buf` 里读最多 0x100 字节——而 `buf` 只有 0x50 字节；\n3. `leave; ret`：`ret` 把栈顶那 8 字节当作下一条指令的地址跳过去。\n\n`read` 不检查边界，多读的字节会顺着栈一路写下去。栈视图里 `buf`、saved rbp、ret addr 三段是连着的：盖住 ret addr，你就接管了 `ret` 的去向。\n\n## 四个可用的片段\n\n`text` 段里除了 `main` 和 `vuln`，还躺着四段代码。它们的名字就是用途，地址在指令视图的「函数」列表和每一行里都能看到：\n\n- `pop rax; ret`：`rax = [rsp]`，`rsp += 8`\n- `add rax, 0x10; ret`：`rax += 0x10`\n- `mov rbx, rax; ret`：`rbx = rax`\n- `target`：`rbx == 0x1010` 就把 `FLAG` 置 1 并退出，否则直接退出\n\n每一段都以 `ret` 结尾。一段执行完，`ret` 会把栈上的下一格当作下一段的地址——**这就是链**。\n\n## 一条能赢的链\n\n把下面五个字按顺序摆在栈上（每格 8 字节）：\n\n```\n[ pop rax; ret 的地址 ]   ← vuln 的 ret 先弹到这里\n[ 0x1000 ]                ← pop rax 把它装进 rax\n[ add rax, 0x10 的地址 ]  ← rax 变成 0x1010\n[ mov rbx, rax 的地址 ]   ← rbx 变成 0x1010\n[ target 的地址 ]         ← 检查通过，判胜\n```\n\n判胜要求 `FLAG == 1` 与 `rbx == 0x1010` 同时成立，所以直接跳进 `target` 里那条 `syscall 99` 不算数：`rbx` 只能靠这条链算出来。\n\n## 你要做的\n\n1. 用工具箱里的 `introduce(buf)` 把字节喂给 `read`（它只往 stdin 追加字节，程序执行到 `read` 时才取走）；\n2. 从 `buf` 写到 ret addr：中间要填多少字节？对着栈视图和寄存器视图自己数；\n3. 把五个字接在 ret addr 的位置上，多字节的数按小端序写（低位字节在低地址）；\n4. `run`，盯住寄存器视图里的 `rbx` 和 `FLAG`。",
+  "title": "ret2rop：把 gadget 串成链",
+  "briefing": "# ret2rop：把 gadget 串成链\n\n`vuln` 的栈上有一个 0x40 字节的 `struct frame`：\n\n```c\nstruct frame {\n    char buf[0x20];\n    char mask[0x20];\n};\n```\n\n后面紧跟着 `n`、`i`、saved rbp、ret addr。`vuln` 做了四件事：\n\n1. `read(0, name, 0x10)`：先把 16 字节 name 读进全局 `name[16]`（`0x401000`）。\n2. `getRandom(frame.mask, 0x20)`：往 `buf + 0x20` 填 32 字节「密钥」。\n3. `read(0, frame.buf, 0x100)`：`buf` 只有 `0x20` 字节，最多却读 `0x100` 字节。\n4. 原地 XOR：每个 8 字节字异或它后面第 4 个字，然后 `leave; ret`。\n\n栈布局（初态 `RIP = 0x400000`，`RSP = RBP = 0x7fffff00`）：\n\n| 区域 | 地址 | 说明 |\n|---|---|---|\n| `buf` | `0x7ffffea0` – `0x7ffffebf` | `0x20` 字节 |\n| `mask` | `0x7ffffec0` – `0x7ffffedf` | `0x20` 字节，XOR 的「密钥」 |\n| `n` | `0x7ffffee0` | read 的返回值 |\n| `i` | `0x7ffffee8` | 循环变量 |\n| saved rbp | `0x7ffffef0` | `leave` 会把它弹进 RBP |\n| ret addr | `0x7ffffef8` | `ret` 从这里取地址 |\n| name | `0x401000` | 16 字节全局 |\n\n`vuln` 的 `ret` 之后，栈顶依次是 payload 第 `0x58` 字节起的每个 8 字节字。\n\n## 可用的片段\n\n| 片段 | 地址 | 作用 |\n|---|---|---|\n| `pop rsi; ret` | `0x4000d3` | 从栈上取一个值到 RSI |\n| `mov rdi, rsi; ret` | `0x4000d5` | RDI = RSI |\n| `shell` | `0x4000d7` | `syscall 98`：FLAG = 1 并退出 |\n\n判胜要求 `FLAG == 1` 且 `RDI == 0x401000`，也就是必须带着 `name` 的地址进入 `shell`。\n\n## 难点一：XOR 会读到 frame 之外\n\n第 3 步的 `read` 从 `buf` 写 `0x100` 字节，`mask`、`n`、`i`、saved rbp、ret addr\n都在这段范围内。`mask` 只有 `0x20` 字节，所以循环里 `mask[i]` 在 `i >= 0x20` 时读到的是\n`n`、`i`、saved rbp、ret addr 以及调用者栈上的字节；这些位置同样被这次 read 写满了。\n对每个字 `i`，异或的「密钥」就是 payload 自己的第 `i + 0x20` 字节起的那个字。\n\n## 难点二：循环会改自己的上界和计数器\n\n`n` 在 `buf + 0x40`，`i` 在 `buf + 0x48`，都在溢出区里。循环体走到 `i = 0x40` /\n`i = 0x48` 时，会把这两个位置也异或掉：\n\n- `n` 的密钥在 `buf + 0x60`。如果那里不是 0，`n` 会被改成一个巨大的值，循环停不下来。\n- `i` 的密钥在 `buf + 0x68`。如果那里不是 0，计数器会被改掉，后面的字全部错位。\n\n而 `0x60` / `0x68` 又正好是链里 `name` 和 `mov rdi, rsi` 两个字的位置。所以不能把链\n原样写进去：要让 `0x60` / `0x68` 在循环早期是 0，把真正的链字放到 `0x80` / `0x88`，\n让它们在 `i = 0x60` / `0x68` 时再被解出来。\n\n记 `d` 是你希望 read 之后内存里出现的内容，`p` 是真正喂进去的字节。对不受自修改影响的\n字，`d[i] = p[i] ^ p[i+4]`；对 `0x40` / `0x48` 这两个槽，循环会用 `p[0x60]` / `p[0x68]`\n去异或它们，所以需要：\n\n- `p[0x60] = 0`，`p[0x68] = 0`；\n- `p[0x80] = d[0x60]`（`name` 的地址），`p[0x88] = d[0x68]`（`mov` 的地址）；\n- 链的其余字按 `p[i] = d[i] ^ p[i+4]` 从后往前算。\n\n`d` 的前 11 个字是 padding（填满 frame、`n`、`i` 和 saved rbp），`d[11]` 正好落在\n`vuln` 的返回地址。VM 的访存是 8 字节字，所以这里的 XOR 也按字进行；原题逐字节循环的\n自修改在字边界上对应到同样的 `0x40` / `0x48` 两个槽。\n\n## 怎么喂\n\n先用 `name(命令)` 喂 16 字节，再用 `introduce(payload)` 喂编码后的 payload。\n两个积木都只做 `feed`，**顺序就是 stdin 的顺序**；name 必须正好 16 字节，少了会把\npayload 的开头当成 name 的一部分。\n\npayload 最多 0x100 字节，XOR 循环读的是 `read` 的返回值，所以长度要按 8 字节对齐。\n写好后 `run`，看寄存器里的 RDI 和 FLAG。",
   "archBits": 64,
-  "encoding": {
-    "preset": "x86ish",
-    "add": [
-      { "opcode": "0x05", "op": "mov", "operands": ["reg:RBP", "reg:RSP"], "mnemonic": "mov rbp, rsp" },
-      { "opcode": "0x06", "op": "mov", "operands": ["reg:RSI", "reg:RSP"], "mnemonic": "mov rsi, rsp" },
-      { "opcode": "0x07", "op": "sub", "operands": ["reg:RSP", "imm"], "mnemonic": "sub rsp, imm" },
-      { "opcode": "0x11", "op": "syscall", "operands": ["const:0"], "mnemonic": "syscall read" },
-      { "opcode": "0x12", "op": "syscall", "operands": ["const:99"], "mnemonic": "syscall win" },
-      { "opcode": "0x13", "op": "add", "operands": ["reg:RAX", "imm"], "mnemonic": "add rax, imm" },
-      { "opcode": "0x14", "op": "mov", "operands": ["reg:RBX", "reg:RAX"], "mnemonic": "mov rbx, rax" },
-      { "opcode": "0x15", "op": "cmp", "operands": ["reg:RBX", "imm"], "mnemonic": "cmp rbx, imm" }
-    ],
-    "remove": [
-      "0xb8",
-      "0xb9",
-      "0xbb",
-      "0xbc",
-      "0xbd",
-      "0xbe",
-      "0x88",
-      "0x89",
-      "0x8a",
-      "0x8b",
-      "0x8d",
-      "0x8e",
-      "0x8f",
-      "0x86",
-      "0x87",
-      "0x50",
-      "0x51",
-      "0x52",
-      "0x53",
-      "0x54",
-      "0x56",
-      "0x57",
-      "0x68",
-      "0x59",
-      "0x5a",
-      "0x5b",
-      "0x5c",
-      "0x5d",
-      "0x5e",
-      "0x5f",
-      "0x00",
-      "0x01",
-      "0x02",
-      "0x04",
-      "0x03",
-      "0x28",
-      "0x29",
-      "0x2a",
-      "0x2b",
-      "0x38",
-      "0x39",
-      "0x3a",
-      "0x3b",
-      "0x20",
-      "0x21",
-      "0x24",
-      "0x08",
-      "0x09",
-      "0x0c",
-      "0x30",
-      "0x31",
-      "0x34",
-      "0xc0",
-      "0xc1",
-      "0xd2",
-      "0xd3",
-      "0xc4",
-      "0xc5",
-      "0xd6",
-      "0xd7",
-      "0xe9",
-      "0xff",
-      "0x26",
-      "0x74",
-      "0x72",
-      "0x73",
-      "0x9a",
-      "0x10",
-      "0x0f",
-      "0x90"
-    ]
-  },
+  "encoding": [
+    { "opcode": "0x0e", "op": "syscall", "operands": ["const:60"], "mnemonic": "syscall exit" },
+    { "opcode": "0x55", "op": "push", "operands": ["reg:RBP"], "mnemonic": "push rbp" },
+    { "opcode": "0x05", "op": "mov", "operands": ["reg:RBP", "reg:RSP"], "mnemonic": "mov rbp, rsp" },
+    { "opcode": "0x07", "op": "sub", "operands": ["reg:RSP", "imm"], "mnemonic": "sub rsp, imm" },
+    { "opcode": "0xbf", "op": "mov", "operands": ["reg:RDI", "imm"], "mnemonic": "mov rdi, imm" },
+    { "opcode": "0xbe", "op": "mov", "operands": ["reg:RSI", "imm"], "mnemonic": "mov rsi, imm" },
+    { "opcode": "0xba", "op": "mov", "operands": ["reg:RDX", "imm"], "mnemonic": "mov rdx, imm" },
+    { "opcode": "0x06", "op": "mov", "operands": ["reg:RSI", "reg:RSP"], "mnemonic": "mov rsi, rsp" },
+    { "opcode": "0x11", "op": "syscall", "operands": ["const:0"], "mnemonic": "syscall read" },
+    { "opcode": "0x16", "op": "syscall", "operands": ["const:318"], "mnemonic": "syscall getrandom" },
+    { "opcode": "0xb8", "op": "mov", "operands": ["reg:RAX", "imm"], "mnemonic": "mov rax, imm" },
+    { "opcode": "0x20", "op": "mov", "operands": ["reg:RCX", "mem:RSP+disp"], "mnemonic": "mov rcx, [rsp+disp]" },
+    { "opcode": "0x21", "op": "mov", "operands": ["reg:RAX", "mem:RSP+disp"], "mnemonic": "mov rax, [rsp+disp]" },
+    { "opcode": "0x22", "op": "mov", "operands": ["mem:RSP+disp", "reg:RAX"], "mnemonic": "mov [rsp+disp], rax" },
+    { "opcode": "0x28", "op": "mov", "operands": ["mem:RSP+disp", "reg:RCX"], "mnemonic": "mov [rsp+disp], rcx" },
+    { "opcode": "0x23", "op": "mov", "operands": ["reg:RDX", "reg:RSP"], "mnemonic": "mov rdx, rsp" },
+    { "opcode": "0x89", "op": "mov", "operands": ["reg:RDX", "reg:RAX"], "mnemonic": "mov rdx, rax" },
+    { "opcode": "0x19", "op": "add", "operands": ["reg:RDX", "reg:RCX"], "mnemonic": "add rdx, rcx" },
+    { "opcode": "0x1a", "op": "cmp", "operands": ["reg:RCX", "reg:RDX"], "mnemonic": "cmp rcx, rdx" },
+    { "opcode": "0x73", "op": "jae", "operands": ["imm"], "mnemonic": "jae addr" },
+    { "opcode": "0x24", "op": "mov", "operands": ["reg:RAX", "mem:RDX+disp"], "mnemonic": "mov rax, [rdx+disp]" },
+    { "opcode": "0x25", "op": "xor", "operands": ["reg:RAX", "mem:RDX+disp"], "mnemonic": "xor rax, [rdx+disp]" },
+    { "opcode": "0x26", "op": "mov", "operands": ["mem:RDX+disp", "reg:RAX"], "mnemonic": "mov [rdx+disp], rax" },
+    { "opcode": "0x1e", "op": "add", "operands": ["reg:RCX", "imm"], "mnemonic": "add rcx, imm" },
+    { "opcode": "0xe9", "op": "jmp", "operands": ["imm"], "mnemonic": "jmp addr" },
+    { "opcode": "0xc9", "op": "leave", "operands": [], "mnemonic": "leave" },
+    { "opcode": "0xc3", "op": "ret", "operands": [], "mnemonic": "ret" },
+    { "opcode": "0x5e", "op": "pop", "operands": ["reg:RSI"], "mnemonic": "pop rsi" },
+    { "opcode": "0x1f", "op": "mov", "operands": ["reg:RDI", "reg:RSI"], "mnemonic": "mov rdi, rsi" },
+    { "opcode": "0x12", "op": "syscall", "operands": ["const:98"], "mnemonic": "syscall shell" },
+    { "opcode": "0xe8", "op": "call", "operands": ["imm"], "mnemonic": "call addr" }
+  ],
   "syscallAbi": { "nr": "RAX", "args": ["RDI", "RSI", "RDX"], "ret": "RAX" },
   "syscalls": [
     {
       "nr": 0,
       "name": "read",
       "kind": "read",
-      "doc": "read(fd, buf, count)：从 stdin 取字节，payload 由 introduce(buf) 喂进来"
+      "doc": "从 stdin 读入最多 count 字节；name 和 payload 分两次读"
     },
-    { "nr": 60, "name": "exit", "kind": "exit", "doc": "exit(code)：退出，不判胜" },
     {
-      "nr": 99,
-      "name": "win",
+      "nr": 60,
+      "name": "exit",
+      "kind": "exit",
+      "doc": "退出程序"
+    },
+    {
+      "nr": 98,
+      "name": "shell",
       "kind": "custom",
-      "doc": "置 FLAG=1 并退出，判胜",
+      "doc": "本题的 system 桩：置 FLAG=1 并退出；判胜还要求 RDI 指向 name",
       "effects": [
         { "type": "set_reg", "reg": "FLAG", "value": "0x1" },
         { "type": "exit" }
+      ]
+    },
+    {
+      "nr": 318,
+      "name": "getrandom",
+      "kind": "custom",
+      "doc": "固定伪随机源：复制 32 字节到 frame.mask = 0x7ffffec0（随后会被 read 覆盖）",
+      "effects": [
+        { "type": "copy", "src": "0x500000", "dst": "0x7ffffec0", "len": 32 }
       ]
     }
   ],
   "fds": [{ "fd": 0, "name": "stdin", "kind": "stdin" }],
   "labels": [
     { "name": "main", "addr": "0x400000", "size": 10, "kind": "func" },
-    { "name": "vuln", "addr": "0x40000a", "size": 33, "kind": "func" },
-    { "name": "pop rax; ret", "addr": "0x40002b", "size": 2, "kind": "func" },
-    { "name": "add rax, 0x10; ret", "addr": "0x40002d", "size": 10, "kind": "func" },
-    { "name": "mov rbx, rax; ret", "addr": "0x400037", "size": 2, "kind": "func" },
-    { "name": "target", "addr": "0x400039", "size": 19, "kind": "func" },
-    { "name": "lose", "addr": "0x40004c", "size": 1, "kind": "func" },
-    { "name": "buf", "addr": "0x7ffffea0", "size": 80, "kind": "buffer" },
+    { "name": "vuln", "addr": "0x40000a", "size": 201, "kind": "func" },
+    { "name": "gadget_pop_rsi", "addr": "0x4000d3", "size": 2, "kind": "func" },
+    { "name": "gadget_mov_rdi_rsi", "addr": "0x4000d5", "size": 2, "kind": "func" },
+    { "name": "shell", "addr": "0x4000d7", "size": 2, "kind": "func" },
+    { "name": "name[16]", "addr": "0x401000", "size": 16, "kind": "custom" },
+    { "name": "buf", "addr": "0x7ffffea0", "size": 32, "kind": "buffer" },
+    { "name": "mask[32]", "addr": "0x7ffffec0", "size": 32, "kind": "custom" },
+    { "name": "n", "addr": "0x7ffffee0", "size": 8, "kind": "custom" },
+    { "name": "i", "addr": "0x7ffffee8", "size": 8, "kind": "custom" },
     { "name": "saved rbp", "addr": "0x7ffffef0", "size": 8, "kind": "saved_bp" },
     { "name": "ret addr", "addr": "0x7ffffef8", "size": 8, "kind": "ret_addr" }
   ],
   "allowedActions": ["step", "run", "undo", "reset"],
   "authorBlocks": [
     {
+      "id": "name",
+      "label": "name(命令)",
+      "tooltip": "先喂 16 字节 name；它会被 system 当作参数指针。",
+      "params": [{ "name": "data", "type": "bytes" }],
+      "expand": [{ "type": "feed", "hex": "$data" }]
+    },
+    {
       "id": "introduce",
-      "label": "introduce(buf)",
-      "tooltip": "把字节喂给 read(0, buf, 0x100)：从 buf 起写多少就覆盖多少，不检查边界",
+      "label": "introduce(payload)",
+      "tooltip": "再喂编码后的 payload；顺序必须在 name 之后。",
       "params": [{ "name": "data", "type": "bytes" }],
       "expand": [{ "type": "feed", "hex": "$data" }]
     }
   ],
   "hints": [
     {
-      "text": "先看栈视图：`buf`、saved rbp、ret addr 三段是连着的，`read` 从 `buf` 起连续写。先算清楚从 `buf` 到 ret addr 隔了多少字节——寄存器视图里的 `RSP` 和这三段里的某一格有关。"
+      "text": "先只算栈：buf 在 0x7ffffea0（0x20 字节），mask 在 0x7ffffec0，n 在 0x7ffffee0，i 在 0x7ffffee8，saved rbp 在 0x7ffffef0，ret 在 0x7ffffef8。read 从 buf 起最多写 0x100 字节，到 ret 槽要多少字节？"
     },
     {
-      "text": "`ret` 只认栈顶：`vuln` 的 `ret` 弹走 ret addr 那 8 字节后，`RSP` 正好指向下一格。所以第一格写第一个 gadget 的地址，第二格是被 `pop rax` 弹进 `RAX` 的值，后面依次是 `add`、`mov`、`target` 的地址。"
-    },
-    {
-      "text": "地址按小端序写成 8 个字节（低位字节在前）。只写对地址不够：`pop rax` 弹出来的值决定了后面能算出什么，`target` 要的是 `rbx == 0x1010`。",
+      "text": "循环把 n 和 i 也当成 buf 的一部分来异或：i=0x40 时写 n，i=0x48 时写 i。要保住 n=0x100 和计数器，p[0x60] 和 p[0x68] 必须是 0；但 0x60/0x68 又是 name 和 mov 两个字的位置，所以要把它们放到 0x80/0x88，让循环晚一点再解出来。",
       "unlockAfterFailures": 3
+    },
+    {
+      "text": "链的顺序：pop rsi; ret → name 的地址 → mov rdi, rsi; ret → shell。shell 判胜还要求 RDI == 0x401000，所以必须让 RSI 指向 name，而不是栈上的 buf。",
+      "unlockAfterFailures": 6
     }
   ],
   "errorNotes": {
-    "invalid_ip": "`ret` 把栈顶的 8 字节当成了地址，但那个地址不在可执行的 `text` 段里。检查你写在 ret addr 位置上的第一个字：它必须是 `text` 里某条指令的地址（比如 `pop rax; ret`）；写成 0、栈地址或者只改对了半个字节，都会撞上这条。",
-    "invalid_instruction": "跳过去的地址确实可执行，但那一行的字节不在本题的编码表里——通常是地址只写对了一部分，`ret` 落进了另一条指令的立即数中间。对着指令视图逐字节核对你写的 8 个字节。",
-    "memory_fault": "程序在 `ret` / `pop` 时读 `[rsp]`，而那个地址不可读。本题的栈有 8KB（约一千个槽），正常做题撞不上；真看到就先 `step_back`，看看链是不是太长、把 `RSP` 一路顶出了栈区。",
-    "not_executable": "程序已经结束（`syscall 60` 或 `syscall 99` 退出），执行类动作会被拒绝。用 `undo` / `reset` 退回去再改 payload；如果是在链没接上就退出之后撞上它，说明 `rbx` 还不是 0x1010。",
-    "stdin_overflow": "`feed` 只往 stdin 追加字节，累计上限是 4KB。本题的 payload 只有 0x80 字节，正常撞不上；看到它就检查是不是把整段 hex 重复喂了多次。"
+    "invalid_ip": "取指落到了不可执行的地方：先检查 ret 槽（0x7ffffef8）里是不是一个真实片段地址，再看小端序有没有写反。",
+    "invalid_instruction": "解码失败：gadget 地址要对准指令开头，payload 的 XOR 编码也要和 d 对得上。",
+    "memory_fault": "读写越界：name 固定 0x401000，frame 在栈上；链上的地址必须是已声明的 VMA。自修改循环也可能把 n/i 改得很大，导致越界。",
+    "stdin_overflow": "一次喂的字节超过 4KB：name 和 payload 要分两个积木，payload 最多 0x100 字节。"
   }
 }
