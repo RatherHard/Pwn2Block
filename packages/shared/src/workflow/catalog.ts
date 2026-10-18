@@ -565,7 +565,7 @@ export function nodeSpec(kind: string): NodeKindSpec | undefined {
 }
 
 /** 当前交付阶段：目录里更晚阶段的节点不会出现在工具箱，但存档读入时要给出原因。 */
-export const CURRENT_STAGE: NodeKindSpec['stage'] = 'p4';
+export const CURRENT_STAGE: NodeKindSpec['stage'] = 'p7';
 
 const STAGE_ORDER: readonly NodeKindSpec['stage'][] = ['p2', 'p3', 'p4', 'p5', 'p7'];
 

@@ -72,6 +72,8 @@ export async function compileGraph(input: CompileGraphInput): Promise<CompileOut
     throw error;
   }
 
+  // 取消可能发生在一次长求值（Python）中间：优先报取消，不把半途的错误当结论。
+  if (input.signal?.aborted === true) return { ok: false, issues: [cancelledIssue('')] };
   if (ctx.issues.length > 0) return { ok: false, issues: [...ctx.issues] };
 
   if (sink.actions.length > MAX_SUBMIT_ACTIONS) {

@@ -61,6 +61,42 @@ function feedGraph(): unknown {
   });
 }
 
+describe('画布面板：Python 能力', () => {
+  it('服务端报隔离运行器不可用时，面板写清原因', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ python: { available: false, backend: 'none', isolated: false, reason: '未配置隔离后端' } }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    try {
+      const { panel } = await mount();
+      await vi.waitFor(() => {
+        expect(panel.shadowRoot?.textContent ?? '').toContain('Python：不可用');
+      });
+      expect(panel.shadowRoot?.textContent ?? '').toContain('未配置隔离后端');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('隔离后端可用时显示后端与「已隔离」', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ python: { available: true, backend: 'docker', isolated: true } }), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    try {
+      const { panel } = await mount();
+      await vi.waitFor(() => {
+        expect(panel.shadowRoot?.textContent ?? '').toContain('Python：docker · 已隔离');
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
 describe('画布面板：工具箱与存档', () => {
   it('工具箱按阶段列出节点，点一下就加进画布', async () => {
     const { panel } = await mount();

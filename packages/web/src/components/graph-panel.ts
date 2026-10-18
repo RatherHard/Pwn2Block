@@ -15,11 +15,13 @@ import type {
   ParamSpec,
   ParamValue,
   PublicChallenge,
+  PythonCapability,
   WorkflowIssue,
 } from '@pwn2block/shared';
 import { compileGraph } from '../workflow/compile';
 import { checkParam } from '../workflow/params';
 import { lookupGraph } from '../workflow/document';
+import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
 import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
 import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import {
@@ -202,6 +204,23 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private compiledRevision = -1;
   private message = '';
   private loadedFor = '';
+  private pythonCapability: PythonCapability | undefined;
+  private capabilityLoaded = false;
+  /** 当前编译的取消句柄：语义编辑或重新编译都会取消上一次。 */
+  private abort: AbortController | undefined;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    void this.loadCapability();
+  }
+
+  /** 读一次 Python 能力；失败就保持「未知」，不把节点当成可用。 */
+  private async loadCapability(): Promise<void> {
+    if (this.capabilityLoaded) return;
+    this.capabilityLoaded = true;
+    this.pythonCapability = await fetchPythonCapability();
+    this.requestUpdate();
+  }
 
   override render() {
     const challenge = this.challenge;
@@ -223,6 +242,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
         <button ?disabled=${state.past.length === 0} @click=${() => this.setEditor(undo(state))}>撤销</button>
         <button ?disabled=${state.future.length === 0} @click=${() => this.setEditor(redo(state))}>重做</button>
         <button @click=${() => this.canvas()?.fit()}>适应窗口</button>
+        ${this.renderPythonStatus()}
         <span class=${stale ? 'bad' : 'ok'}>${this.status}</span>
       </header>
       ${this.renderToolbox()}
@@ -246,6 +266,17 @@ export class Pwn2BlockGraphPanel extends LitElement {
         ${this.renderIssues()}
       </footer>
     `;
+  }
+
+  /** Python 能力：不可用时写清原因，避免学习者以为节点坏了（06 §6）。 */
+  private renderPythonStatus() {
+    const capability = this.pythonCapability;
+    if (capability === undefined) return html`<span class="bad">Python：未知</span>`;
+    if (!capability.available) {
+      return html`<span class="bad">Python：不可用${capability.reason === undefined ? '' : `（${capability.reason}）`}</span>`;
+    }
+    const isolation = capability.isolated ? '已隔离' : '未隔离，仅开发';
+    return html`<span class="ok">Python：${capability.backend} · ${isolation}</span>`;
   }
 
   private renderToolbox() {
@@ -406,6 +437,8 @@ export class Pwn2BlockGraphPanel extends LitElement {
   }
 
   private setEditor(next: GraphEditorState): void {
+    // 语义变了，正在跑的 Python 求值已经没有意义：取消，别让迟到结果覆盖新产物（07 §P7）。
+    if (next.semanticRevision !== this.editor.semanticRevision) this.abort?.abort();
     this.editor = next;
     this.persist();
     this.requestUpdate();
@@ -483,12 +516,18 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private async compile(): Promise<void> {
     const challenge = this.challenge;
     if (challenge === undefined) return;
+    this.abort?.abort();
+    const controller = new AbortController();
+    this.abort = controller;
     const context: WorkflowContext = {
       archBits: challenge.archBits,
       allowedActions: challenge.allowedActions.filter((name): name is ActionName =>
         (ACTION_NAMES as readonly string[]).includes(name),
       ),
       ...(challenge.authorBlocks === undefined ? {} : { authorBlocks: challenge.authorBlocks }),
+      ...(this.pythonCapability?.available === true
+        ? { python: createHttpPython({ signal: controller.signal }) }
+        : {}),
     };
     this.status = '正在编译…';
     this.requestUpdate();
@@ -497,7 +536,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
       document: this.editor.document,
       context,
       documentRevision: revision,
+      signal: controller.signal,
     });
+    if (controller.signal.aborted) return;
     if (!outcome.ok) {
       this.artifact = undefined;
       this.issues = [...outcome.issues];
