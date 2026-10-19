@@ -119,14 +119,20 @@ export function parseGraphDocument(raw: unknown): ParseGraphResult {
   return { ok: true, document: parsed.data };
 }
 
-/** 新建一份空图：只有一个「开始」节点，顶层序列为空。 */
+/**
+ * 新建一份空图：**没有任何节点**（10 §5「首次打开题目时提供空画布」）。
+ *
+ * 这里不再预置「开始」节点：空画布本身就是合法的存档内容，能否执行由 `validateGraph`
+ * 在编译/运行时判定（`missing_start`），界面只负责提示，不替用户插入节点。
+ * 注意「没有存档」与「存档内容是空画布」是两件事，存档层必须分开处理。
+ */
 export function emptyGraphDocument(): GraphDocument {
   return {
     format: WORKFLOW_FORMAT,
     version: WORKFLOW_VERSION,
-    nodes: [{ id: 'start', kind: 'start', params: {} }],
+    nodes: [],
     connections: [],
     main: [],
-    layout: { start: { x: 40, y: 40 } },
+    layout: {},
   };
 }

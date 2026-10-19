@@ -1,4 +1,4 @@
-import { defaultParams, nodeInputs, nodeOutput, nodeRegions, nodeSpec } from '@pwn2block/shared';
+import { defaultParams, nodeInputs, nodeOutput, nodeParams, nodeRegions, nodeSpec } from '@pwn2block/shared';
 import type {
   GraphConnection,
   GraphDocument,
@@ -130,11 +130,19 @@ export interface AddNodeOptions {
   readonly params?: ParamValues;
 }
 
-/** 加节点：默认参数来自目录；语句节点追加到执行序列末尾，数据节点浮在画布上等接线。 */
+/**
+ * 加节点：默认参数来自目录；语句节点追加到执行序列末尾，数据节点浮在画布上等接线。
+ *
+ * 「开始」是入口而不是一条语句（`validate` 的 `start_has_input`），所以它**不进 `main`**；
+ * 一张图只允许一个入口，重复添加直接拒绝，避免用户先看到两条错误再自己猜。
+ */
 export function addNode(
   state: GraphEditorState,
   options: AddNodeOptions,
 ): EditResult {
+  if (options.kind === 'start' && state.document.nodes.some((node) => node.kind === 'start')) {
+    return { ok: false, message: '流程只能有一个「开始」节点；要换位置可以先删掉原来那个' };
+  }
   const spec = nodeSpec(options.kind);
   if (spec === undefined) return { ok: false, message: `未知节点类型：${options.kind}` };
   const id = nextNodeId(state.document, options.kind);
@@ -153,14 +161,13 @@ export function addNode(
     ...state.document,
     nodes: [...state.document.nodes, node],
     layout: { ...state.document.layout, [id]: placement },
-    main: spec.exec ? [...state.document.main, id] : state.document.main,
+    main: spec.exec && options.kind !== 'start' ? [...state.document.main, id] : state.document.main,
   };
   return { ok: true, state: apply(state, document, 'semantic', [id]) };
 }
 
 export function removeNodes(state: GraphEditorState, ids: readonly string[]): GraphEditorState {
   const doomed = new Set(ids);
-  if (doomed.has('start')) doomed.delete('start');
   if (doomed.size === 0) return state;
   const document: GraphDocument = {
     ...state.document,
@@ -232,22 +239,82 @@ export function setParam(
   return apply(state, document, 'semantic');
 }
 
+/**
+ * 手填参数（10 §2.2）：值与「手填」模式在同一次修改里落定。
+ *
+ * 节点内输入框和属性面板输入框都走这一条命令，所以同一次输入只有一条撤销记录；
+ * 之前分两步写（先 `setParam` 再 `setPortMode`）会留下两条。
+ */
+export function setInlineParam(
+  state: GraphEditorState,
+  nodeId: string,
+  name: string,
+  value: ParamValue,
+  context: PortContext,
+): GraphEditorState {
+  const declared = state.document.nodes.find((node) => node.id === nodeId);
+  if (declared === undefined) return state;
+  const spec = nodeSpec(declared.kind);
+  const connectable =
+    spec !== undefined &&
+    (nodeParams(spec, declared.params).some((param) => param.name === name && param.port !== undefined) ||
+      // 动态输入（题目积木的 `data`、命名输入）没有 ParamSpec，但一样有 `xxxMode`。
+      nodeInputs(spec, declared.params, context).some((input) => input.name === name));
+  const nodes = state.document.nodes.map((node) =>
+    node.id === nodeId
+      ? withDeclaredRegions({
+          ...node,
+          params: {
+            ...node.params,
+            [name]: value,
+            ...(connectable ? { [`${name}Mode`]: 'inline' } : {}),
+          },
+        })
+      : node,
+  );
+  const document = pruneConnections({ ...state.document, nodes }, context);
+  return apply(state, document, 'semantic');
+}
+
+/**
+ * 参数当前的有效来源模式：显式写了 `xxxMode` 就照它，否则按有没有入边推断。
+ *
+ * 节点内与属性面板都读这一份，避免两处显示不同的「手填 / 接线」。
+ */
+export function portModeOf(
+  document: GraphDocument,
+  nodeId: string,
+  port: string,
+): { readonly mode: 'inline' | 'port'; readonly source?: string } {
+  const node = document.nodes.find((candidate) => candidate.id === nodeId);
+  const incoming = document.connections.find(
+    (connection) => connection.to.node === nodeId && connection.to.port === port,
+  );
+  const declared = node?.params[`${port}Mode`];
+  const mode = declared === 'inline' || declared === 'port' ? declared : incoming === undefined ? 'inline' : 'port';
+  return incoming === undefined || mode === 'inline' ? { mode } : { mode, source: incoming.from.node };
+}
+
+/** 全选现有节点（Ctrl+A）：空画布时什么也不做。 */
+export function selectAll(state: GraphEditorState): GraphEditorState {
+  const ids = state.document.nodes.map((node) => node.id);
+  return ids.length === 0 ? state : select(state, ids);
+}
+
+
 export interface PortRef {
   readonly node: string;
   readonly port: string;
 }
 
-/**
- * 接数据线：类型必须一致、不能成环、同一个输入口重复接线时**替换**旧边。
- * 返回失败原因而不是抛错，调用方把它显示在状态栏。
- */
-export function connect(
-  state: GraphEditorState,
+/** 接线校验与文档变换：`connect` 与 `rewire` 共用，保证两条入口的规则一字不差。 */
+function connectDocument(
+  document: GraphDocument,
   context: PortContext,
   from: PortRef,
   to: PortRef,
-): EditResult {
-  const nodes = new Map(state.document.nodes.map((node) => [node.id, node]));
+): { readonly ok: true; readonly document: GraphDocument } | { readonly ok: false; readonly message: string } {
+  const nodes = new Map(document.nodes.map((node) => [node.id, node]));
   const fromNode = nodes.get(from.node);
   const toNode = nodes.get(to.node);
   if (fromNode === undefined || toNode === undefined) {
@@ -271,11 +338,11 @@ export function connect(
     };
   }
   if (from.node === to.node) return { ok: false, message: '数据线不能指向自己' };
-  if (wouldCycle(state.document, from.node, to.node)) {
+  if (wouldCycle(document, from.node, to.node)) {
     return { ok: false, message: '这条线会让数据依赖成环：先拆掉反向的那条' };
   }
 
-  const existing = state.document.connections.filter(
+  const existing = document.connections.filter(
     (connection) => connection.to.node === to.node && connection.to.port === to.port,
   );
   if (
@@ -286,18 +353,73 @@ export function connect(
     return { ok: false, message: '这条线已经接好了' };
   }
   // 同一个输入口只允许一条入边：接线即替换（06 §4「输入口唯一」）。
-  const connections = state.document.connections.filter(
+  const connections = document.connections.filter(
     (connection) => !(connection.to.node === to.node && connection.to.port === to.port),
   );
-  const document: GraphDocument = {
-    ...state.document,
-    connections: [
-      ...connections,
-      { from: { node: from.node, port: from.port }, to: { node: to.node, port: to.port } },
-    ],
+  return {
+    ok: true,
+    document: {
+      ...document,
+      connections: [
+        ...connections,
+        { from: { node: from.node, port: from.port }, to: { node: to.node, port: to.port } },
+      ],
+    },
   };
-  return { ok: true, state: apply(state, document, 'semantic') };
 }
+
+/**
+ * 接数据线：类型必须一致、不能成环、同一个输入口重复接线时**替换**旧边。
+ * 返回失败原因而不是抛错，调用方把它显示在状态栏。
+ */
+export function connect(
+  state: GraphEditorState,
+  context: PortContext,
+  from: PortRef,
+  to: PortRef,
+): EditResult {
+  const result = connectDocument(state.document, context, from, to);
+  if (!result.ok) return result;
+  return { ok: true, state: apply(state, result.document, 'semantic') };
+}
+
+/**
+ * 改接：把一条已有连线的一端拖到新端口（10 §3.3）。
+ *
+ * 语义是「先校验新端点，再把旧边换掉」：新端点不合法时**保留原连接**，只有成功才算一次
+ * 可撤销的修改。实现上不调用 `connect`，避免产生两条撤销记录。
+ */
+export function rewire(
+  state: GraphEditorState,
+  context: PortContext,
+  edge: GraphConnection,
+  end: 'from' | 'to',
+  target: PortRef,
+): EditResult {
+  const exists = state.document.connections.some((connection) => sameEdge(connection, edge));
+  if (!exists) return { ok: false, message: '这条连线已经不在了，改接取消' };
+  const next =
+    end === 'from'
+      ? { from: target, to: edge.to }
+      : { from: edge.from, to: target };
+  const without: GraphDocument = {
+    ...state.document,
+    connections: state.document.connections.filter((connection) => !sameEdge(connection, edge)),
+  };
+  const result = connectDocument(without, context, next.from, next.to);
+  if (!result.ok) return result;
+  return { ok: true, state: apply(state, result.document, 'semantic') };
+}
+
+export function sameEdge(a: GraphConnection, b: GraphConnection): boolean {
+  return (
+    a.from.node === b.from.node &&
+    a.from.port === b.from.port &&
+    a.to.node === b.to.node &&
+    a.to.port === b.to.port
+  );
+}
+
 
 /** 从 `source` 顺着数据线向上游走，能走到 `target` 就说明新边会成环。 */
 function wouldCycle(document: GraphDocument, source: string, target: string): boolean {

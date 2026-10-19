@@ -183,9 +183,23 @@ describe('编辑器：删除、撤销与复制', () => {
     expect(removed.document.main).toEqual(['feed']);
   });
 
-  it('开始节点删不掉', () => {
-    const state = removeNodes(seedEditorWithStart(), ['start']);
-    expect(state.document.nodes.some((node) => node.id === 'start')).toBe(true);
+  it('开始节点可以删除，删完还能重新加一个', () => {
+    // 10 §5：空画布是合法状态，不预置「开始」；用户删掉它不该被拦住。
+    const withStart = createEditor(workflow({ nodes: [wfNode('start', 'start')], main: [] }));
+    const removed = removeNodes(withStart, ['start']);
+    expect(removed.document.nodes.some((node) => node.id === 'start')).toBe(false);
+    const readded = addNode(removed, { kind: 'start' });
+    expect(readded.ok).toBe(true);
+    if (readded.ok) {
+      expect(readded.state.document.nodes.filter((node) => node.kind === 'start')).toHaveLength(1);
+    }
+  });
+
+  it('第二个「开始」节点被拒绝', () => {
+    const withStart = createEditor(workflow({ nodes: [wfNode('start', 'start')], main: [] }));
+    const again = addNode(withStart, { kind: 'start' });
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.message).toContain('只能有一个');
   });
 
   it('撤销恢复文档与选择，重做再前进一次', () => {

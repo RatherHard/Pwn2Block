@@ -133,6 +133,22 @@ describe('画布手势', () => {
     });
   });
 
+  it('改接落到空白处：不派发 rewire，原连接保持不变', async () => {
+    const canvas = await mount(editorWithPayload());
+    const events: GraphEdit[] = [];
+    canvas.addEventListener('p2b-graph-edit', (event) =>
+      events.push((event as CustomEvent<GraphEdit>).detail),
+    );
+    const handle = canvas.shadowRoot?.querySelector('[data-edge="0"][data-edge-end="to"]');
+    if (handle === null || handle === undefined) throw new Error('连线上没有改接把手');
+    const viewport = canvas.shadowRoot?.querySelector('.viewport');
+    if (viewport === null || viewport === undefined) throw new Error('没有画布视口');
+    handle.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }));
+    viewport.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 900, clientY: 700 }));
+    viewport.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 900, clientY: 700 }));
+    expect(events.filter((event) => event.type === 'rewire')).toEqual([]);
+  });
+
   it('键盘接线：没有选中节点时给出提示', async () => {
     const canvas = await mount(editorWithPayload());
     let message = '';
@@ -152,6 +168,67 @@ describe('画布手势', () => {
     });
     canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
     expect(message).toContain('Tab');
+  });
+
+  it('拖动节点标题栏后松手才派发移动事件（不跳变、不原地不动）', async () => {
+    const state = editorWithPayload();
+    const origin = state.document.layout.fill;
+    if (origin === undefined) throw new Error('填充节点没有布局');
+    const canvas = await mount(state);
+    const events: GraphEdit[] = [];
+    canvas.addEventListener('p2b-graph-edit', (event) =>
+      events.push((event as CustomEvent<GraphEdit>).detail),
+    );
+    const head = canvas.shadowRoot?.querySelector('[data-node="fill"] [data-drag-handle]');
+    if (head === null || head === undefined) throw new Error('节点没有拖动把手');
+    // jsdom 没有布局：视口为 0 平移、1 倍缩放，屏幕坐标即图坐标。
+    head.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 40, clientY: 40 }));
+    // 按下只选中，位置不动。
+    expect(events.filter((event) => event.type === 'move')).toEqual([]);
+    head.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 90, clientY: 70 }));
+    expect(events.filter((event) => event.type === 'move')).toEqual([]);
+    head.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 90, clientY: 70 }));
+    expect(events).toContainEqual({
+      type: 'move',
+      moves: { fill: { x: origin.x + 50, y: origin.y + 30 } },
+    });
+  });
+
+  it('Shift 框选松手后按矩形范围选中节点', async () => {
+    const canvas = await mount(editorWithPayload());
+    const events: GraphEdit[] = [];
+    canvas.addEventListener('p2b-graph-edit', (event) =>
+      events.push((event as CustomEvent<GraphEdit>).detail),
+    );
+    const viewport = canvas.shadowRoot?.querySelector('.viewport');
+    if (viewport === null || viewport === undefined) throw new Error('没有画布视口');
+    viewport.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true, clientX: -20, clientY: -20, shiftKey: true }),
+    );
+    viewport.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 400, clientY: 400 }));
+    viewport.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 400, clientY: 400 }));
+    const selected = events.find((event) => event.type === 'select');
+    expect(selected).toBeDefined();
+    if (selected?.type !== 'select') return;
+    expect(selected.ids).toContain('fill');
+  });
+
+  it('空白处拖动平移视图，位移带 px 单位', async () => {
+    const canvas = await mount(editorWithPayload());
+    const viewport = canvas.shadowRoot?.querySelector('.viewport');
+    if (viewport === null || viewport === undefined) throw new Error('没有画布视口');
+    const surface = canvas.shadowRoot?.querySelector('.surface');
+    const before = surface?.getAttribute('style') ?? '';
+    const origin = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(before);
+    expect(origin).not.toBeNull();
+    viewport.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }));
+    viewport.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 40, clientY: 25 }));
+    await canvas.updateComplete;
+    const after = surface?.getAttribute('style') ?? '';
+    const moved = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(after);
+    expect(moved).not.toBeNull();
+    expect(Number(moved?.[1]) - Number(origin?.[1])).toBe(30);
+    expect(Number(moved?.[2]) - Number(origin?.[2])).toBe(15);
   });
 });
 

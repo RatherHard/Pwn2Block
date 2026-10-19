@@ -134,11 +134,14 @@ describe('值的传输编码', () => {
 });
 
 describe('图存档 Schema', () => {
-  it('空图只有一个开始节点，且能被重新解析', () => {
+  it('空图是完全空白的文档，且能被重新解析', () => {
+    // 10 §5：首次进入不预置任何节点（包括「开始」），空画布是合法存档。
     const document = emptyGraphDocument();
     expect(document.format).toBe(WORKFLOW_FORMAT);
     expect(document.version).toBe(WORKFLOW_VERSION);
-    expect(document.nodes).toEqual([{ id: 'start', kind: 'start', params: {} }]);
+    expect(document.nodes).toEqual([]);
+    expect(document.connections).toEqual([]);
+    expect(document.layout).toEqual({});
     const parsed = parseGraphDocument(document);
     expect(parsed.ok).toBe(true);
   });

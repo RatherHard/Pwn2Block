@@ -5,6 +5,7 @@
  * 图模型、节点目录、传输编码和 Python 协议都在这里，前端与后端读的是同一份定义。
  */
 export * from './catalog';
+export * from './catalog-library';
 export * from './python';
 export * from './save';
 export * from './schema';

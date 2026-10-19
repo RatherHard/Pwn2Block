@@ -425,19 +425,21 @@ describe('单页骨架：输出区改为通栏（本批任务第 6 条）', () =
 });
 
 describe('单页骨架：编译与运行按钮的门禁（05 §3）', () => {
-  it('空画布编译成功但没有动作：提交被判门禁拦住', async () => {
+  it('空画布编译报缺「开始」：提交仍被门禁拦住，且不会自动补节点', async () => {
     const { app, api } = await mountApp(createFakeApi());
     panelOf(app).recompile();
     await settle(app);
 
-    const output = outputOf(app);
-    expect(textOf(output)).not.toContain('编译失败');
+    // 10 §5：空画布可编辑可保存，但不能当成合法流程执行；缺开始节点只提示、不自动插入。
+    expect(panelOf(app).currentDocument().nodes).toHaveLength(0);
+    expect(textOf(outputOf(app))).toContain('开始');
 
     clickRun(app, '提交判题');
     await settle(app);
     // 空程序没有产物：控制器与按钮都不放行，且一个请求都没发出去。
     expect(api.calls.some((call) => call.method === 'submit')).toBe(false);
-    expect(textOf(runMenuOf(app))).toContain('画布上没有动作');
+    // 缺开始节点让编译直接失败，所以禁用原因是「先修错误」而不是「没有动作」。
+    expect(textOf(runMenuOf(app))).toContain('编译失败');
   });
 
   it('拼出「开始 → step(1)」后编译成功：输出区没有错误（走画布桥）', async () => {
@@ -623,12 +625,12 @@ describe('单页骨架：编译错误 → 出错积木的定位（D5 ②，05 §
     expect(panelOf(app).highlightNodeId).toBe('push');
 
     const canvas = panelOf(app).shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('.executing')?.getAttribute('data-node')).toBe('push');
+    expect(canvas?.shadowRoot?.querySelector('.running')?.getAttribute('data-node')).toBe('push');
     buttonsOf(output)
       .find((button) => button.textContent?.trim() === '定位积木')
       ?.click();
     await settle(app);
-    expect(canvas?.shadowRoot?.querySelector('.select')?.getAttribute('data-node')).toBe('push');
+    expect(canvas?.shadowRoot?.querySelector('.selected')?.getAttribute('data-node')).toBe('push');
   });
 
   it('没有具体位置的编译错误（缺开始积木）不给定位出口，也不把空串当积木 id', async () => {

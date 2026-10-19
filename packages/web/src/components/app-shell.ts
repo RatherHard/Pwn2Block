@@ -117,31 +117,41 @@ export class Pwn2BlockApp extends LitElement {
         color: var(--p2b-bg);
         background: var(--p2b-fg);
       }
+      /*
+       * 上下工作区（10 §2.1）：视图在上、画布工作区在下，两栏都用页面可用宽度。
+       * 不设可拖动分隔条，也不要求两块同时塞进一屏：页面保持正常纵向滚动，
+       * 画布下方的工作区保留足够的可操作高度（不靠压缩节点内容来适应一屏）。
+       */
       main {
         flex: none;
-        height: max(28rem, calc(100dvh - var(--p2b-topbar-h)));
-        min-height: 0;
-        display: grid;
-        /* 画布是主工作区：右栏占两份，左栏留一份；1280 宽度下画布仍有可操作空间。 */
-        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+        display: flex;
+        flex-direction: column;
         gap: 0.8rem;
         padding: 0.8rem;
-        overflow: hidden;
+        overflow: visible;
       }
-      /* 两栏不画边框：视图管理器和 payload 窗口各自的 .box 已经带框。 */
       .left,
       .right {
         min-width: 0;
-        min-height: 0;
         overflow: hidden;
       }
       .left {
         display: flex;
         flex-direction: column;
+        height: max(20rem, 46dvh);
+        min-height: 20rem;
         background: var(--p2b-bg);
       }
       .right {
+        display: flex;
+        flex-direction: column;
+        height: max(34rem, 76dvh);
+        min-height: 34rem;
         background: var(--p2b-bg);
+      }
+      .right > pwn2block-graph-panel {
+        flex: 1 1 auto;
+        min-height: 0;
       }
       .output {
         flex: none;
@@ -186,13 +196,12 @@ export class Pwn2BlockApp extends LitElement {
       }
       @media (max-width: 980px) {
         main {
-          height: auto;
-          grid-template-columns: 1fr;
           overflow: visible;
         }
         .left,
         .right {
-          min-height: 32rem;
+          height: auto;
+          min-height: 26rem;
         }
       }
       @media (max-width: 620px) {

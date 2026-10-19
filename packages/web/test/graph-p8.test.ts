@@ -223,7 +223,7 @@ describe('读取顺序、保留旧存档与失败不覆盖', () => {
     const store = memoryStore();
     const result = loadGraph(store, 'ret2win');
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.raw).toBeUndefined();
+    if (!result.ok) expect(result.kind).toBe('empty');
     expect(store.data.size).toBe(0);
   });
 
@@ -258,7 +258,7 @@ describe('读取顺序、保留旧存档与失败不覆盖', () => {
     const store = memoryStore({ 'pwn2block.canvas.v1.ret2win': raw });
     const result = loadGraph(store, 'ret2win');
     expect(result.ok).toBe(false);
-    if (!result.ok) {
+    if (!result.ok && result.kind === 'corrupt') {
       expect(result.raw).toBe(raw);
       expect(result.issues?.join('\n')).toContain('mystery');
     }
@@ -274,7 +274,7 @@ describe('读取顺序、保留旧存档与失败不覆盖', () => {
     });
     const result = loadGraph(store, 'ret2win');
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.raw).toBe(raw);
+    if (!result.ok && result.kind === 'corrupt') expect(result.raw).toBe(raw);
     expect(store.data.get(graphStorageKey('ret2win'))).toBe(raw);
   });
 
@@ -288,7 +288,7 @@ describe('读取顺序、保留旧存档与失败不覆盖', () => {
     store.setItem(graphStorageKey('ret2win'), JSON.stringify(save));
     const missing = loadGraph(store, 'ret2win');
     expect(missing.ok).toBe(false);
-    if (!missing.ok) expect(missing.reason).toContain('依赖');
+    if (!missing.ok && missing.kind === 'corrupt') expect(missing.reason).toContain('依赖');
   });
 
   it('存储不可用时返回没有存档，写入返回 false', () => {

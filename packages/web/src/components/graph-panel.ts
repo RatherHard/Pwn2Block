@@ -4,73 +4,86 @@ import {
   NODE,
   availableNodeSpecs,
   CURRENT_STAGE,
-  nodeSpec,
-  nodeRegions,
-  defaultParams,
-  nodeParams,
   collectModuleBundle,
   emptyGraphDocument,
   makeGraphSave,
+  nodeSpec,
   parseGraphDocument,
   parseGraphSave,
 } from '@pwn2block/shared';
-import type { GraphDocument } from '@pwn2block/shared';
 import type {
   ActionName,
-  ParamSpec,
+  GraphDocument,
   ParamValue,
   PublicChallenge,
   PythonCapability,
   WorkflowIssue,
 } from '@pwn2block/shared';
 import { compileGraph } from '../workflow/compile';
-import { checkParam } from '../workflow/params';
-import { lookupGraph } from '../workflow/document';
 import { extractModule } from '../graph/extract';
-import { groupSelection, setPortMode, ungroup, withDocument } from '../graph/editor';
-import { locateTarget, type LocateRequest } from '../graph/locate';
-import { moduleViewState, withModuleBody } from '../graph/module-view';
-import { upgradeModule, upgradeTargetOf } from '../graph/module-upgrade';
-import { importDocument } from '../graph/transfer';
-import { loadGraph, saveGraph } from '../graph/storage';
-import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
-import type { NodePreview, PreviewSegment, WorkflowArtifact, WorkflowContext } from '../workflow/types';
-import type { GraphNode as WorkspaceNodeLike } from '@pwn2block/shared';
-import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
-import type { PayloadControlsModel } from '../viewmodel/toolbar';
 import {
   addNode,
   connect,
   copySelection,
   createEditor,
   disconnect,
+  groupSelection,
   moveInto,
   moveNodes,
   moveOut,
   paste,
-  setCollapsed,
   redo,
   removeNodes,
-  reorder,
   reorderAfter,
+  rewire,
   select,
-  setParam,
+  setCollapsed,
+  setInlineParam,
+  setPortMode,
   undo,
+  ungroup,
   type EditResult,
   type GraphEditorState,
 } from '../graph/editor';
-import './graph-canvas';
-import type { GraphEdit, Pwn2BlockGraphCanvas } from './graph-canvas';
+import { locateTarget, type LocateRequest } from '../graph/locate';
+import { moduleViewState, withModuleBody } from '../graph/module-view';
+import { importDocument } from '../graph/transfer';
+import { clearGraph, loadGraph, saveGraph } from '../graph/storage';
+import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
+import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
+import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
+import type { PayloadControlsModel } from '../viewmodel/toolbar';
 import { sharedStyles, terminalTheme } from '../theme';
+import './graph-canvas';
+import './node-library';
+import './node-inspector';
+import {
+  moduleCallParams,
+  renderGroups,
+  renderIssues,
+  renderLoadFailure,
+  renderModules,
+  renderPythonStatus,
+  renderRunControls,
+  renderTemplates,
+  renderTrace,
+  type ChromeHandlers,
+} from './graph-panel-chrome';
+import type { GraphEdit, Pwn2BlockGraphCanvas } from './graph-canvas';
+import type { Pwn2BlockNodeInspector } from './node-inspector';
+import type { LibraryDragEndDetail } from './node-library';
 
 /**
- * 节点画布面板（06 §3–§5；07 §P2/P3）：工具箱 + 画布 + 检查器 + 编译预览。
+ * 节点画布面板（10 §2、§4、§5、§6）。
  *
- * 位置与边界：
- * - **自带编辑器状态**：画布只收手势，命令在这里落到 `graph/editor`，文档存本地（按题目 id 分开）。
+ * 布局：工具栏 + 「节点库 / 画布 / 属性面板」三栏 + 问题区。属性面板常驻并默认展开，
+ * 节点内与属性面板编辑的是**同一份文档**（命令都落到 `graph/editor`），复杂配置只在面板里。
+ *
+ * 边界：
+ * - **只做装配**：手势来自画布、库与面板的事件，编辑结果落 `graph/editor` 的纯函数，文档存本地。
  * - **编译是本地纯计算**：数据节点求值 + 生成动作，产物只用于预览与后续运行；Python 求值经注入的
  *   `python` 求值器（服务端隔离运行器未启用时明确报 `python_unavailable`，不回落到浏览器执行）。
- * - **替换 Blockly 是 P9 的事**：这一个面板目前挂在受控入口（`?editor=graph`）后面，跑/提交仍走积木。
+ * - **空画布是合法状态**：没有存档与「存档是空画布」分开处理；损坏存档不会被静默覆盖。
  */
 
 /** 没有 localStorage 时的兜底：不保存，但调用方不必到处判空。 */
@@ -85,57 +98,79 @@ export class Pwn2BlockGraphPanel extends LitElement {
     sharedStyles,
     css`
       :host {
-        display: grid;
-        grid-template-columns: 12rem minmax(0, 1fr) 18rem;
-        grid-template-rows: auto minmax(0, 1fr) auto;
-        gap: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
         height: 100%;
         min-height: 0;
-        padding: 0.6rem 0 0;
+        padding: 0.5rem 0 0.4rem;
       }
       header {
-        grid-column: 1 / -1;
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.4rem;
         flex-wrap: wrap;
       }
+      header button {
+        min-height: 1.6rem;
+        padding: 0.05rem 0.35rem;
+      }
+      .breadcrumb {
+        color: var(--p2b-dim);
+      }
+      .divider {
+        color: var(--p2b-line);
+      }
+      .workspace {
+        flex: 1 1 auto;
+        min-height: 30rem;
+        display: grid;
+        grid-template-columns: 13rem minmax(0, 1fr) 19rem;
+        gap: 0.5rem;
+        align-items: stretch;
+      }
       .toolbox {
-        grid-row: 2;
-        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        min-height: 0;
         border: var(--p2b-border) solid var(--p2b-line);
-        padding: 0.4rem;
+        padding: 0.3rem;
+        overflow: auto;
         scrollbar-color: var(--p2b-line) transparent;
       }
-      .toolbox h3 {
-        margin: 0.35rem 0 0.25rem;
+      .extras h3 {
+        margin: 0.4rem 0 0.2rem;
       }
-      .toolbox button {
+      .extras button {
         display: block;
         width: 100%;
         text-align: left;
         margin-bottom: 0.2rem;
       }
       .canvas-host {
-        grid-row: 2;
         min-height: 0;
         min-width: 0;
+        display: flex;
       }
-      .inspector {
-        grid-row: 2;
-        overflow: auto;
-        border: var(--p2b-border) solid var(--p2b-line);
-        padding: 0.4rem;
-        scrollbar-color: var(--p2b-line) transparent;
+      .canvas-host pwn2block-graph-canvas {
+        flex: 1 1 auto;
+      }
+      aside.inspector {
+        min-height: 0;
+        display: flex;
+      }
+      aside.inspector pwn2block-node-inspector {
+        flex: 1 1 auto;
       }
       footer {
-        grid-column: 1 / -1;
+        flex: none;
         display: flex;
         flex-direction: column;
-        gap: 0.25rem;
+        gap: 0.2rem;
         border-top: var(--p2b-border) solid var(--p2b-line);
-        padding-top: 0.35rem;
-        max-height: 12rem;
+        padding-top: 0.3rem;
+        max-height: 11rem;
         overflow: auto;
       }
       .issues {
@@ -148,67 +183,14 @@ export class Pwn2BlockGraphPanel extends LitElement {
       .issues li.warning {
         color: var(--p2b-changed);
       }
-      .row {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-      }
-      .param {
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-        margin-bottom: 0.45rem;
-      }
       .bad {
         color: var(--p2b-error);
       }
       .ok {
         color: var(--p2b-ip);
       }
-      code {
-        color: var(--p2b-data);
-      }
-      label {
+      .hint {
         color: var(--p2b-dim);
-      }
-      input,
-      select,
-      textarea {
-        font: inherit;
-        color: var(--p2b-fg);
-        background: var(--p2b-bg);
-        border: 1px solid var(--p2b-line);
-        padding: 0.1rem 0.25rem;
-        width: 100%;
-      }
-      textarea {
-        min-height: 7rem;
-        resize: vertical;
-      }
-      button {
-        font: inherit;
-        color: var(--p2b-fg);
-        background: var(--p2b-bg);
-        border: var(--p2b-border) solid var(--p2b-line);
-        padding: 0.1rem 0.5rem;
-        cursor: pointer;
-      }
-      button:disabled {
-        color: var(--p2b-dim);
-        border-color: var(--p2b-dim);
-        cursor: not-allowed;
-      }
-      button.link {
-        border: none;
-        background: none;
-        padding: 0;
-        color: var(--p2b-data);
-        text-decoration: underline;
-      }
-      tr.selected td {
-        background: var(--p2b-changed);
-        color: var(--p2b-bg);
       }
       .load-failure {
         border: var(--p2b-border) solid var(--p2b-error);
@@ -217,6 +199,28 @@ export class Pwn2BlockGraphPanel extends LitElement {
       .trace ol {
         margin: 0;
         padding-left: 1.2rem;
+      }
+      .run-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+      button.link {
+        border: 0;
+        background: none;
+        padding: 0;
+        color: var(--p2b-data);
+        text-decoration: underline;
+      }
+      label.import {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        color: var(--p2b-dim);
+        cursor: pointer;
+      }
+      label.import input {
+        width: 8rem;
       }
     `,
   ];
@@ -250,13 +254,36 @@ export class Pwn2BlockGraphPanel extends LitElement {
   /** 当前编译的取消句柄：语义编辑或重新编译都会取消上一次。 */
   private abort: AbortController | undefined;
   /** 存档读取失败时保留原因与原文：不覆盖、不猜，给用户一个导出出口。 */
-  private loadFailure?: { readonly reason: string; readonly raw?: string; readonly issues?: readonly string[] };
+  private loadFailure?: { readonly reason: string; readonly raw: string; readonly issues?: readonly string[] };
+  /**
+   * 损坏存档的锁：锁住期间**不写存档**，直到用户明确选择「从空白开始」。
+   * 这样「读不出来」不会被当成「首次进入」而把用户原来的内容覆盖掉（10 §5）。
+   */
+  private archiveLocked = false;
   /** 存档迁移/恢复的说明（旧积木、旧画布），显示一次就够。 */
   private loadNote = '';
   /** 当前选中的组装分段：高亮输入端口并显示对应结果字节。 */
   private segmentFocus?: { readonly nodeId: string; readonly port: string };
   /** 最近一次写入是否失败：只提示一次，避免每次拖动都刷同一句。 */
   private persistFailed = false;
+  /** 属性面板正在编辑的节点：节点标题与面板同时高亮，提示两处是同一份数据。 */
+  private editingNodeId?: string;
+  /** 从节点库拖入时的节点种类：用于画布上的落点预览。 */
+  private dragKind?: string;
+
+  private readonly chrome: ChromeHandlers = {
+    onCommand: (command) => {
+      this.dispatchEvent(new CustomEvent('p2b-graph-run', { detail: command, bubbles: true, composed: true }));
+    },
+    onLocate: (nodeId, extra) => this.locate({ nodeId, ...(extra ?? {}) }),
+    onTemplate: (template) => this.addPythonTemplate(template),
+    onAddModule: (moduleId) => this.addModuleCall(moduleId),
+    onEditModule: (moduleId) => this.enterModule(moduleId),
+    onExportModule: (moduleId) => this.exportModule(moduleId),
+    onUngroup: (groupId) => this.setEditor(ungroup(this.editor, groupId)),
+    onDownloadRaw: (raw) => this.download('pwn2block-old-save.json', raw),
+    onDiscardArchive: () => this.discardCorruptArchive(),
+  };
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -278,7 +305,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const state = this.editor;
     const selected = state.selection
       .map((id) => state.document.nodes.find((node) => node.id === id))
-      .filter((node) => node !== undefined);
+      .find((node) => node !== undefined);
     const stale = this.compiledRevision !== state.semanticRevision;
     return html`
       <header>
@@ -290,434 +317,209 @@ export class Pwn2BlockGraphPanel extends LitElement {
         </span>
         <button
           part="compile"
-          ?disabled=${this.editingModuleId !== undefined || state.document.main.length === 0}
+          ?disabled=${this.editingModuleId !== undefined}
+          title=${this.editingModuleId === undefined
+            ? '在本地求值并生成动作；不发送任何请求'
+            : '先回到主图再编译'}
           @click=${() => this.compile()}
         >编译</button>
-        ${this.controls === undefined ? nothing : this.renderRunControls()}
-        <button ?disabled=${!this.canUndo()} @click=${() => this.undoEdit()}>撤销</button>
-        <button ?disabled=${!this.canRedo()} @click=${() => this.redoEdit()}>重做</button>
+        ${renderRunControls(this.controls, this.chrome)}
+        <span class="divider">|</span>
+        <button ?disabled=${!this.canUndo()} title="撤销（Ctrl+Z）" @click=${() => this.undoEdit()}>撤销</button>
+        <button ?disabled=${!this.canRedo()} title="重做（Ctrl+Y）" @click=${() => this.redoEdit()}>重做</button>
+        <button title="缩小（Ctrl+滚轮也可以）" @click=${() => this.canvas()?.zoomBy(1 / 1.15)}>缩放 -</button>
+        <button title="放大" @click=${() => this.canvas()?.zoomBy(1.15)}>缩放 +</button>
+        <button title="把全部节点放进可视区（f）" @click=${() => this.canvas()?.fit()}>适应画布</button>
         ${this.editingModuleId !== undefined || state.selection.length < 2
           ? nothing
           : html`<button @click=${() => this.run((editor) => groupSelection(editor))}>分组</button>`}
         ${this.editingModuleId !== undefined || state.selection.length === 0
           ? nothing
           : html`<button @click=${() => this.extractSelection()}>提取为模块</button>`}
-        <button @click=${() => this.canvas()?.fit()}>适应窗口</button>
         ${this.editingModuleId === undefined
-          ? html`<button @click=${() => this.exportGraph()}>导出</button>
-              <label class="import">导入<input type="file" accept="application/json,.json" @change=${(event: Event) => this.importGraph(event)} /></label>`
+          ? html`<button @click=${() => this.exportGraph()}>导出图</button>
+              <label class="import"
+                >导入图<input
+                  type="file"
+                  accept="application/json,.json"
+                  @change=${(event: Event) => this.importGraph(event)}
+              /></label>`
           : nothing}
-        ${this.renderPythonStatus()}
+        ${renderPythonStatus(this.pythonCapability)}
         <span class=${stale ? 'bad' : 'ok'}>${this.status}</span>
       </header>
-      ${this.renderToolbox()}
-      <div class="canvas-host">
-        <pwn2block-graph-canvas
-          .state=${state}
-          .context=${this.portContext(challenge)}
-          .previews=${this.artifact?.previews ?? []}
-          .issues=${this.issues}
-          .highlightNodeId=${this.highlightNodeId}
-          .focusPort=${this.segmentFocus === undefined ? undefined : { nodeId: this.segmentFocus.nodeId, port: this.segmentFocus.port }}
-          @p2b-graph-edit=${(event: CustomEvent<GraphEdit>) => this.onEdit(event.detail)}
-          @p2b-graph-undo=${() => this.setEditor(undo(this.editor))}
-          @p2b-graph-redo=${() => this.setEditor(redo(this.editor))}
-          @p2b-graph-copy=${() => this.setEditor(copySelection(this.editor))}
-          @p2b-graph-paste=${() => this.run((editor) => paste(editor, this.portContextOf()))}
-          @p2b-graph-message=${(event: CustomEvent<{ message: string }>) => this.say(event.detail.message)}
-        ></pwn2block-graph-canvas>
-      </div>
-      ${this.renderInspector(selected, challenge)}
+      <section class="workspace">
+        <aside class="toolbox" aria-label="节点库">
+          <pwn2block-node-library
+            .specs=${availableNodeSpecs(CURRENT_STAGE)}
+            .context=${this.portContext(challenge)}
+            .store=${this.storage()}
+            @p2b-library-add=${(event: CustomEvent<{ kind: string }>) => this.addFromLibrary(event.detail.kind)}
+            @p2b-library-dragstart=${(event: CustomEvent<{ kind: string; clientX: number; clientY: number }>) =>
+              this.startLibraryDrag(event.detail)}
+            @p2b-library-dragmove=${(event: CustomEvent<{ kind: string; clientX: number; clientY: number }>) =>
+              this.moveLibraryDrag(event.detail)}
+            @p2b-library-dragend=${(event: CustomEvent<LibraryDragEndDetail>) => this.endLibraryDrag(event.detail)}
+          ></pwn2block-node-library>
+          ${renderTemplates(this.chrome)} ${renderModules(state.document, this.chrome)}
+          ${renderGroups(state.document, this.chrome)}
+        </aside>
+        <div class="canvas-host">
+          <pwn2block-graph-canvas
+            .state=${state}
+            .context=${this.portContext(challenge)}
+            .previews=${this.artifact?.previews ?? []}
+            .issues=${this.issues}
+            .highlightNodeId=${this.highlightNodeId}
+            .editingNodeId=${this.editingNodeId}
+            .focusPort=${this.segmentFocus === undefined
+              ? undefined
+              : { nodeId: this.segmentFocus.nodeId, port: this.segmentFocus.port }}
+            @p2b-graph-edit=${(event: CustomEvent<GraphEdit>) => this.onEdit(event.detail)}
+            @p2b-graph-undo=${() => this.undoEdit()}
+            @p2b-graph-redo=${() => this.redoEdit()}
+            @p2b-graph-copy=${() => this.setEditor(copySelection(this.editor))}
+            @p2b-graph-paste=${() => this.run((editor) => paste(editor, this.portContextOf()))}
+            @p2b-graph-open=${(event: CustomEvent<{ nodeId: string }>) => this.openInspector(event.detail.nodeId)}
+            @p2b-graph-message=${(event: CustomEvent<{ message: string }>) => this.say(event.detail.message)}
+          ></pwn2block-graph-canvas>
+        </div>
+        <aside class="inspector" aria-label="属性">
+          <pwn2block-node-inspector
+            .node=${selected}
+            .document=${state.document}
+            .context=${this.portContext(challenge)}
+            .issues=${this.issues}
+            .preview=${selected === undefined
+              ? undefined
+              : this.artifact?.previews.find((item) => item.nodeId === selected.id)}
+            .selectionCount=${state.selection.length}
+            .collapsed=${selected !== undefined && state.document.layout[selected.id]?.collapsed === true}
+            @p2b-inspector-param=${(event: CustomEvent<{ name: string; value: ParamValue }>) =>
+              this.onInspectorParam(event.detail.name, event.detail.value)}
+            @p2b-inspector-mode=${(event: CustomEvent<{ port: string; mode: 'inline' | 'port' }>) =>
+              this.onInspectorMode(event.detail.port, event.detail.mode)}
+            @p2b-inspector-action=${(event: CustomEvent<{ action: string }>) =>
+              this.onInspectorAction(event.detail.action)}
+          ></pwn2block-node-inspector>
+        </aside>
+      </section>
       <footer>
         ${this.loadNote === '' ? nothing : html`<p class="hint">${this.loadNote}</p>`}
-        ${this.loadFailure === undefined ? nothing : this.renderLoadFailure()}
+        ${this.loadFailure === undefined ? nothing : renderLoadFailure(this.loadFailure, this.chrome)}
         ${this.message === '' ? nothing : html`<p class="bad">${this.message}</p>`}
-        ${this.renderIssues()} ${this.renderTrace()}
+        ${renderIssues(this.issues, this.chrome)} ${renderTrace(this.artifact?.trace ?? [], this.chrome)}
       </footer>
     `;
   }
 
-  /** 运行/终止：可用性与禁用原因全部来自控制器给的模型（07 §P9 默认画布后仍只有一份门禁）。 */
-  private renderRunControls() {
-    const controls = this.controls;
-    if (controls === undefined) return nothing;
-    const dispatch = (command: 'run-all' | 'abort'): void => {
-      this.dispatchEvent(
-        new CustomEvent('p2b-graph-run', {
-          detail: command,
-          bubbles: true,
-          composed: true,
-        }),
-      );
-    };
-    return html`<span class="run-controls">
-      <button
-        data-run="run-all"
-        ?disabled=${!controls.run.enabled}
-        title=${controls.run.hint}
-        aria-describedby="run-reason"
-        @click=${() => dispatch('run-all')}
-      >${controls.run.label}</button>
-      <button
-        data-run="abort"
-        ?disabled=${!controls.abort.enabled}
-        title=${controls.abort.disabledReason ?? controls.abort.hint}
-        @click=${() => dispatch('abort')}
-      >${controls.abort.label}</button>
-      <span id="run-reason" class="hint">${controls.run.enabled ? '' : controls.run.hint}</span>
-    </span>`;
+  // ------------------------------------------------------------ 节点库与模板
+
+  private addFromLibrary(kind: string): void {
+    this.run((state) => addNode(state, { kind, at: this.visiblePlacement() }));
   }
 
-  /** Python 能力：不可用时写清原因，避免学习者以为节点坏了（06 §6）。 */
-  private renderPythonStatus() {
-    const capability = this.pythonCapability;
-    if (capability === undefined) return html`<span class="bad">Python：未知</span>`;
-    if (!capability.available) {
-      return html`<span class="bad">Python：不可用${capability.reason === undefined ? '' : `（${capability.reason}）`}</span>`;
+  /** 点击添加落在当前可见画布范围内（10 §4.2）：取视口左上角向内一点，避开已有节点。 */
+  private visiblePlacement(): { x: number; y: number } {
+    const canvas = this.canvas();
+    const base = canvas === undefined
+      ? { x: 40, y: 40 }
+      : (() => {
+          const rect = canvas.getBoundingClientRect();
+          const point = canvas.worldFromClient(rect.left + 60, rect.top + 60);
+          return { x: Math.round(point.x), y: Math.round(point.y) };
+        })();
+    return this.freeSpotNear(base);
+  }
+
+  /**
+   * 连续点击添加时按网格错开：不会把新节点盖在上一个节点上（10 §4.2）。
+   *
+   * 节点宽高约 232×120，按 250×140 的格子向右铺，铺满可见宽度后另起一行。
+   */
+  private freeSpotNear(start: { x: number; y: number }): { x: number; y: number } {
+    const taken = Object.values(this.editor.document.layout);
+    const rect = this.canvas()?.getBoundingClientRect();
+    const columns = rect === undefined ? 2 : Math.max(1, Math.min(4, Math.floor(rect.width / 260)));
+    for (let row = 0; row < 6; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const spot = { x: start.x + column * 250, y: start.y + row * 140 };
+        const clash = taken.some(
+          (placement) => Math.abs(placement.x - spot.x) < 120 && Math.abs(placement.y - spot.y) < 60,
+        );
+        if (!clash) return spot;
+      }
     }
-    const isolation = capability.isolated ? '已隔离' : '未隔离，仅开发';
-    return html`<span class="ok">Python：${capability.backend} · ${isolation}</span>`;
+    return start;
   }
 
-  private renderToolbox() {
-    const stage = CURRENT_STAGE;
-    const groups = new Map<string, { label: string; kinds: { kind: string; label: string; summary: string }[] }>();
-    for (const spec of availableNodeSpecs(stage)) {
-      const group = groups.get(spec.category) ?? { label: spec.category, kinds: [] };
-      group.kinds.push({ kind: spec.kind, label: spec.label, summary: spec.summary });
-      groups.set(spec.category, group);
+  private startLibraryDrag(detail: { kind: string; clientX: number; clientY: number }): void {
+    this.dragKind = detail.kind;
+    this.moveLibraryDrag(detail);
+  }
+
+  /** 拖入预览：落在画布内才显示虚线框，拖回节点库或画布外就取消。 */
+  private moveLibraryDrag(detail: { kind: string; clientX: number; clientY: number }): void {
+    const canvas = this.canvas();
+    if (canvas === undefined || this.dragKind === undefined) return;
+    if (!this.insideCanvas(detail.clientX, detail.clientY)) {
+      canvas.showDropHint(undefined);
+      return;
     }
-    return html`<aside class="toolbox" aria-label="工具箱">
-      ${[...groups.values()].map(
-        (group) => html`<section>
-          <h3>${group.label}</h3>
-          ${group.kinds.map(
-            (item) => html`<button
-              title=${item.summary}
-              data-kind=${item.kind}
-              @click=${() => this.run((state) => addNode(state, { kind: item.kind }))}
-            >${item.label}</button>`,
-          )}
-        </section>`,
-      )}
-      ${this.renderModules()} ${this.renderGroups()}
-    </aside>`;
+    const point = canvas.worldFromClient(detail.clientX, detail.clientY);
+    const label = nodeSpec(detail.kind)?.label ?? detail.kind;
+    canvas.showDropHint({ x: Math.round(point.x - 8), y: Math.round(point.y - 12), label });
   }
 
-  /** 已定义的模块：显示种类/版本/被调用次数，并可插入调用节点（模块体在提取时生成）。 */
-  private renderModules() {
-    const modules = this.editor.document.modules ?? [];
-    if (modules.length === 0) {
-      return nothing;
+  private endLibraryDrag(detail: LibraryDragEndDetail): void {
+    const kind = this.dragKind;
+    this.dragKind = undefined;
+    this.canvas()?.showDropHint(undefined);
+    if (kind === undefined || detail.canceled === true) return;
+    if (!this.insideCanvas(detail.clientX, detail.clientY)) return;
+    const point = this.canvas()?.worldFromClient(detail.clientX, detail.clientY) ?? { x: 40, y: 40 };
+    this.run((state) =>
+      addNode(state, { kind, at: { x: Math.round(point.x - 8), y: Math.round(point.y - 12) } }),
+    );
+  }
+
+  private insideCanvas(clientX: number, clientY: number): boolean {
+    const canvas = this.canvas();
+    if (canvas === undefined) return false;
+    const rect = canvas.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }
+
+  /** 带模板新建 Python 节点：代码与输入/输出类型一起写进参数，编辑器里可继续改。 */
+  private addPythonTemplate(template: {
+    readonly code: string;
+    readonly inputs: readonly string[];
+    readonly outputType: string;
+  }): void {
+    this.run((state) =>
+      addNode(state, {
+        kind: NODE.python,
+        params: { code: template.code, inputs: [...template.inputs], outputType: template.outputType },
+      }),
+    );
+  }
+
+  /** 插入模块调用节点（流程模块 → `module.call`，数据模块 → `module.data`）。 */
+  private addModuleCall(moduleId: string): void {
+    const module = (this.editor.document.modules ?? []).find((candidate) => candidate.id === moduleId);
+    if (module === undefined) {
+      this.say(`找不到模块 ${moduleId}`);
+      return;
     }
-    const usage = new Map<string, number>();
-    for (const node of this.editor.document.nodes) {
-      const id = typeof node.params.moduleId === 'string' ? node.params.moduleId : '';
-      if (id !== '') usage.set(id, (usage.get(id) ?? 0) + 1);
-    }
-    return html`<section class="modules">
-      <h3>模块</h3>
-      ${modules.map(
-        (module) => html`<span class="module-row">
-        <button
-          title="${module.kind === 'flow' ? '流程模块' : '数据模块'} · ${usage.get(module.id) ?? 0} 处调用"
-          data-module=${module.id}
-          @click=${() =>
-            this.run((state) =>
-              addNode(state, {
-                kind: module.kind === 'flow' ? NODE.moduleCall : NODE.moduleData,
-                params: {
-                  moduleId: module.id,
-                  moduleVersion: module.version,
-                  ...(module.output === undefined ? { hasOutput: 'no' } : { hasOutput: 'yes', outputType: module.output.type }),
-                  ...(module.output === undefined ? {} : { outputType: module.output.type }),
-                  inputs: module.inputs.map((input) => `${input.name}:${input.type}`),
-                },
-              }),
-            )}
-        >${module.name} v${module.version}</button>
-        <button data-edit-module=${module.id} @click=${() => this.enterModule(module.id)}>编辑</button>
-        <button data-export-module=${module.id} @click=${() => this.exportModule(module.id)}>导出</button>
-        </span>`,
-      )}
-    </section>`;
+    this.run((state) =>
+      addNode(state, {
+        kind: module.kind === 'flow' ? NODE.moduleCall : NODE.moduleData,
+        params: moduleCallParams(module),
+      }),
+    );
   }
 
-  /** 已建的分组：只列名字与解组入口；分组是布局，改它不需要重新编译。 */
-  private renderGroups() {
-    const groups = this.editor.document.groups ?? [];
-    if (groups.length === 0) return nothing;
-    return html`<section class="modules">
-      <h3>分组</h3>
-      ${groups.map(
-        (group) => html`<button data-group=${group.id} @click=${() => this.setEditor(ungroup(this.editor, group.id))}
-          >${group.name} · ${group.members.length} 个节点（解组）</button
-        >`,
-      )}
-    </section>`;
-  }
-
-  private renderInspector(
-    selected: readonly { id: string; kind: string; params: Record<string, ParamValue> }[],
-    challenge: PublicChallenge,
-  ) {
-    if (selected.length === 0) {
-      return html`<aside class="inspector" aria-label="检查器">
-        <p>选中节点后可在这里改参数。</p>
-        <p>快捷键：<code>Delete</code> 删除、<code>Ctrl+Z/Y</code> 撤销/重做、<code>Ctrl+C/V</code> 复制/粘贴、
-          <code>方向键</code> 微调、<code>f</code> 适应窗口、<code>c</code> 键盘接线。</p>
-      </aside>`;
-    }
-    if (selected.length > 1) {
-      return html`<aside class="inspector" aria-label="检查器">
-        <p>已选中 ${selected.length} 个节点。</p>
-        <button @click=${() => this.run((state) => removeNodes(state, this.editor.selection))}>删除选中</button>
-      </aside>`;
-    }
-    const node = selected[0];
-    if (node === undefined) return nothing;
-    const spec = nodeSpec(node.kind);
-    const declared = spec === undefined ? [] : nodeParams(spec, defaultParams(spec));
-    // 动态输入（题目积木参数、变参）同样是「可手填可接线」的参数，检查器必须给输入框，
-    // 否则用户只能看到端口、没有任何地方填值（06 §3）。
-    const dynamic = spec?.dynamicInputs?.(node.params, this.portContext(challenge)) ?? [];
-    const specs = [
-      ...declared,
-      ...dynamic
-        .filter((input) => !declared.some((param) => param.name === input.name))
-        .map((input) => ({
-          name: input.name,
-          label: input.label,
-          kind: (input.type === 'bytes' ? 'hex' : input.type === 'int' ? 'int' : 'text') as ParamSpec['kind'],
-          default: input.type === 'bytes' ? '' : 0,
-          port: input.type,
-        })),
-    ];
-    const lookup = lookupGraph(this.editor.document);
-    const placement = lookup.placements.get(node.id);
-    const container = placement?.container;
-    const isContainer = spec !== undefined && nodeRegions(spec, node.params).length > 0;
-    const collapsed = this.editor.document.layout[node.id]?.collapsed === true;
-    const upgrade = upgradeTargetOf(this.editor.document, node);
-    return html`<aside class="inspector" aria-label="检查器">
-      <h3>${spec?.label ?? node.kind}</h3>
-      <p><code>${node.id}</code></p>
-      ${placement === undefined
-        ? nothing
-        : html`<div class="row">
-            <button ?disabled=${placement.index === 0} @click=${() => this.run((state) => reorder(state, node.id, -1))}>前移</button>
-            <button @click=${() => this.run((state) => reorder(state, node.id, 1))}>后移</button>
-            ${container === undefined
-              ? nothing
-              : html`<button @click=${() => this.setEditor(moveOut(this.editor, [node.id]))}>移出容器</button>`}
-          </div>`}
-      ${specs.map((param) => this.renderParam(node.id, param, challenge))} ${this.renderSegments(node)}
-      ${upgrade === undefined
-        ? nothing
-        : html`<div class="row">
-            <button @click=${() => this.upgrade(node.id)}>升级到 v${upgrade.version}</button>
-            <span class="hint">输入与结果类型不变才能升级</span>
-          </div>`}
-      <div class="row">
-        <button @click=${() => this.canvas()?.focusNode(node.id)}>定位</button>
-        ${isContainer
-          ? html`<button @click=${() => this.setEditor(setCollapsed(this.editor, node.id, !collapsed))}>
-              ${collapsed ? '展开容器' : '折叠容器'}
-            </button>`
-          : nothing}
-        <button @click=${() => this.run((state) => removeNodes(state, [node.id]))}>删除</button>
-      </div>
-    </aside>`;
-  }
-
-  private renderParam(nodeId: string, param: ParamSpec, challenge: PublicChallenge) {
-    const node = this.editor.document.nodes.find((candidate) => candidate.id === nodeId);
-    if (node === undefined) return nothing;
-    const value = node.params[param.name] ?? param.default;
-    const reason = checkParam(param, value);
-    const error = reason === undefined ? nothing : html`<span class="bad">${reason}</span>`;
-    const update = (next: ParamValue) => {
-      const edited = setParam(this.editor, nodeId, param.name, next, this.portContext(challenge));
-      // 手动填值就是选择「手填」：否则必填的端口参数会一直报「缺少输入」，即使输入框里已有值。
-      this.setEditor(
-        param.port === undefined ? edited : setPortMode(edited, nodeId, param.name, 'inline'),
-      );
-    };
-
-    const modeSwitch = param.port === undefined ? nothing : this.renderPortMode(nodeId, param.name);
-
-    if (param.kind === 'select' || param.kind === 'type') {
-      const options =
-        param.kind === 'select' ? (param.options ?? []) : (param.options ?? []);
-      return html`<div class="param">
-        <label for=${`${nodeId}-${param.name}`}>${param.label}</label>
-        <select
-          id=${`${nodeId}-${param.name}`}
-          @change=${(event: Event) => update((event.target as HTMLSelectElement).value)}
-        >
-          ${options.map(
-            (option) => html`<option value=${option.value} ?selected=${String(value) === option.value}>
-              ${option.label}
-            </option>`,
-          )}
-        </select>
-        ${error}
-      </div>`;
-    }
-    if (param.kind === 'code' || param.kind === 'portList') {
-      const text = Array.isArray(value) ? value.join(',') : String(value);
-      return html`<div class="param">
-        <label for=${`${nodeId}-${param.name}`}>${param.label}</label>
-        <textarea
-          id=${`${nodeId}-${param.name}`}
-          .value=${text}
-          @change=${(event: Event) => {
-            const raw = (event.target as HTMLTextAreaElement).value;
-            update(param.kind === 'portList' ? splitPorts(raw) : raw);
-          }}
-        ></textarea>
-        ${error}
-      </div>`;
-    }
-    return html`<div class="param">
-      <label for=${`${nodeId}-${param.name}`}>${param.label}</label>
-      <input
-        id=${`${nodeId}-${param.name}`}
-        .value=${String(value)}
-        @change=${(event: Event) => update(coerce(param, (event.target as HTMLInputElement).value))}
-      />
-      ${error} ${modeSwitch}
-    </div>`;
-  }
-
-  /** 组装预览：逐段显示偏移、长度与来源，编译前就能看出各段落在哪。 */
-  private renderSegments(node: WorkspaceNodeLike) {
-    if (node.kind !== NODE.assemble) return nothing;
-    const preview = this.artifact?.previews.find((item) => item.nodeId === node.id);
-    const segments = preview?.segments;
-    if (segments === undefined || segments.length === 0) return nothing;
-    const lookup = lookupGraph(this.editor.document);
-    const selected = this.segmentFocus?.nodeId === node.id ? this.segmentFocus.port : undefined;
-    const focus = segments.find((segment) => segment.port === selected);
-    return html`<table class="segments">
-      <thead><tr><th>段</th><th>偏移</th><th>长度</th><th>来源</th></tr></thead>
-      <tbody>
-        ${segments.map((segment) => {
-          const incoming = lookup.incoming.get(`${node.id}\u0000${segment.port}`);
-          return html`<tr class=${segment.port === selected ? 'selected' : ''}>
-            <td><button class="link" @click=${() => this.focusSegment(node.id, segment)}>
-              <code>${segment.port}</code>
-            </button></td>
-            <td>+${String(segment.offset)}</td>
-            <td>${String(segment.length)}</td>
-            <td>${incoming === undefined ? '手填' : incoming.source}</td>
-          </tr>`;
-        })}
-      </tbody>
-    </table>
-    ${focus === undefined ? nothing : this.renderSegmentBytes(preview, focus)}`;
-  }
-
-  /** 选中分段后显示它的字节：预览只保留前 64 字节，超出时明确说明而不是假装全有。 */
-  private renderSegmentBytes(preview: NodePreview | undefined, segment: PreviewSegment) {
-    const hex = preview?.hex;
-    if (hex === undefined) return html`<p class="hint">这一段没有字节预览。</p>`;
-    const start = segment.offset * 2;
-    const end = start + segment.length * 2;
-    if (start >= hex.length) {
-      return html`<p class="hint">这一段从第 ${String(segment.offset)} 字节开始，超出预览的 64 字节上限。</p>`;
-    }
-    const slice = hex.slice(start, Math.min(end, hex.length));
-    const truncated = end > hex.length ? '（预览截断）' : '';
-    return html`<p class="hint">第 ${String(segment.offset)} 字节起：<code>${slice}</code>${truncated}</p>`;
-  }
-
-  private focusSegment(nodeId: string, segment: PreviewSegment): void {
-    const same = this.segmentFocus?.nodeId === nodeId && this.segmentFocus.port === segment.port;
-    this.segmentFocus = same ? undefined : { nodeId, port: segment.port };
-    this.requestUpdate();
-    if (!same) void this.updateComplete.then(() => this.canvas()?.centerOnPort(nodeId, segment.port));
-  }
-
-  /** 一个端口的来源切换：手填会断线，接线要求必须有线（缺线由编译报 missing_input）。 */
-  private renderPortMode(nodeId: string, port: string) {
-    const node = this.editor.document.nodes.find((candidate) => candidate.id === nodeId);
-    if (node === undefined) return nothing;
-    const lookup = lookupGraph(this.editor.document);
-    const incoming = lookup.incoming.get(`${nodeId}\u0000${port}`);
-    const mode = node.params[`${port}Mode`];
-    const current = mode === 'inline' || mode === 'port' ? mode : incoming === undefined ? 'inline' : 'port';
-    return html`<div class="row">
-      <span class="hint">${incoming === undefined ? '手填值' : `接线自 ${incoming.source}`}</span>
-      <button
-        ?disabled=${current === 'inline'}
-        @click=${() => this.setEditor(setPortMode(this.editor, nodeId, port, 'inline'))}
-      >手填</button>
-      <button
-        ?disabled=${current === 'port'}
-        @click=${() => this.setEditor(setPortMode(this.editor, nodeId, port, 'port'))}
-      >接线</button>
-    </div>`;
-  }
-
-  private renderIssues() {
-    if (this.issues.length === 0) return nothing;
-    return html`<p>问题 ${this.issues.length} 条</p>
-      <ul class="issues">
-        ${this.issues.slice(0, 12).map(
-          (issue) => html`<li class=${issue.severity}>
-            ${issue.nodeId === ''
-              ? nothing
-              : html`<button class="link" @click=${() => this.locate({ nodeId: issue.nodeId })}>
-                  定位
-                </button>
-                <code>${issue.nodeId}</code> `}
-            ${issue.message}
-          </li>`,
-        )}
-      </ul>`;
-  }
-
-  /** 存档读取失败：说明原因、列出旧积木的具体问题，并提供原文导出（不覆盖、不猜）。 */
-  private renderLoadFailure() {
-    const failure = this.loadFailure;
-    if (failure === undefined) return nothing;
-    return html`<div class="load-failure">
-      <p class="bad">${failure.reason}</p>
-      ${failure.issues === undefined || failure.issues.length === 0
-        ? nothing
-        : html`<ul class="issues">
-            ${failure.issues.map((issue) => html`<li class="warning">${issue}</li>`)}
-          </ul>`}
-      ${failure.raw === undefined
-        ? nothing
-        : html`<button @click=${() => this.downloadRaw(failure.raw as string)}>导出原文</button>`}
-    </div>`;
-  }
-
-  /** 编译轨迹：分支选择、循环轮次、模块路径；点一条回到对应节点（06 §8）。 */
-  private renderTrace() {
-    const trace = this.artifact?.trace ?? [];
-    if (trace.length === 0) return nothing;
-    return html`<details class="trace">
-      <summary>编译轨迹 ${trace.length} 条</summary>
-      <ol>
-        ${trace.slice(0, 40).map(
-          (entry) => html`<li>
-            <button class="link" @click=${() => this.locate({ nodeId: entry.nodeId, path: entry.path, ...(entry.rounds === undefined ? {} : { rounds: entry.rounds }) })}>
-              ${entry.nodeId}
-            </button>
-            ${entry.rounds === undefined
-              ? ''
-              : html`<span class="hint">${Object.entries(entry.rounds).map(([id, round]) => `${id} 第 ${round + 1} 轮`).join('、')} </span>`}
-            ${entry.message}
-          </li>`,
-        )}
-      </ol>
-    </details>`;
-  }
-
-  // ------------------------------------------------------------------ 状态
+  // ------------------------------------------------------------ 存档
 
   private ensureLoaded(challenge: PublicChallenge): void {
     if (this.loadedFor === challenge.id) return;
@@ -730,16 +532,27 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.persistFailed = false;
     this.loadFailure = undefined;
     this.loadNote = '';
+    this.archiveLocked = false;
+    this.editingNodeId = undefined;
     if (!loaded.ok) {
       this.editor = createEditor(emptyGraphDocument());
-      this.status = '还没有编译。搭好图后点「编译」。';
-      if (loaded.raw !== undefined) {
-        this.loadFailure = { reason: loaded.reason, raw: loaded.raw, ...(loaded.issues === undefined ? {} : { issues: loaded.issues }) };
+      this.status = '画布是空的：从左侧节点库添加节点。';
+      if (loaded.kind === 'corrupt') {
+        this.archiveLocked = true;
+        this.loadFailure = {
+          reason: loaded.reason,
+          raw: loaded.raw,
+          ...(loaded.issues === undefined ? {} : { issues: loaded.issues }),
+        };
+        this.status = '存档读不出来：已保留原文，暂时不写入新存档。';
       }
       return;
     }
     this.editor = createEditor(loaded.document);
-    this.status = '已恢复上次的图，还没有编译。';
+    this.status =
+      loaded.document.nodes.length === 0
+        ? '画布是空的：从左侧节点库添加节点。'
+        : '已恢复上次的图，还没有编译。';
     if (loaded.source === 'interim') this.loadNote = '已把上一阶段的画布存档升到新格式；旧存档保留，可回滚。';
     if (loaded.source === 'blockly') {
       this.loadNote = '已从旧积木存档迁移；旧存档原样保留，可回滚。';
@@ -754,6 +567,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private persist(): void {
     const challenge = this.challenge;
     if (challenge === undefined) return;
+    if (this.archiveLocked) return;
     const document = this.mainEditor?.document ?? this.editor.document;
     const ok = saveGraph(this.storage(), challenge.id, document);
     if (!ok && !this.persistFailed) {
@@ -763,9 +577,76 @@ export class Pwn2BlockGraphPanel extends LitElement {
     if (ok) this.persistFailed = false;
   }
 
+  /** 用户明确放弃损坏存档：清掉坏存档、解锁写入，之后才开始保存新内容。 */
+  private discardCorruptArchive(): void {
+    const challenge = this.challenge;
+    if (challenge === undefined) return;
+    clearGraph(this.storage(), challenge.id);
+    this.archiveLocked = false;
+    this.loadFailure = undefined;
+    this.status = '已放弃损坏存档，从现在开始保存新画布。';
+    this.persist();
+    this.requestUpdate();
+  }
+
+  /** 模块导出必须带上它调用到的模块：缺依赖的文件在导入时会被拒绝。 */
+  private exportModule(moduleId: string): void {
+    const document = this.mainEditor?.document ?? this.editor.document;
+    const bundle = collectModuleBundle(document, moduleId);
+    if (bundle === undefined) {
+      this.say(`找不到模块 ${moduleId}`);
+      return;
+    }
+    this.download(`${moduleId}-module.json`, JSON.stringify(bundle, null, 2));
+  }
+
+  private download(name: string, content: string): void {
+    const blob = new Blob([content], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement('a');
+    anchor.href = url;
+    anchor.download = name;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** 导出当前图：包装里带依赖表，换机器/换版本打开时能自证模块齐全。 */
+  private exportGraph(): void {
+    const challenge = this.challenge;
+    if (challenge === undefined) return;
+    const document = this.mainEditor?.document ?? this.editor.document;
+    this.download('pwn2block-graph.json', JSON.stringify(makeGraphSave(challenge.id, document), null, 2));
+  }
+
+  /** 导入先校验再替换；失败时原图不动，只报原因。兼容裸图与带依赖的包装。 */
+  private async importGraph(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file === undefined) return;
+    const raw = await file.text();
+    const parsed = safeJson(raw);
+    if (parsed === 'invalid') {
+      this.say('导入失败：不是合法 JSON，原图未改动');
+      return;
+    }
+    const challenge = this.challenge;
+    const wrapped = challenge === undefined ? undefined : parseGraphSave(parsed, challenge.id);
+    const graphText = wrapped !== undefined && wrapped.ok ? JSON.stringify(wrapped.value.document) : raw;
+    const result = importDocument(this.editor, graphText);
+    if (!result.ok) {
+      this.say(result.message);
+      return;
+    }
+    this.setEditor(result.state);
+    this.say('已导入图，原图可撤销恢复');
+  }
+
+  // ------------------------------------------------------------ 编辑器状态
+
   private setEditor(next: GraphEditorState): void {
     if (this.mainEditor !== undefined && this.editingModuleId !== undefined) {
-      // 只改选中：画布与检查器要立刻反映，但不写回主图、不涨语义版本。
+      // 只改选中：画布与属性面板要立刻反映，但不写回主图、不涨语义版本。
       if (next.document === this.editor.document) {
         this.editor = next;
         this.requestUpdate();
@@ -791,9 +672,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
       }
       this.editor = view;
       this.persist();
-      if (semanticChanged) {
-        this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
-      }
+      if (semanticChanged) this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
       this.requestUpdate();
       return;
     }
@@ -802,9 +681,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     if (semanticChanged) this.abort?.abort();
     this.editor = next;
     this.persist();
-    if (semanticChanged) {
-      this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
-    }
+    if (semanticChanged) this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
     this.requestUpdate();
   }
 
@@ -891,17 +768,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.say(`已提取为模块 ${result.moduleId}`);
   }
 
-  /** 显式升级模块调用：不做自动升级，失败时保留原版本。 */
-  private upgrade(nodeId: string): void {
-    const result = upgradeModule(this.editor, nodeId);
-    if (!result.ok) {
-      this.say(result.message);
-      return;
-    }
-    this.setEditor(result.state);
-    this.say('已升级到新版本');
-  }
-
   /** 把产物交给页面壳写进运行追踪器；来源用节点 id 表示（runner 的 blockId 口径）。 */
   private publish(artifact: WorkflowArtifact): void {
     this.dispatchEvent(
@@ -916,62 +782,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     );
   }
 
-  /** 导出当前图：包装里带依赖表，换机器/换版本打开时能自证模块齐全。 */
-  private exportGraph(): void {
-    const challenge = this.challenge;
-    if (challenge === undefined) return;
-    const document = this.mainEditor?.document ?? this.editor.document;
-    this.download('pwn2block-graph.json', JSON.stringify(makeGraphSave(challenge.id, document), null, 2));
-  }
-
-  /** 导入先校验再替换；失败时原图不动，只报原因。兼容裸图与带依赖的包装。 */
-  private async importGraph(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (file === undefined) return;
-    const raw = await file.text();
-    const parsed = safeJson(raw);
-    if (parsed === 'invalid') {
-      this.say('导入失败：不是合法 JSON，原图未改动');
-      return;
-    }
-    const challenge = this.challenge;
-    const wrapped = challenge === undefined ? undefined : parseGraphSave(parsed, challenge.id);
-    const graphText = wrapped !== undefined && wrapped.ok ? JSON.stringify(wrapped.value.document) : raw;
-    const result = importDocument(this.editor, graphText);
-    if (!result.ok) {
-      this.say(result.message);
-      return;
-    }
-    this.setEditor(result.state);
-    this.say('已导入图，原图可撤销恢复');
-  }
-
-  /** 模块导出必须带上它调用到的模块：缺依赖的文件在导入时会被拒绝。 */
-  private exportModule(moduleId: string): void {
-    const document = this.mainEditor?.document ?? this.editor.document;
-    const bundle = collectModuleBundle(document, moduleId);
-    if (bundle === undefined) {
-      this.say(`找不到模块 ${moduleId}`);
-      return;
-    }
-    this.download(`${moduleId}-module.json`, JSON.stringify(bundle, null, 2));
-  }
-
-  private download(name: string, content: string): void {
-    const blob = new Blob([content], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = name;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
-  private downloadRaw(raw: string): void {
-    this.download('pwn2block-old-save.json', raw);
-  }
+  // ------------------------------------------------------------ 对外接口
 
   /**
    * 定位一个节点（供输出面板、问题列表与轨迹共用）。
@@ -985,20 +796,19 @@ export class Pwn2BlockGraphPanel extends LitElement {
       this.say('来源未知：这条记录对应的节点已不在图里（可能被删除或存档来自另一版本）');
       return;
     }
-    const expanded = withDocument(base, target.document, 'layout');
+    const expanded = withDocumentOf(base, target.document, 'layout');
     const next = { ...expanded, selection: [target.nodeId] };
     if (target.moduleId !== undefined) {
-      // 进模块视图：主图留在这份展开后的状态，之后的编辑经 withModuleBody 写回。
       this.mainEditor = next;
       this.editingModuleId = target.moduleId;
       const view = moduleViewState(next, target.moduleId, [target.nodeId]);
       if (view !== undefined) this.editor = view;
     } else {
-      // 定位主图节点时不能留下 `mainEditor`：否则后续编辑会被当成「模块体编辑」写不回去。
       this.mainEditor = undefined;
       this.editingModuleId = undefined;
       this.editor = next;
     }
+    this.editingNodeId = target.nodeId;
     this.persist();
     this.say(target.detail);
     this.requestUpdate();
@@ -1033,15 +843,20 @@ export class Pwn2BlockGraphPanel extends LitElement {
     return this.compile();
   }
 
-  /** 旧 Blockly 面板的同名接口：画布没有「装载一次」的动作，返回 `undefined` 表示无需提示。 */
+  /** 画布没有「装载一次」的动作，返回 `undefined` 表示无需提示。 */
   restoreArchive(): string | undefined {
     return undefined;
   }
 
-  /** 旧 Blockly 面板的同名接口：画布在每次编辑时已写入，提交前无需再存。 */
+  /** 画布在每次编辑时已写入，提交前无需再存。 */
   saveArchive(): string | undefined {
     this.persist();
     return undefined;
+  }
+
+  /** 属性面板正在编辑的节点；`undefined` 表示没有选中。 */
+  currentEditingNode(): string | undefined {
+    return this.editingNodeId;
   }
 
   private say(message: string): void {
@@ -1068,6 +883,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     switch (edit.type) {
       case 'select':
         this.setEditor(select(this.editor, edit.ids));
+        if (edit.ids.length === 1) this.editingNodeId = edit.ids[0];
         return;
       case 'move':
         this.setEditor(moveNodes(this.editor, edit.moves));
@@ -1078,6 +894,18 @@ export class Pwn2BlockGraphPanel extends LitElement {
         else this.setEditor(result.state);
         return;
       }
+      case 'rewire': {
+        const result = rewire(this.editor, this.portContextOf(), edit.edge, edit.end, edit.to);
+        if (!result.ok) this.say(result.message);
+        else this.setEditor(result.state);
+        return;
+      }
+      case 'param':
+        this.setEditor(setInlineParam(this.editor, edit.nodeId, edit.name, edit.value, this.portContextOf()));
+        return;
+      case 'portMode':
+        this.setEditor(setPortMode(this.editor, edit.nodeId, edit.port, edit.mode));
+        return;
       case 'delete':
         this.setEditor(removeNodes(this.editor, edit.ids));
         return;
@@ -1099,20 +927,66 @@ export class Pwn2BlockGraphPanel extends LitElement {
     }
   }
 
+  /** 属性面板的修改：走与节点内完全相同的编辑命令，所以撤销一次就是一次修改。 */
+  private onInspectorParam(name: string, value: ParamValue): void {
+    const nodeId = this.editor.selection[0];
+    if (nodeId === undefined) return;
+    this.setEditor(setInlineParam(this.editor, nodeId, name, value, this.portContextOf()));
+  }
+
+  private onInspectorMode(port: string, mode: 'inline' | 'port'): void {
+    const nodeId = this.editor.selection[0];
+    if (nodeId === undefined) return;
+    this.setEditor(setPortMode(this.editor, nodeId, port, mode));
+  }
+
+  private onInspectorAction(action: string): void {
+    const nodeId = this.editor.selection[0];
+    if (nodeId === undefined) return;
+    switch (action) {
+      case 'focus':
+        this.canvas()?.focusNode(nodeId);
+        return;
+      case 'delete':
+        this.setEditor(removeNodes(this.editor, [nodeId]));
+        return;
+      case 'collapse':
+        this.setEditor(setCollapsed(this.editor, nodeId, true));
+        return;
+      case 'expand':
+        this.setEditor(setCollapsed(this.editor, nodeId, false));
+        return;
+      case 'move-out':
+        this.setEditor(moveOut(this.editor, [nodeId]));
+        return;
+      default:
+        this.say(`未知操作：${action}`);
+    }
+  }
+
+  /** 点节点上的「配置」或双击：选中它并把注意力交回属性面板。 */
+  private openInspector(nodeId: string): void {
+    this.editingNodeId = nodeId;
+    this.setEditor(select(this.editor, [nodeId]));
+    void this.updateComplete.then(() => {
+      const inspector = this.shadowRoot?.querySelector<Pwn2BlockNodeInspector>('pwn2block-node-inspector');
+      inspector?.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
   private canvas(): Pwn2BlockGraphCanvas | undefined {
     return this.shadowRoot?.querySelector('pwn2block-graph-canvas') ?? undefined;
   }
 
   private portContextOf() {
     const challenge = this.challenge;
-    return this.portContext(challenge as PublicChallenge);
+    return challenge === undefined
+      ? { archBits: 64 as const }
+      : { archBits: challenge.archBits, authorBlocks: challenge.authorBlocks };
   }
 
   private portContext(challenge: PublicChallenge) {
-    return {
-      archBits: challenge.archBits,
-      authorBlocks: challenge.authorBlocks,
-    };
+    return { archBits: challenge.archBits, authorBlocks: challenge.authorBlocks };
   }
 
   /** 编译：本地求值 + 生成动作，只更新预览与问题，不发送任何请求。 */
@@ -1170,24 +1044,20 @@ export class Pwn2BlockGraphPanel extends LitElement {
   }
 }
 
-function splitPorts(raw: string): readonly string[] {
-  return raw
-    .split(/[,，\s]+/)
-    .map((part) => part.trim())
-    .filter((part) => part !== '');
-}
-
-/** 输入框里的字符串按参数类型转换；转换不了就原样交给校验器报错。 */
-function coerce(param: ParamSpec, raw: string): ParamValue {
-  if (param.kind === 'int') {
-    const trimmed = raw.trim();
-    if (/^0x[0-9a-fA-F]+$/.test(trimmed)) return Number.parseInt(trimmed.slice(2), 16);
-    if (/^-?\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
-    return raw;
-  }
-  // `hex` 是字节串（`4141`），不是数字：全数字的字节串不能按十进制吞掉。
-  if (param.kind === 'hex') return raw.trim();
-  return raw;
+function withDocumentOf(
+  state: GraphEditorState,
+  document: GraphDocument,
+  kind: 'layout' | 'semantic',
+): GraphEditorState {
+  return {
+    ...state,
+    document,
+    ...(kind === 'semantic'
+      ? { semanticRevision: state.semanticRevision + 1 }
+      : { layoutRevision: state.layoutRevision + 1 }),
+    past: [...state.past, state.document].slice(-50),
+    future: [],
+  };
 }
 
 function safeJson(raw: string): unknown | 'invalid' {

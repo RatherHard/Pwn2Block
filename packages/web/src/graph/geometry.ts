@@ -1,19 +1,36 @@
-import { nodeInputs, nodeOutput, nodeSpec } from '@pwn2block/shared';
-import type { GraphNode, NodeKindSpec, NodeLayout, ParamValues, PortContext, PortType } from '@pwn2block/shared';
-
+import { nodeInputs, nodeOutput, nodeSpec, nodeParams } from '@pwn2block/shared';
+import type {
+  GraphNode,
+  InputPortSpec,
+  NodeKindSpec,
+  NodeLayout,
+  ParamSpec,
+  ParamValue,
+  ParamValues,
+  PortContext,
+  PortType,
+} from '@pwn2block/shared';
+import { orthogonalRoute, type RouteEnd } from './routing';
 
 /**
- * 画布几何（06 §3）：节点尺寸、端口位置、连线走法、视口变换与命中测试。
+ * 画布几何（06 §3；10 §3）：节点尺寸、端口位置、连线走法、视口变换与命中测试。
  *
  * 全部是纯函数，不碰 DOM：组件只负责把这里算出的矩形与折线画出来。这样「点击端口接线」
  * 这类交互可以在测试里用坐标断言，而不必截图或模拟浏览器布局。
+ *
+ * 本轮的模型变化（10 §2.2）：**每个参数占一行**，可接线的参数在同一行左侧同时是输入端口。
+ * 因此节点高度由「行数」决定，行序决定端口 y 坐标——画布、命中测试和连线都读这一份。
  */
 
-export const NODE_WIDTH = 208;
+export const NODE_WIDTH = 232;
 export const HEADER_HEIGHT = 26;
-export const PORT_ROW = 20;
-export const PORT_SIZE = 8;
-export const BODY_PADDING = 10;
+/** 一行（参数或纯端口）的高度。 */
+export const PORT_ROW = 24;
+/** 兼容旧名字：行高就是端口的纵向步距。 */
+export const ROW_HEIGHT = PORT_ROW;
+export const FOOTER_HEIGHT = 18;
+export const PORT_SIZE = 10;
+export const BODY_PADDING = 2;
 
 export interface Point {
   readonly x: number;
@@ -46,6 +63,20 @@ export interface PortAnchor extends Point {
   readonly flow: 'data' | 'exec';
 }
 
+/** 节点内的一行：参数行、纯端口行或输出行。 */
+export interface NodeRowModel {
+  /** 唯一键：参数名或端口名。 */
+  readonly key: string;
+  readonly label: string;
+  readonly param?: ParamSpec;
+  readonly input?: { readonly name: string; readonly type: PortType; readonly required: boolean };
+  readonly output?: { readonly name: string; readonly type: PortType };
+  /** 参数当前值的摘要（没有参数时为空串）。 */
+  readonly value: string;
+  /** 参数错误原因（节点内只标红 + 提示，完整文案在属性面板）。 */
+  readonly error?: string;
+}
+
 export interface NodeBox {
   readonly id: string;
   readonly x: number;
@@ -54,12 +85,15 @@ export interface NodeBox {
   readonly height: number;
   readonly header: string;
   readonly subtitle: string;
+  readonly rows: readonly NodeRowModel[];
   readonly inputs: readonly PortAnchor[];
   readonly outputs: readonly PortAnchor[];
   readonly execIn?: PortAnchor;
   readonly execOut?: PortAnchor;
   readonly error: boolean;
   readonly selected: boolean;
+  /** 行在节点内的纵向偏移（相对节点顶部）。 */
+  readonly rowTops: readonly number[];
 }
 
 export interface GeometryOptions {
@@ -68,7 +102,63 @@ export interface GeometryOptions {
   readonly errorNodes?: readonly string[];
 }
 
-/** 节点框：高度按端口行数算，数据端口左右对齐，执行端口上下对齐。 */
+/** 节点内行模型：参数行在前（保持目录顺序），纯端口行在后，输出行最后。 */
+export function nodeRows(
+  node: GraphNode,
+  spec: NodeKindSpec,
+  context: PortContext,
+): readonly NodeRowModel[] {
+  const declared = nodeParams(spec, node.params);
+  const ports: readonly InputPortSpec[] = nodeInputs(spec, node.params, context);
+  const byName = new Map(ports.map((port) => [port.name, port]));
+  const rows: NodeRowModel[] = [];
+  const used = new Set<string>();
+  for (const param of declared) {
+    const input = byName.get(param.name);
+    if (input !== undefined) used.add(param.name);
+    rows.push({
+      key: param.name,
+      label: param.label,
+      param,
+      ...(input === undefined
+        ? {}
+        : { input: { name: input.name, type: input.type, required: input.required } }),
+      value: summarizeParam(param, node.params[param.name]),
+    });
+  }
+  for (const input of ports) {
+    if (used.has(input.name)) continue;
+    rows.push({
+      key: input.name,
+      label: input.label,
+      input: { name: input.name, type: input.type, required: input.required },
+      value: '',
+    });
+  }
+  const output = nodeOutput(spec, node.params);
+  if (output !== undefined) {
+    rows.push({ key: output.name, label: '结果', output: { name: output.name, type: output.type }, value: '' });
+  }
+  return rows;
+}
+
+/** 参数值的一行摘要：太长就截断，完整值在属性面板里。 */
+export function summarizeParam(param: ParamSpec, value: ParamValue | undefined): string {
+  if (param.kind === 'code') {
+    const text = typeof value === 'string' ? value : '';
+    const lines = text === '' ? 0 : text.split('\n').length;
+    return `${lines} 行代码`;
+  }
+  if (param.kind === 'portList') {
+    const list = Array.isArray(value) ? value : [];
+    return list.length === 0 ? '没有命名输入' : list.join(', ');
+  }
+  if (Array.isArray(value)) return value.join(', ');
+  const text = value === undefined ? '' : String(value);
+  return text.length <= 28 ? text : `${text.slice(0, 27)}…`;
+}
+
+/** 节点框：高度按行数算，数据端口左右对齐，执行端口上下对齐。 */
 export function nodeBox(
   node: GraphNode,
   placement: NodeLayout,
@@ -76,38 +166,38 @@ export function nodeBox(
 ): NodeBox | undefined {
   const spec = nodeSpec(node.kind);
   if (spec === undefined) return undefined;
-  const params: ParamValues = node.params;
-  const inputs = nodeInputs(spec, params, options.context);
-  const output = nodeOutput(spec, params);
-  const rows = Math.max(inputs.length, output === undefined ? 0 : 1, 1);
-  const height = HEADER_HEIGHT + rows * PORT_ROW + BODY_PADDING;
+  const rows = nodeRows(node, spec, options.context);
+  const height = HEADER_HEIGHT + rows.length * ROW_HEIGHT + FOOTER_HEIGHT + BODY_PADDING;
   const boxX = placement.x;
   const boxY = placement.y;
-  const startY = boxY + HEADER_HEIGHT + PORT_ROW / 2;
-
-  const inputAnchors = inputs.map((input, index) => ({
-    nodeId: node.id,
-    port: input.name,
-    type: input.type,
-    kind: 'in' as const,
-    flow: 'data' as const,
-    x: boxX,
-    y: startY + index * PORT_ROW,
-  }));
-  const outputAnchors: PortAnchor[] =
-    output === undefined
-      ? []
-      : [
-          {
-            nodeId: node.id,
-            port: output.name,
-            type: output.type,
-            kind: 'out',
-            flow: 'data',
-            x: boxX + NODE_WIDTH,
-            y: startY,
-          },
-        ];
+  const rowTops = rows.map((_, index) => HEADER_HEIGHT + index * ROW_HEIGHT);
+  const inputAnchors: PortAnchor[] = [];
+  const outputAnchors: PortAnchor[] = [];
+  rows.forEach((row, index) => {
+    const centerY = boxY + HEADER_HEIGHT + index * ROW_HEIGHT + ROW_HEIGHT / 2;
+    if (row.input !== undefined) {
+      inputAnchors.push({
+        nodeId: node.id,
+        port: row.input.name,
+        type: row.input.type,
+        kind: 'in',
+        flow: 'data',
+        x: boxX,
+        y: centerY,
+      });
+    }
+    if (row.output !== undefined) {
+      outputAnchors.push({
+        nodeId: node.id,
+        port: row.output.name,
+        type: row.output.type,
+        kind: 'out',
+        flow: 'data',
+        x: boxX + NODE_WIDTH,
+        y: centerY,
+      });
+    }
+  });
 
   const execIn = spec.exec
     ? {
@@ -139,13 +229,15 @@ export function nodeBox(
     width: NODE_WIDTH,
     height,
     header: spec.label,
-    subtitle: subtitleOf(spec, params),
+    subtitle: subtitleOf(spec, node.params),
+    rows,
     inputs: inputAnchors,
     outputs: outputAnchors,
     ...(execIn === undefined ? {} : { execIn }),
     ...(execOut === undefined ? {} : { execOut }),
     error: (options.errorNodes ?? []).includes(node.id),
     selected: (options.selection ?? []).includes(node.id),
+    rowTops,
   };
 }
 
@@ -169,7 +261,11 @@ export function allPorts(box: NodeBox): readonly PortAnchor[] {
   ];
 }
 
-/** 正交折线：数据边横向走、执行边纵向走，中点错开避免线叠在一起。 */
+/**
+ * 正交折线：数据边横向走、执行边纵向走，中点错开避免线叠在一起。
+ *
+ * 画布本身走 `routing.ts`（带节点框避障）；这个函数保留给纯几何断言与不关心避障的调用方。
+ */
 export function edgePath(from: PortAnchor, to: PortAnchor): string {
   if (from.flow === 'exec') {
     const midY = from.y + Math.max(18, (to.y - from.y) / 2);
@@ -183,6 +279,11 @@ export function edgePath(from: PortAnchor, to: PortAnchor): string {
 export function dragPath(from: Point, to: Point): string {
   const midX = from.x + Math.max(28, (to.x - from.x) / 2);
   return `M ${from.x} ${from.y} L ${midX} ${from.y} L ${midX} ${to.y} L ${to.x} ${to.y}`;
+}
+
+/** 端口锚点 → 路由端点（临时连线与预览共用）。 */
+export function routeEndOf(anchor: PortAnchor): RouteEnd {
+  return { x: anchor.x, y: anchor.y, flow: anchor.flow, kind: anchor.kind };
 }
 
 export function boxContains(box: NodeBox, point: Point): boolean {
@@ -215,6 +316,20 @@ export function hitTest(boxes: readonly NodeBox[], point: Point): HitTarget | un
   return undefined;
 }
 
+/** 单个端口命中：接线、改接的落点判定都用它。 */
+export function portHitTest(
+  boxes: readonly NodeBox[],
+  point: Point,
+  radius = PORT_SIZE,
+): PortAnchor | undefined {
+  for (const box of boxes) {
+    for (const port of allPorts(box)) {
+      if (Math.abs(port.x - point.x) <= radius && Math.abs(port.y - point.y) <= radius) return port;
+    }
+  }
+  return undefined;
+}
+
 export function rectsIntersect(a: { x: number; y: number; width: number; height: number }, b: {
   readonly x: number;
   readonly y: number;
@@ -234,7 +349,16 @@ export function screenToWorld(point: Point, viewport: Viewport): Point {
 }
 
 export function viewportTransform(viewport: Viewport): string {
-  return `translate(${viewport.x} ${viewport.y}) scale(${viewport.zoom})`;
+  // CSS 的 translate 必须带长度单位；无单位是无效声明，整条 transform 会被丢掉（画布就固定不动了）。
+  return `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`;
+}
+
+/**
+ * 同一套视图变换的 SVG 写法：`transform` 属性按用户单位解析，**不能**带 px，
+ * 否则浏览器报 "Expected ')'" 并且整条变换失效（边线会与节点错位）。
+ */
+export function svgViewportTransform(viewport: Viewport): string {
+  return `translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`;
 }
 
 export function clampZoom(zoom: number): number {
@@ -253,7 +377,7 @@ export function zoomAt(viewport: Viewport, screen: Point, delta: number): Viewpo
   };
 }
 
-/** 把内容放进视口：用于「适应窗口」与首次打开时的定位。 */
+/** 把内容放进视口：用于「适应画布」与首次打开时的定位。 */
 export function fitViewport(boxes: readonly NodeBox[], size: Size, padding = 40): Viewport {
   if (boxes.length === 0) return IDENTITY_VIEWPORT;
   const minX = Math.min(...boxes.map((box) => box.x));
@@ -368,4 +492,14 @@ export function regionAt(frames: readonly RegionFrame[], point: Point): RegionFr
     }
   }
   return best;
+}
+
+/** 连线避障用的矩形：节点框的显示尺寸，不带语义。 */
+export function rectOfBox(box: NodeBox): { x: number; y: number; width: number; height: number } {
+  return { x: box.x, y: box.y, width: box.width, height: box.height };
+}
+
+/** 正式连线的路径（带避障）：输出端口在右侧，输入端口在左侧。 */
+export function connectionPath(from: PortAnchor, to: PortAnchor, fromBox: NodeBox, toBox: NodeBox): string {
+  return orthogonalRoute(routeEndOf(from), routeEndOf(to), rectOfBox(fromBox), rectOfBox(toBox)).path;
 }

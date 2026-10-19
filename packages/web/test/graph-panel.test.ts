@@ -51,6 +51,21 @@ async function settle(panel: Pwn2BlockGraphPanel): Promise<void> {
   await panel.updateComplete;
 }
 
+/** 节点库与属性面板各自有影子根：跨一层的查询单独收在这里，测试里只看行为。 */
+function libraryButton(panel: Pwn2BlockGraphPanel, kind: string): HTMLButtonElement | null {
+  const library = panel.shadowRoot?.querySelector('pwn2block-node-library');
+  return library?.shadowRoot?.querySelector<HTMLButtonElement>(`button[data-kind="${kind}"]`) ?? null;
+}
+
+function inspectorInput(panel: Pwn2BlockGraphPanel, id: string): HTMLInputElement | null {
+  const inspector = panel.shadowRoot?.querySelector('pwn2block-node-inspector');
+  return inspector?.shadowRoot?.querySelector<HTMLInputElement>(`input#${id}`) ?? null;
+}
+
+function canvasOf(panel: Pwn2BlockGraphPanel) {
+  return panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
+}
+
 afterEach(() => {
   for (const panel of panels.splice(0)) panel.remove();
 });
@@ -104,32 +119,33 @@ describe('画布面板：Python 能力', () => {
 });
 
 describe('画布面板：工具箱与存档', () => {
-  it('工具箱按阶段列出节点，点一下就加进画布', async () => {
+  it('节点库按分类列出节点，点一下就加进画布', async () => {
     const { panel } = await mount();
-    const buttons = panel.shadowRoot?.querySelectorAll('.toolbox button') ?? [];
-    expect(buttons.length).toBeGreaterThan(10);
-    const fill = panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]');
+    const library = panel.shadowRoot?.querySelector('pwn2block-node-library');
+    const entries = library?.shadowRoot?.querySelectorAll('button[data-kind]') ?? [];
+    expect(entries.length).toBeGreaterThan(10);
+    const fill = libraryButton(panel, 'data.fill');
     expect(fill).not.toBeNull();
     fill?.click();
     await settle(panel);
-    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('[data-node="fill"]')).not.toBeNull();
+    expect(canvasOf(panel)?.shadowRoot?.querySelector('[data-node="fill"]')).not.toBeNull();
   });
 
-  it('本地存档能恢复，坏存档退回空图而不是崩溃', async () => {
+  it('本地存档能恢复；坏存档显示提示并保持空画布', async () => {
     const { panel } = await mount(feedGraph());
-    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('[data-node="hex"]')).not.toBeNull();
+    expect(canvasOf(panel)?.shadowRoot?.querySelector('[data-node="hex"]')).not.toBeNull();
 
     const broken = await mount({ format: 'pwn2block.workflow', version: 99, nodes: [] });
-    const empty = broken.panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(empty?.shadowRoot?.querySelector('[data-node="start"]')).not.toBeNull();
+    const empty = canvasOf(broken.panel);
+    // 10 §5：读不出来时画布是空的（不预置开始节点），并给出可解释的提示与「从空白开始」出口。
+    expect(empty?.shadowRoot?.querySelector('[data-node]')).toBeNull();
+    expect(broken.panel.shadowRoot?.textContent ?? '').toContain('导出原文');
+    expect(broken.panel.shadowRoot?.textContent ?? '').toContain('从空白画布开始');
   });
 
   it('编辑后写回存档', async () => {
     const { panel, store } = await mount();
-    const fill = panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]');
-    fill?.click();
+    libraryButton(panel, 'data.fill')?.click();
     await settle(panel);
     const saved = store.getItem(graphStorageKey(ret2winPublic.id));
     expect(saved).not.toBeNull();
@@ -162,10 +178,9 @@ describe('画布面板：运行入口与存档失败', () => {
     });
     await settle(broken.panel);
     const text = broken.panel.shadowRoot?.textContent ?? '';
-    expect(text).toContain('当前存档不可用');
     expect(text).toContain('导出原文');
-    const canvas = broken.panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('[data-node="run"]')).toBeNull();
+    expect(text).toContain('从空白画布开始');
+    expect(canvasOf(broken.panel)?.shadowRoot?.querySelector('[data-node="run"]')).toBeNull();
   });
 });
 
@@ -229,7 +244,7 @@ describe('画布面板：编译', () => {
     await vi.waitFor(() => {
       expect(panel.shadowRoot?.textContent ?? '').toContain('编译成功');
     });
-    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]')?.click();
+    libraryButton(panel, 'data.fill')?.click();
     await settle(panel);
     // 加了节点但没编译：状态行仍写上次结果，另外用红色标记过期。
     const header = panel.shadowRoot?.querySelector('header');
@@ -258,7 +273,7 @@ describe('画布面板：把产物交给运行链路', () => {
     panel.addEventListener('p2b-graph-edited', () => {
       edited += 1;
     });
-    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]')?.click();
+    libraryButton(panel, 'data.fill')?.click();
     await settle(panel);
     expect(edited).toBe(1);
   });
@@ -290,8 +305,7 @@ describe('画布面板：模块列表', () => {
     expect(button?.textContent ?? '').toContain('自增 v2');
     button?.click();
     await settle(panel);
-    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('[data-node="data"]')).not.toBeNull();
+    expect(canvasOf(panel)?.shadowRoot?.querySelector('[data-node="data"]')).not.toBeNull();
   });
 
   it('来源定位自动切进模块视图并选中节点', async () => {
@@ -299,9 +313,8 @@ describe('画布面板：模块列表', () => {
     panel.locate({ nodeId: 'get', modules: ['inc@2'] });
     await settle(panel);
     expect(panel.shadowRoot?.querySelector('header')?.textContent ?? '').toContain('自增 v2');
-    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('[data-node="get"]')).not.toBeNull();
-    expect(canvas?.shadowRoot?.querySelector('.select')?.getAttribute('data-node')).toBe('get');
+    expect(canvasOf(panel)?.shadowRoot?.querySelector('[data-node="get"]')).not.toBeNull();
+    expect(canvasOf(panel)?.shadowRoot?.querySelector('.selected')?.getAttribute('data-node')).toBe('get');
   });
 
   it('进入模块体：面包屑显示模块名，编辑写回主图，返回后主图恢复', async () => {
@@ -316,7 +329,7 @@ describe('画布面板：模块列表', () => {
     expect(bodyCanvas?.shadowRoot?.querySelector('[data-node="get"]')).not.toBeNull();
     expect(bodyCanvas?.shadowRoot?.querySelector('[data-node="run"]')).toBeNull();
 
-    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]')?.click();
+    libraryButton(panel, 'data.fill')?.click();
     await settle(panel);
     const saved = JSON.parse(store.getItem(graphStorageKey(ret2winPublic.id)) ?? '{}') as {
       document?: { modules?: { nodes?: { kind: string }[] }[] };
@@ -325,8 +338,7 @@ describe('画布面板：模块列表', () => {
 
     panel.shadowRoot?.querySelector<HTMLButtonElement>('button.crumb')?.click();
     await settle(panel);
-    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
-    expect(canvas?.shadowRoot?.querySelector('[data-node="run"]')).not.toBeNull();
+    expect(canvasOf(panel)?.shadowRoot?.querySelector('[data-node="run"]')).not.toBeNull();
   });
 });
 
@@ -335,7 +347,7 @@ describe('画布面板：来源定位后的编辑与动态参数', () => {
     const { panel } = await mount(feedGraph());
     panel.locate({ nodeId: 'hex' });
     await settle(panel);
-    const input = panel.shadowRoot?.querySelector<HTMLInputElement>('input#hex-hex');
+    const input = inspectorInput(panel, 'hex-hex');
     expect(input).not.toBeNull();
     input!.value = '42';
     input!.dispatchEvent(new Event('change', { bubbles: true }));
@@ -346,18 +358,18 @@ describe('画布面板：来源定位后的编辑与动态参数', () => {
 
   it('题目积木的动态输入在检查器里可手填，且按字节串保存（全数字也仍是十六进制）', async () => {
     const { panel } = await mount();
-    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="action.author"]')?.click();
+    libraryButton(panel, 'action.author')?.click();
     await settle(panel);
     const id = panel.currentDocument().nodes.find((node) => node.kind === 'action.author')?.id;
     if (id === undefined) throw new Error('没有 author 节点');
 
-    const block = panel.shadowRoot?.querySelector<HTMLInputElement>(`input#${id}-id`);
+    const block = inspectorInput(panel, `${id}-id`);
     expect(block).not.toBeNull();
     block!.value = 'gets';
     block!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle(panel);
 
-    const data = panel.shadowRoot?.querySelector<HTMLInputElement>(`input#${id}-data`);
+    const data = inspectorInput(panel, `${id}-data`);
     expect(data).not.toBeNull();
     data!.value = '4141';
     data!.dispatchEvent(new Event('change', { bubbles: true }));

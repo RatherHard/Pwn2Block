@@ -48,11 +48,17 @@ export type GraphLoadResult =
       /** 迁移过程中的说明（忽略的游离积木等），给界面提示用。 */
       readonly notes: readonly string[];
     }
+  /** 完全没有可恢复内容：这是「首次进入」，界面给空画布，不算错误。 */
+  | { readonly ok: false; readonly kind: 'empty' }
+  /**
+   * 有存档但读不出来：保留原文供导出，界面**不得**静默当成首次进入覆盖它（10 §5）。
+   */
   | {
       readonly ok: false;
+      readonly kind: 'corrupt';
       readonly reason: string;
-      /** 读到的原始文本；`undefined` 表示没有存档。界面可导出它。 */
-      readonly raw?: string;
+      /** 读到的原始文本。 */
+      readonly raw: string;
       /** 旧积木迁移失败的具体原因。 */
       readonly issues?: readonly string[];
       readonly source?: GraphLoadSource;
@@ -85,7 +91,7 @@ function parseJson(raw: string): unknown | undefined {
   }
 }
 
-/** 读并迁移存档；调用方拿到 `ok` 才装进画布。 */
+/** 读并迁移存档；调用方拿到 `ok` 才装进画布，`kind: 'empty'` 表示空画布。 */
 export function loadGraph(
   store: KeyValueStore | undefined,
   challengeId: string,
@@ -94,11 +100,11 @@ export function loadGraph(
   if (currentRaw !== undefined && currentRaw !== '') {
     const parsed = parseJson(currentRaw);
     if (parsed === undefined) {
-      return { ok: false, reason: '当前存档不是合法 JSON：保留原文，不加载也不覆盖', raw: currentRaw, source: 'current' };
+      return { ok: false, kind: 'corrupt', reason: '当前存档不是合法 JSON：保留原文，不加载也不覆盖', raw: currentRaw, source: 'current' };
     }
     const result = parseGraphSave(parsed, challengeId);
     if (!result.ok) {
-      return { ok: false, reason: `当前存档不可用：${result.message}`, raw: currentRaw, source: 'current' };
+      return { ok: false, kind: 'corrupt', reason: `当前存档不可用：${result.message}`, raw: currentRaw, source: 'current' };
     }
     return { ok: true, document: result.value.document, source: 'current', notes: [] };
   }
@@ -107,11 +113,11 @@ export function loadGraph(
   if (interimRaw !== undefined && interimRaw !== '') {
     const parsed = parseJson(interimRaw);
     if (parsed === undefined) {
-      return { ok: false, reason: '旧画布存档不是合法 JSON：保留原文，不加载也不覆盖', raw: interimRaw, source: 'interim' };
+      return { ok: false, kind: 'corrupt', reason: '旧画布存档不是合法 JSON：保留原文，不加载也不覆盖', raw: interimRaw, source: 'interim' };
     }
     const result = parseGraphDocument(parsed);
     if (!result.ok) {
-      return { ok: false, reason: `旧画布存档不可用：${result.message}`, raw: interimRaw, source: 'interim' };
+      return { ok: false, kind: 'corrupt', reason: `旧画布存档不可用：${result.message}`, raw: interimRaw, source: 'interim' };
     }
     writeIfPossible(store, challengeId, result.document);
     return { ok: true, document: result.document, source: 'interim', notes: [] };
@@ -121,12 +127,13 @@ export function loadGraph(
   if (legacyRaw !== undefined && legacyRaw !== '') {
     const parsed = parseJson(legacyRaw);
     if (parsed === undefined) {
-      return { ok: false, reason: '旧积木存档不是合法 JSON：保留原文，可导出后手工处理', raw: legacyRaw, source: 'blockly' };
+      return { ok: false, kind: 'corrupt', reason: '旧积木存档不是合法 JSON：保留原文，可导出后手工处理', raw: legacyRaw, source: 'blockly' };
     }
     const migrated = migrateBlocklyWorkspace(parsed);
     if (!migrated.ok) {
       return {
         ok: false,
+        kind: 'corrupt',
         reason: '旧积木存档里有不受支持的积木：已保留原文，可导出后重做或等待支持',
         raw: legacyRaw,
         issues: migrated.reasons,
@@ -137,7 +144,7 @@ export function loadGraph(
     return { ok: true, document: migrated.document, source: 'blockly', notes: migrated.notes };
   }
 
-  return { ok: false, reason: '没有存档' };
+  return { ok: false, kind: 'empty' };
 }
 
 function writeIfPossible(store: KeyValueStore | undefined, challengeId: string, document: GraphDocument): void {

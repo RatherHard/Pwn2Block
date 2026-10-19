@@ -12,6 +12,8 @@ import {
   regionAt,
   regionFrames,
   screenToWorld,
+  svgViewportTransform,
+  viewportTransform,
   worldToScreen,
   zoomAt,
   type NodeBox,
@@ -35,12 +37,15 @@ function boxOf(kind: string, id = 'node', params?: Readonly<Record<string, Param
 }
 
 describe('节点框与端口方位', () => {
-  it('数据输入在左边缘、输出在右边缘', () => {
+  it('数据输入在左边缘、输出在右边缘，且每个端口占一行', () => {
     const box = boxOf(NODE.concat, 'cat', { count: 2 });
     expect(box.inputs.map((port) => port.x)).toEqual([100, 100]);
     expect(box.outputs[0]?.x).toBe(100 + NODE_WIDTH);
-    expect(box.inputs[0]?.y).toBe(50 + HEADER_HEIGHT + PORT_ROW / 2);
-    expect(box.inputs[1]?.y).toBe(50 + HEADER_HEIGHT + PORT_ROW * 1.5);
+    // 行 0 是参数（count），端口从行 1 开始；每行一个端口，不会再挤在同一行里。
+    expect(box.inputs[0]?.y).toBe(50 + HEADER_HEIGHT + PORT_ROW * 1.5);
+    expect(box.inputs[1]?.y).toBe(50 + HEADER_HEIGHT + PORT_ROW * 2.5);
+    expect(box.inputs[0]?.y).not.toBe(box.inputs[1]?.y);
+    expect(box.rows.length).toBeGreaterThanOrEqual(3);
   });
 
   it('执行节点有上下两个控制流端口，数据节点没有', () => {
@@ -193,5 +198,17 @@ describe('区域框与容器', () => {
     const inner: RegionFrame = { nodeId: 'inner', region: 'then', label: '成立', x: 100, y: 100, width: 100, height: 100, empty: false };
     expect(regionAt([outer, inner], { x: 150, y: 150 })?.nodeId).toBe('inner');
     expect(regionAt([outer, inner], { x: 20, y: 20 })?.nodeId).toBe('outer');
+  });
+
+  it('视图变换带 px 单位，否则 CSS 会丢掉整条 transform', () => {
+    expect(viewportTransform({ x: -12, y: 34, zoom: 0.75 })).toBe('translate(-12px, 34px) scale(0.75)');
+    // 0 也要带单位：`translate(0 0)` 是无效值，会让画布失去平移。
+    expect(viewportTransform({ x: 0, y: 0, zoom: 1 })).toBe('translate(0px, 0px) scale(1)');
+  });
+
+  it('SVG 的 transform 属性不带 px，两种写法保持同一套变换', () => {
+    const viewport = { x: -12, y: 34, zoom: 0.75 };
+    expect(svgViewportTransform(viewport)).toBe('translate(-12, 34) scale(0.75)');
+    expect(svgViewportTransform(viewport)).not.toContain('px');
   });
 });
