@@ -329,3 +329,41 @@ describe('画布面板：模块列表', () => {
     expect(canvas?.shadowRoot?.querySelector('[data-node="run"]')).not.toBeNull();
   });
 });
+
+describe('画布面板：来源定位后的编辑与动态参数', () => {
+  it('定位主图节点后再编辑，改动写回当前图（不会卡在模块视图的主图副本上）', async () => {
+    const { panel } = await mount(feedGraph());
+    panel.locate({ nodeId: 'hex' });
+    await settle(panel);
+    const input = panel.shadowRoot?.querySelector<HTMLInputElement>('input#hex-hex');
+    expect(input).not.toBeNull();
+    input!.value = '42';
+    input!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle(panel);
+    expect(panel.currentDocument().nodes.find((node) => node.id === 'hex')?.params.hex).toBe('42');
+    expect(panel.shadowRoot?.querySelector('header')?.textContent ?? '').not.toContain(' / ');
+  });
+
+  it('题目积木的动态输入在检查器里可手填，且按字节串保存（全数字也仍是十六进制）', async () => {
+    const { panel } = await mount();
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="action.author"]')?.click();
+    await settle(panel);
+    const id = panel.currentDocument().nodes.find((node) => node.kind === 'action.author')?.id;
+    if (id === undefined) throw new Error('没有 author 节点');
+
+    const block = panel.shadowRoot?.querySelector<HTMLInputElement>(`input#${id}-id`);
+    expect(block).not.toBeNull();
+    block!.value = 'gets';
+    block!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle(panel);
+
+    const data = panel.shadowRoot?.querySelector<HTMLInputElement>(`input#${id}-data`);
+    expect(data).not.toBeNull();
+    data!.value = '4141';
+    data!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle(panel);
+
+    const params = panel.currentDocument().nodes.find((node) => node.id === id)?.params;
+    expect(params).toMatchObject({ id: 'gets', data: '4141', dataMode: 'inline' });
+  });
+});

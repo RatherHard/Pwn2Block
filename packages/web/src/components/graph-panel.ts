@@ -477,7 +477,22 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const node = selected[0];
     if (node === undefined) return nothing;
     const spec = nodeSpec(node.kind);
-    const specs = spec === undefined ? [] : nodeParams(spec, defaultParams(spec));
+    const declared = spec === undefined ? [] : nodeParams(spec, defaultParams(spec));
+    // 动态输入（题目积木参数、变参）同样是「可手填可接线」的参数，检查器必须给输入框，
+    // 否则用户只能看到端口、没有任何地方填值（06 §3）。
+    const dynamic = spec?.dynamicInputs?.(node.params, this.portContext(challenge)) ?? [];
+    const specs = [
+      ...declared,
+      ...dynamic
+        .filter((input) => !declared.some((param) => param.name === input.name))
+        .map((input) => ({
+          name: input.name,
+          label: input.label,
+          kind: (input.type === 'bytes' ? 'hex' : input.type === 'int' ? 'int' : 'text') as ParamSpec['kind'],
+          default: input.type === 'bytes' ? '' : 0,
+          port: input.type,
+        })),
+    ];
     const lookup = lookupGraph(this.editor.document);
     const placement = lookup.placements.get(node.id);
     const container = placement?.container;
@@ -521,8 +536,13 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const value = node.params[param.name] ?? param.default;
     const reason = checkParam(param, value);
     const error = reason === undefined ? nothing : html`<span class="bad">${reason}</span>`;
-    const update = (next: ParamValue) =>
-      this.setEditor(setParam(this.editor, nodeId, param.name, next, this.portContext(challenge)));
+    const update = (next: ParamValue) => {
+      const edited = setParam(this.editor, nodeId, param.name, next, this.portContext(challenge));
+      // 手动填值就是选择「手填」：否则必填的端口参数会一直报「缺少输入」，即使输入框里已有值。
+      this.setEditor(
+        param.port === undefined ? edited : setPortMode(edited, nodeId, param.name, 'inline'),
+      );
+    };
 
     const modeSwitch = param.port === undefined ? nothing : this.renderPortMode(nodeId, param.name);
 
@@ -967,12 +987,15 @@ export class Pwn2BlockGraphPanel extends LitElement {
     }
     const expanded = withDocument(base, target.document, 'layout');
     const next = { ...expanded, selection: [target.nodeId] };
-    this.mainEditor = next;
     if (target.moduleId !== undefined) {
+      // 进模块视图：主图留在这份展开后的状态，之后的编辑经 withModuleBody 写回。
+      this.mainEditor = next;
       this.editingModuleId = target.moduleId;
       const view = moduleViewState(next, target.moduleId, [target.nodeId]);
       if (view !== undefined) this.editor = view;
     } else {
+      // 定位主图节点时不能留下 `mainEditor`：否则后续编辑会被当成「模块体编辑」写不回去。
+      this.mainEditor = undefined;
       this.editingModuleId = undefined;
       this.editor = next;
     }
@@ -1156,12 +1179,14 @@ function splitPorts(raw: string): readonly string[] {
 
 /** 输入框里的字符串按参数类型转换；转换不了就原样交给校验器报错。 */
 function coerce(param: ParamSpec, raw: string): ParamValue {
-  if (param.kind === 'int' || param.kind === 'hex') {
+  if (param.kind === 'int') {
     const trimmed = raw.trim();
     if (/^0x[0-9a-fA-F]+$/.test(trimmed)) return Number.parseInt(trimmed.slice(2), 16);
     if (/^-?\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
     return raw;
   }
+  // `hex` 是字节串（`4141`），不是数字：全数字的字节串不能按十进制吞掉。
+  if (param.kind === 'hex') return raw.trim();
   return raw;
 }
 
