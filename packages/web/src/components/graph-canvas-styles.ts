@@ -138,50 +138,12 @@ export const canvasStyles = css`
         text-overflow: ellipsis;
         color: var(--p2b-data);
       }
-      .row-control {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        gap: 0.15rem;
-        max-width: 9.5rem;
+      .row-value[data-invalid='true'] {
+        color: var(--p2b-error);
+        text-decoration: underline dotted;
       }
-      .row-control[data-invalid='true'] input {
-        border-color: var(--p2b-error);
-      }
-      .row-control input,
-      .row-control select {
-        width: 5.4rem;
-        min-height: 1.15rem;
-        padding: 0 0.15rem;
-        font: inherit;
-        font-size: inherit;
-        color: var(--p2b-fg);
-        background: var(--p2b-bg);
-        border: 1px solid var(--p2b-line);
-        border-radius: 0;
-      }
-      .row-control input:disabled {
-        color: var(--p2b-dim);
-        border-style: dashed;
-      }
-      .row-control .mode-badge {
-        min-height: 1.15rem;
-        padding: 0 0.15rem;
-        border-width: 1px;
-        color: var(--p2b-dim);
-      }
-      .row-control .mode-badge.port {
+      .row-value[data-mode='port'] {
         color: var(--p2b-ip);
-        border-color: var(--p2b-ip);
-      }
-      .row-control .param-summary {
-        color: var(--p2b-dim);
-        white-space: nowrap;
-      }
-      .row-control .configure {
-        min-height: 1.15rem;
-        padding: 0 0.2rem;
-        border-width: 1px;
       }
       /* 端口热区比形状大，方便点中；形状本身用 clip-path 区分类型（10 §3.4）。 */
       .port-hit {

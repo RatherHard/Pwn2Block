@@ -371,10 +371,6 @@ export class Pwn2BlockGraphCanvas extends LitElement {
         onPointerUp: this.onPointerUp,
         onWheel: this.onWheel,
         onDoubleClick: this.onDoubleClick,
-        onParam: (nodeId, name, value) => this.emitEdit({ type: 'param', nodeId, name, value }),
-        onMode: (nodeId, port, mode) => this.emitEdit({ type: 'portMode', nodeId, port, mode }),
-        onConfigure: (nodeId) =>
-          this.dispatchEvent(new CustomEvent('p2b-graph-open', { detail: { nodeId }, bubbles: true, composed: true })),
         onPortDown: this.onPortDown,
         onPortKey: this.onPortKey,
       },

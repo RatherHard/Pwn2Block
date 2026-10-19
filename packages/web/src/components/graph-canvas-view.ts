@@ -1,5 +1,5 @@
 import { html, nothing } from 'lit';
-import type { GraphConnection, ParamValue, PortContext } from '@pwn2block/shared';
+import type { GraphConnection, PortContext } from '@pwn2block/shared';
 import { nodeSpec } from '@pwn2block/shared';
 import { SIMPLIFY_ZOOM, collapsedSummary } from '../graph/collapse';
 import type { GraphEditorState } from '../graph/editor';
@@ -31,9 +31,6 @@ export interface CanvasHandlers {
   readonly onPointerUp: (event: PointerEvent) => void;
   readonly onWheel: (event: WheelEvent) => void;
   readonly onDoubleClick: (event: MouseEvent) => void;
-  readonly onParam: (nodeId: string, name: string, value: ParamValue) => void;
-  readonly onMode: (nodeId: string, port: string, mode: 'inline' | 'port') => void;
-  readonly onConfigure: (nodeId: string) => void;
   readonly onPortDown: (event: PointerEvent, port: PortAnchor) => void;
   readonly onPortKey: (event: KeyboardEvent, port: PortAnchor) => void;
 }
@@ -138,9 +135,6 @@ function renderNode(options: CanvasViewOptions, box: NodeBox): unknown {
     ...(options.activeKey === undefined ? {} : { activePort: options.activeKey }),
     ...(options.hoverPort === undefined ? {} : { hoverPort: portKey(options.hoverPort) }),
     ...(options.focusPort === undefined ? {} : { focusPort: `${options.focusPort.nodeId}\u0000${options.focusPort.port}` }),
-    onParam: (name, value) => handlers.onParam(box.id, name, value),
-    onMode: (port, mode) => handlers.onMode(box.id, port, mode),
-    onConfigure: () => handlers.onConfigure(box.id),
     onPortDown: (event, port) => handlers.onPortDown(event, port),
     onPortKey: (event, port) => handlers.onPortKey(event, port),
   });

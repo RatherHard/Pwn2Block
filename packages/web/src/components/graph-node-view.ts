@@ -3,7 +3,6 @@ import type {
   GraphDocument,
   GraphNode,
   NodeKindSpec,
-  ParamValue,
   PortContext,
   PortType,
 } from '@pwn2block/shared';
@@ -11,15 +10,13 @@ import { portModeOf } from '../graph/editor';
 import { HEADER_HEIGHT, PORT_SIZE, ROW_HEIGHT, type NodeBox, type PortAnchor } from '../graph/geometry';
 import { PORT_LABELS } from '../graph/port-style';
 import { portShapeClass } from './node-skin';
-import { paramIdOf, renderParamField } from './param-field';
 import { checkParam } from '../workflow/params';
 
 /**
  * 单个节点的 DOM（10 §2.2、§7）。
  *
- * 节点用 HTML 而不是 SVG：这样参数输入框是真正的 `<input>/<select>`，编辑、选择、复制文字
- * 和键盘可达都按浏览器原生行为工作，同时又能与 SVG 的直角折线共用一份 `geometry` 坐标。
- * 拖动只从标题区（`data-drag-handle`）开始，输入框与按钮不会触发节点移动。
+ * 画布内只展示属性值和连接来源；参数编辑统一在属性面板中进行。
+ * 拖动从标题区（`data-drag-handle`）开始，端口保留接线操作。
  */
 
 export interface NodeViewOptions {
@@ -44,9 +41,6 @@ export interface NodeViewOptions {
   readonly hoverPort?: string;
   /** 属性面板里选中的端口（组装分段），也高亮。 */
   readonly focusPort?: string;
-  readonly onParam: (name: string, value: ParamValue) => void;
-  readonly onMode: (port: string, mode: 'inline' | 'port') => void;
-  readonly onConfigure: () => void;
   readonly onPortDown: (event: PointerEvent, port: PortAnchor) => void;
   /** 键盘激活端口（Enter / 空格）：与点击接线同一套状态机。 */
   readonly onPortKey: (event: KeyboardEvent, port: PortAnchor) => void;
@@ -103,8 +97,14 @@ function renderRow(options: NodeViewOptions, row: Row, index: number): unknown {
   const compatible = inputKey !== undefined && options.compatible?.has(inputKey) === true;
   const focused = inputKey !== undefined && options.focusPort === inputKey;
   const param = row.param;
+  const source = input === undefined ? undefined : document.connections.find((edge) => edge.to.node === box.id && edge.to.port === input.name)?.from;
   const mode = param?.port === undefined ? undefined : portModeOf(document, box.id, param.name);
-  const reason = param === undefined ? undefined : checkParam(param, node.params[param.name]);
+  const current = param === undefined ? undefined : node.params[param.name] ?? param.default;
+  const reason = param === undefined || mode?.mode === 'port' ? undefined : checkParam(param, current);
+  const value = mode?.mode === 'port'
+    ? mode.source === undefined ? '未连接' : `← ${mode.source}`
+    : Array.isArray(current) ? current.join(', ') || '（空）'
+    : param?.options?.find((option) => option.value === String(current))?.label ?? String(current ?? '');
   const rowClass = [
     'node-row',
     input === undefined ? '' : 'has-in',
@@ -131,26 +131,15 @@ function renderRow(options: NodeViewOptions, row: Row, index: number): unknown {
           @pointerdown=${(event: PointerEvent) => options.onPortDown(event, anchorOf(box, input, 'in'))}
           @keydown=${(event: KeyboardEvent) => options.onPortKey(event, anchorOf(box, input, 'in'))}
         ><span class="port-shape ${portShapeClass(input.type)}"></span></span>`}
+    <span class="row-label">${row.label}</span>
     ${param === undefined
-      ? html`<span class="row-label">${row.label}</span>`
-      : html`<label class="row-label" for=${paramIdOf(box.id, param.name)}>${row.label}</label>`}
-    ${param === undefined
-      ? html`<span class="row-value">${PORT_LABELS[output?.type ?? input?.type ?? 'int']}</span>`
-      : options.simplified
-        ? html`<span class="row-value">${row.value}</span>`
-        : html`<span class="row-control" data-invalid=${String(reason !== undefined)}>
-            ${renderParamField({
-              nodeId: box.id,
-              param,
-              value: node.params[param.name],
-              mode: mode?.mode ?? 'inline',
-              ...(mode?.source === undefined ? {} : { source: mode.source }),
-              compact: true,
-              onValue: (value: ParamValue) => options.onParam(param.name, value),
-              onMode: (next) => options.onMode(param.name, next),
-              onConfigure: () => options.onConfigure(),
-            })}
-          </span>`}
+      ? html`<span class="row-value" title=${source === undefined ? '' : `接线自 ${source.node}.${source.port}`}>
+          ${source === undefined ? PORT_LABELS[output?.type ?? input?.type ?? 'int'] : `← ${source.node}.${source.port}`}
+        </span>`
+      : html`<span class="row-value" data-param-value=${param.name}
+          data-mode=${mode?.mode ?? 'inline'} data-invalid=${String(reason !== undefined)}
+          title=${reason === undefined ? value : `${value} · ${reason}`}
+        >${value === '' ? '（空）' : value}</span>`}
     ${output === undefined
       ? nothing
       : html`<span

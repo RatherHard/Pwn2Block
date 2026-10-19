@@ -286,7 +286,6 @@ export class Pwn2BlockNodeLibrary extends LitElement {
     const pathLabel = ['节点库', category?.label].filter(Boolean).join(' / ');
     return html`<div class="library" @keydown=${this.onKeyDown}>
       <div class="search">
-        <h3>节点库</h3>
         <nav class="navigation" aria-label="节点库目录">
           ${this.path.length === 0 && !searching ? nothing : html`<button
             type="button" class="back"

@@ -21,9 +21,8 @@ import './code-editor';
 /**
  * 常驻属性面板（10 §2.1、§2.2、§6）。
  *
- * 与节点内的编辑框共用 `param-field` 的同一个渲染器与同一套校验：改一处，另一处立刻同步，
- * 因为两处都只读文档、只派发命令，不各自持有一份参数值。复杂配置（Python 代码、命名输入、
- * 题目动作选择）完整放在这里；节点内只留摘要，选中节点即可在侧栏编辑。
+ * 所有属性编辑统一在这里完成，修改通过命令写入文档，画布同步展示只读值。
+ * Python 代码、命名输入与题目动作配置均使用同一份文档。
  */
 
 export type InspectorAction =
@@ -173,7 +172,7 @@ export class Pwn2BlockNodeInspector extends LitElement {
     const document = this.document;
     if (node === undefined || document === undefined) {
       return html`<header><h2>属性</h2></header>
-        <p class="muted">选中一个节点后，这里显示它的完整配置；节点内只放常用参数。</p>
+        <p class="muted">选中一个节点后，在这里修改属性；画布节点只显示属性值。</p>
         ${this.selectionCount > 1
           ? html`<p class="muted">已选中 ${this.selectionCount} 个节点：属性面板一次只编辑一个。</p>`
           : nothing}`;

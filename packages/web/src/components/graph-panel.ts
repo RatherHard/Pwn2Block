@@ -77,7 +77,7 @@ import type { LibraryDragEndDetail } from './node-library';
  * 节点画布面板（10 §2、§4、§5、§6）。
  *
  * 布局：工具栏 + 「节点库 / 画布 / 属性面板」三栏 + 问题区。属性面板常驻并默认展开，
- * 节点内与属性面板编辑的是**同一份文档**（命令都落到 `graph/editor`），复杂配置只在面板里。
+ * 属性面板编辑文档（命令都落到 `graph/editor`），画布节点只显示属性值。
  *
  * 边界：
  * - **只做装配**：手势来自画布、库与面板的事件，编辑结果落 `graph/editor` 的纯函数，文档存本地。
@@ -990,7 +990,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.canvas()?.focus({ preventScroll: true });
   }
 
-  /** 属性面板的修改：走与节点内完全相同的编辑命令，所以撤销一次就是一次修改。 */
+  /** 属性面板的修改：统一通过编辑命令提交，一次修改对应一次撤销。 */
   private onInspectorParam(name: string, value: ParamValue): void {
     const nodeId = this.editor.selection[0];
     if (nodeId === undefined) return;

@@ -151,7 +151,7 @@ async function clickEdge(page: Page, index: number, options?: { double?: boolean
   else await page.mouse.click(point.x, point.y);
 }
 
-test('双入口参数编辑：节点内改完面板同步，撤销一次回到原值（10 §2.2）', async ({ page }) => {
+test('侧栏修改属性同步到只读节点，撤销恢复原值（10 §2.2）', async ({ page }) => {
   await openChallenge(page);
   const panel = page.locator('pwn2block-graph-panel');
   const canvas = panel.getByRole('application', { name: '节点画布' });
@@ -161,19 +161,23 @@ test('双入口参数编辑：节点内改完面板同步，撤销一次回到�
   const original = Number((await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count);
   await focusNode(page, 'fill');
 
-  // 节点内直接改：改完和属性面板读同一份数据。
-  const inline = canvas.locator('.node[data-node="fill"] input#fill-count');
-  await inline.fill('3');
-  await inline.press('Tab');
+  const node = canvas.locator('.node[data-node="fill"]');
+  await expect(node.locator('input, select, textarea, [contenteditable="true"], button')).toHaveCount(0);
+  const countValue = node.locator('[data-param-value="count"]');
+  await expect(countValue).toHaveText(String(original));
+  await inspector.locator('input#fill-count').fill('3');
+  await inspector.locator('input#fill-count').press('Tab');
+  await expect(countValue).toHaveText('3');
   await expect.poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count).toBe(3);
   await expect(inspector.locator('input#fill-count')).toHaveValue('3');
 
-  // 面板内再改：节点内的摘要同步回来。
+  // 继续在侧栏修改，画布只读值同步更新。
   await inspector.locator('input#fill-count').fill('5');
   await inspector.locator('input#fill-count').press('Tab');
   await expect
     .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count)
     .toBe(5);
+  await expect(countValue).toHaveText('5');
 
   // 两次修改各一条撤销记录：撤两次回到原值，而不是把同步也算进去。
   await canvas.press('Control+z');
@@ -182,6 +186,7 @@ test('双入口参数编辑：节点内改完面板同步，撤销一次回到�
   await expect
     .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count)
     .toBe(original);
+  await expect(countValue).toHaveText(String(original));
 });
 
 test('Python 编辑：没有文件导入入口，行号与扩大可用，代码随图保存（10 §6）', async ({ page }) => {
@@ -285,10 +290,11 @@ test('节点库：两级目录、搜索过滤、常驻预览、拖入画布落�
   const back = library.getByRole('button', { name: '返回上一级', exact: true });
   const backBox = await back.boundingBox();
   const fillBox = await fill.boundingBox();
-  const titleBox = await library.getByRole('heading', { name: '节点库', exact: true }).boundingBox();
+  await expect(library.getByRole('heading', { name: '节点库', exact: true })).toHaveCount(0);
+  const searchBox = await library.getByRole('searchbox', { name: '搜索节点' }).boundingBox();
   expect(Math.abs((backBox?.width ?? 0) - (fillBox?.width ?? 0))).toBeLessThanOrEqual(2);
   expect(Math.abs((backBox?.x ?? 0) - (fillBox?.x ?? 0))).toBeLessThanOrEqual(2);
-  expect(backBox?.y).toBeGreaterThan((titleBox?.y ?? 0) + (titleBox?.height ?? 0));
+  expect((backBox?.y ?? 0) + (backBox?.height ?? 0)).toBeLessThan(searchBox?.y ?? 0);
   await fill.hover();
   const colors = await fill.evaluate((element) => {
     const view = element.ownerDocument.defaultView;
@@ -379,7 +385,7 @@ test('拖动节点：不同缩放下连续拖动时预览跟随指针，松手�
   }
 });
 
-test('画布标签不能被拖选，参数输入框仍能选择和编辑文字（10 §3.2）', async ({ page }) => {
+test('画布标签不能被拖选，侧栏输入框仍能选择和编辑文字（10 §3.2）', async ({ page }) => {
   await openChallenge(page);
   const canvas = page.locator('pwn2block-graph-canvas');
   await addNode(page, '填充字节');
@@ -399,7 +405,7 @@ test('画布标签不能被拖选，参数输入框仍能选择和编辑文字�
   await page.mouse.up();
   expect((await readDoc(page)).layout.fill).toEqual(before);
 
-  const input = node.locator('input').first();
+  const input = page.locator('pwn2block-graph-panel aside.inspector input').first();
   await input.fill('42');
   await input.press('ControlOrMeta+A');
   expect(await input.evaluate((element) => {

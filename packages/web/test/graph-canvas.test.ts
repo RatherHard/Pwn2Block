@@ -62,6 +62,24 @@ describe('画布渲染', () => {
     expect(execOut).not.toBeNull();
   });
 
+  it('节点只显示属性值和连接来源，修改侧栏状态后同步显示', async () => {
+    const state = editorWithPayload();
+    const canvas = await mount(state);
+    expect(canvas.shadowRoot?.querySelectorAll('.node input, .node select, .node textarea, .node button')).toHaveLength(0);
+    const count = () => canvas.shadowRoot?.querySelector('[data-node="fill"] [data-param-value="count"]');
+    expect(count()?.textContent).toBe('4');
+    expect(canvas.shadowRoot?.querySelector('[data-node="feed"] .row-value')?.textContent).toContain('fill');
+    canvas.state = {
+      ...state,
+      document: {
+        ...state.document,
+        nodes: state.document.nodes.map((node) => node.id === 'fill' ? { ...node, params: { ...node.params, count: 9 } } : node),
+      },
+    };
+    await canvas.updateComplete;
+    expect(count()?.textContent).toBe('9');
+  });
+
   it('数据线画成路径，数量与连线一致', async () => {
     const canvas = await mount(editorWithPayload());
     const paths = canvas.shadowRoot?.querySelectorAll('path') ?? [];
