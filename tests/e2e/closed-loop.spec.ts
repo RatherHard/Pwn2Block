@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 /**
  * 节点画布闭环：真实浏览器 + 真实后端 + 生产构建，不 mock API。
  *
- * 用界面本身构造 ret2win 的 payload：工具箱放「题目专用动作」与「执行指令」，
+ * 用界面本身构造 ret2win 的 payload：节点库里放「开始」「题目专用动作」「执行指令」，
  * 检查器里选 `gets(buf)`、填字节、把单步次数改成 3，然后编译、先提交一次错的
  * （验证来源定位把出错动作指回画布），再改对并提交拿到 flag。
  */
@@ -46,7 +46,7 @@ async function nodeIdOf(page: Page, kind: string): Promise<string> {
 
 async function selectNode(page: Page, kind: string): Promise<Locator> {
   const id = await nodeIdOf(page, kind);
-  const node = page.locator(`pwn2block-graph-canvas g[data-node="${id}"]`);
+  const node = page.locator(`pwn2block-graph-canvas .node[data-node="${id}"]`);
   // 用面板自己的定位入口选中：它会展开容器并把视口移到节点，比按坐标点画布稳定。
   await page
     .locator('pwn2block-graph-panel')
@@ -55,9 +55,12 @@ async function selectNode(page: Page, kind: string): Promise<Locator> {
   return node;
 }
 
-async function addNode(page: Page, label: string, kind: string): Promise<void> {
-  await page.locator('pwn2block-graph-panel aside.toolbox').getByRole('button', { name: label, exact: true }).click();
-  await expect(page.locator(`pwn2block-graph-canvas g[data-node="${await nodeIdOf(page, kind)}"]`)).toBeVisible();
+async function addNode(page: Page, label: string): Promise<void> {
+  await page
+    .locator('pwn2block-graph-panel')
+    .getByRole('complementary', { name: '节点库' })
+    .getByRole('button', { name: label, exact: true })
+    .click();
 }
 
 async function setAuthorData(page: Page, hex: string): Promise<void> {
@@ -92,15 +95,25 @@ test('画布闭环：构造 payload、错误定位、改对后提交判胜并在
   const picker = page.getByRole('region', { name: '选择题目' });
   if (await picker.isVisible()) await picker.getByRole('button').first().click();
   await expect(panel).toBeVisible();
-  await expect(panel).toContainText('编译成功');
-  await capture(page, info, '01-empty-canvas');
 
-  await test.step('用工具箱与检查器构造 gets(buf) + 单步 3 次', async () => {
-    await addNode(page, '题目专用动作', 'action.author');
+  await test.step('首次进入是空画布：没有预置节点，只提示下一步（10 §5）', async () => {
+    await expect(panel.locator('.empty-hint')).toBeVisible();
+    const nodes = await panel.evaluate((element) =>
+      (element as unknown as { currentDocument(): { nodes: unknown[] } }).currentDocument().nodes.length,
+    );
+    expect(nodes).toBe(0);
+    await capture(page, info, '01-empty-canvas');
+  });
+
+  await test.step('从节点库依次放「开始」「题目专用动作」「执行指令」', async () => {
+    await addNode(page, '开始');
+    await addNode(page, '题目专用动作');
+    await addNode(page, '执行指令');
+    expect(await nodeIdOf(page, 'start')).toBe('start');
     await setAuthorData(page, PAYLOAD_WRONG);
-    await addNode(page, '执行指令', 'action.step');
 
     const stepId = await nodeIdOf(page, 'action.step');
+    await selectNode(page, 'action.step');
     const count = page.locator(`pwn2block-graph-panel aside.inspector input#${stepId}-count`);
     await count.fill('3');
     await count.press('Tab');

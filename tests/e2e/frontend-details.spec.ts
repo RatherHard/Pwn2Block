@@ -29,7 +29,7 @@ test('编译错误在输出区列出，点「定位」选中出错的节点', as
   await openChallenge(page);
   const panel = page.locator('pwn2block-graph-panel');
   // 默认 author 没选题目积木：编译一定失败。
-  await panel.getByRole('complementary', { name: '工具箱' })
+  await panel.getByRole('complementary', { name: '节点库' })
     .getByRole('button', { name: '题目专用动作', exact: true })
     .click();
   await panel.getByRole('button', { name: '编译', exact: true }).click();
@@ -39,7 +39,9 @@ test('编译错误在输出区列出，点「定位」选中出错的节点', as
   await expect(issues).toContainText('题目专用动作');
   await issues.getByRole('button', { name: '定位' }).first().click();
   const canvas = panel.getByRole('application', { name: '节点画布' });
-  await expect(canvas.locator('g.select[data-node="author"], g.executing[data-node="author"]')).toBeVisible();
+  // 出错节点先被自动高亮（running），定位后同时带上选中样式（10 §3.6）。
+  await expect(canvas.locator('.node[data-node="author"]')).toHaveClass(/\b(running|selected)\b/);
+  await expect(canvas.locator('.node.selected[data-node="author"]')).toBeVisible();
 });
 
 test('当前存档损坏时不回退到旧键，保留原文并提供导出', async ({ page }) => {
@@ -59,18 +61,19 @@ test('当前存档损坏时不回退到旧键，保留原文并提供导出', as
   // 坏存档不覆盖旧键：旧键仍在 localStorage，坏的新键也原样保留。
   expect(await page.evaluate((key) => localStorage.getItem(key), CURRENT_KEY)).toBe('{not-json');
   expect(await page.evaluate((key) => localStorage.getItem(key), INTERIM_KEY)).toBe(VALID_INTERIM);
-  // 没有偷偷把旧存档装进来：当前图仍只有开始节点。
+  // 没有偷偷把旧存档装进来：画布保持空白（10 §5 不再自动插入开始节点）。
   const count = await panel.evaluate((element) =>
     (element as unknown as { currentDocument(): { nodes: unknown[] } }).currentDocument().nodes.length,
   );
-  expect(count).toBe(1);
+  expect(count).toBe(0);
+  await expect(panel.locator('.empty-hint')).toBeVisible();
 });
 
 test('画布键盘：Delete 删除、Ctrl+Z 撤销、方向键移动选中节点', async ({ page }) => {
   await openChallenge(page);
   const panel = page.locator('pwn2block-graph-panel');
   const canvas = panel.getByRole('application', { name: '节点画布' });
-  await panel.getByRole('complementary', { name: '工具箱' })
+  await panel.getByRole('complementary', { name: '节点库' })
     .getByRole('button', { name: '填充字节', exact: true })
     .click();
   await panel.evaluate((element) => {
