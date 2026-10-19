@@ -27,7 +27,7 @@ import {
 } from '@pwn2block/shared';
 import { ApiClientError, isSessionExpired, type ApiClient } from '../api';
 import { createArtifactTracker, type ArtifactTracker, type PayloadCompileState } from '../compiler/artifact';
-import type { ActionOrigin, CompiledAction, NormalizedWorkspace } from '../compiler/types';
+import type { ActionOrigin, CompiledAction, CompileError, NormalizedWorkspace } from '../compiler/types';
 import { stepAction } from './program';
 import { createSerialQueue } from './queue';
 import { defaultPosition, displayedView } from './replay';
@@ -182,6 +182,8 @@ export interface SessionController {
    * 来源的 `blockId` 是画布节点 id。
    */
   publish(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): void;
+  /** 画布编译失败：把错误写进同一个追踪器，输出区与运行门禁照常读到（05 §3）。 */
+  publishErrors(errors: readonly CompileError[]): void;
   /** 积木被改动：产物过期，运行、单步与提交被禁用（05 §3）。 */
   noteEdit(): void;
   run(command: RunCommand): void;
@@ -935,9 +937,16 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     },
 
     publish(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): void {
-    tracker.adopt(actions, origins);
-    patch({ artifact: tracker.state, cursor: 0, results: [] });
-  },
+      tracker.adopt(actions, origins);
+      patch({ artifact: tracker.state, cursor: 0, results: [] });
+      applyPendingResume();
+      persistResume();
+    },
+
+    publishErrors(errors: readonly CompileError[]): void {
+      tracker.fail(errors);
+      patch({ artifact: tracker.state, cursor: 0, results: [] });
+    },
 
   compile(program: NormalizedWorkspace): void {
       const challenge = state.challenge;

@@ -4,7 +4,8 @@ import { NODE, ret2winPublic } from '@pwn2block/shared';
 import type { Pwn2BlockGraphPanel } from '../src/components/graph-panel';
 import '../src/components/graph-panel';
 import type { KeyValueStore } from '../src/viewmodel/storage';
-import { wfNode, workflow } from './workflow-helpers';
+import { graphStorageKey } from '../src/graph/storage';
+import { wfEdge, wfNode, workflow } from './workflow-helpers';
 
 /**
  * 画布面板（07 §P2/P3）：从工具箱加节点、恢复本地存档、编译并显示动作数与问题。
@@ -25,10 +26,15 @@ class MemoryStore implements KeyValueStore {
 }
 
 async function mount(saved?: unknown): Promise<{ panel: Pwn2BlockGraphPanel; store: MemoryStore }> {
+  return mountWith(saved === undefined ? {} : { interim: JSON.stringify(saved) });
+}
+
+async function mountWith(
+  raw: { readonly current?: string; readonly interim?: string },
+): Promise<{ panel: Pwn2BlockGraphPanel; store: MemoryStore }> {
   const store = new MemoryStore();
-  if (saved !== undefined) {
-    store.setItem(`pwn2block.graph.${ret2winPublic.id}`, JSON.stringify(saved));
-  }
+  if (raw.current !== undefined) store.setItem(graphStorageKey(ret2winPublic.id), raw.current);
+  if (raw.interim !== undefined) store.setItem(`pwn2block.graph.${ret2winPublic.id}`, raw.interim);
   const panel = document.createElement('pwn2block-graph-panel') as Pwn2BlockGraphPanel;
   panel.challenge = ret2winPublic;
   panel.store = store;
@@ -125,9 +131,65 @@ describe('画布面板：工具箱与存档', () => {
     const fill = panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]');
     fill?.click();
     await settle(panel);
-    const saved = store.getItem(`pwn2block.graph.${ret2winPublic.id}`);
+    const saved = store.getItem(graphStorageKey(ret2winPublic.id));
     expect(saved).not.toBeNull();
     expect(saved ?? '').toContain('data.fill');
+    expect(saved ?? '').toContain('pwn2block.graph-save');
+  });
+});
+
+describe('画布面板：运行入口与存档失败', () => {
+  it('运行/终止按钮复用控制器的门禁模型，点击只派发命令', async () => {
+    const { panel } = await mount();
+    panel.controls = {
+      run: { id: 'run-all', label: '运行', hint: '从头执行', enabled: true },
+      abort: { id: 'abort', label: '终止', hint: '停止后续分片', enabled: false, disabledReason: '没有正在运行的任务' },
+    };
+    await settle(panel);
+    const events: string[] = [];
+    panel.addEventListener('p2b-graph-run', (event) => events.push((event as CustomEvent<string>).detail));
+    const run = panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-run="run-all"]');
+    expect(run?.disabled).toBe(false);
+    run?.click();
+    expect(events).toEqual(['run-all']);
+    expect(panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-run="abort"]')?.disabled).toBe(true);
+  });
+
+  it('当前存档损坏时显示原因并可导出原文，不偷偷回退旧存档', async () => {
+    const broken = await mountWith({
+      current: '{"format":"pwn2block.graph-save","version":99}',
+      interim: JSON.stringify(feedGraph()),
+    });
+    await settle(broken.panel);
+    const text = broken.panel.shadowRoot?.textContent ?? '';
+    expect(text).toContain('当前存档不可用');
+    expect(text).toContain('导出原文');
+    const canvas = broken.panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
+    expect(canvas?.shadowRoot?.querySelector('[data-node="run"]')).toBeNull();
+  });
+});
+
+describe('画布面板：编译轨迹', () => {
+  it('显示分支选择，点一条可定位回容器节点', async () => {
+    const graph = workflow({
+      nodes: [
+        wfNode('if', NODE.if, { branches: 0 }, { then: ['step'] }),
+        wfNode('cond', NODE.compare, { op: 'EQ', a: 1, b: 1 }),
+        wfNode('step', NODE.step, { count: 1 }),
+      ],
+      edges: [wfEdge('cond', 'if', 'cond')],
+      main: ['if'],
+    });
+    const { panel } = await mount(graph);
+    panel.shadowRoot?.querySelector<HTMLButtonElement>('button[part="compile"]')?.click();
+    await vi.waitFor(() => {
+      expect(panel.shadowRoot?.textContent ?? '').toContain('编译轨迹');
+    });
+    const traceButton = panel.shadowRoot?.querySelector<HTMLButtonElement>('details.trace button.link');
+    expect(traceButton).not.toBeNull();
+    traceButton?.click();
+    await settle(panel);
+    expect(panel.shadowRoot?.querySelector('header')?.textContent ?? '').toContain('主图');
   });
 });
 
@@ -232,6 +294,16 @@ describe('画布面板：模块列表', () => {
     expect(canvas?.shadowRoot?.querySelector('[data-node="data"]')).not.toBeNull();
   });
 
+  it('来源定位自动切进模块视图并选中节点', async () => {
+    const { panel } = await mount(moduleDoc);
+    panel.locate({ nodeId: 'get', modules: ['inc@2'] });
+    await settle(panel);
+    expect(panel.shadowRoot?.querySelector('header')?.textContent ?? '').toContain('自增 v2');
+    const canvas = panel.shadowRoot?.querySelector('pwn2block-graph-canvas');
+    expect(canvas?.shadowRoot?.querySelector('[data-node="get"]')).not.toBeNull();
+    expect(canvas?.shadowRoot?.querySelector('.select')?.getAttribute('data-node')).toBe('get');
+  });
+
   it('进入模块体：面包屑显示模块名，编辑写回主图，返回后主图恢复', async () => {
     const { panel, store } = await mount(moduleDoc);
     panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-edit-module="inc"]')?.click();
@@ -246,10 +318,10 @@ describe('画布面板：模块列表', () => {
 
     panel.shadowRoot?.querySelector<HTMLButtonElement>('button[data-kind="data.fill"]')?.click();
     await settle(panel);
-    const saved = JSON.parse(store.getItem(`pwn2block.graph.${ret2winPublic.id}`) ?? '{}') as {
-      modules?: { nodes?: { kind: string }[] }[];
+    const saved = JSON.parse(store.getItem(graphStorageKey(ret2winPublic.id)) ?? '{}') as {
+      document?: { modules?: { nodes?: { kind: string }[] }[] };
     };
-    expect(saved.modules?.[0]?.nodes?.some((node) => node.kind === 'data.fill')).toBe(true);
+    expect(saved.document?.modules?.[0]?.nodes?.some((node) => node.kind === 'data.fill')).toBe(true);
 
     panel.shadowRoot?.querySelector<HTMLButtonElement>('button.crumb')?.click();
     await settle(panel);

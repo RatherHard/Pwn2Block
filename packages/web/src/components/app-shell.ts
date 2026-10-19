@@ -48,12 +48,11 @@ import { sharedStyles, terminalTheme } from '../theme';
 import './briefing-panel';
 import './output-view';
 import './graph-panel';
-import './payload-panel';
 import './top-bar';
 import './verdict-panel';
 import './view-manager';
-import type { ActionOrigin, CompiledAction, NormalizedWorkspace } from '../compiler/types';
-import type { Pwn2BlockPayloadPanel } from './payload-panel';
+import type { ActionOrigin, CompiledAction, CompileError } from '../compiler/types';
+import type { Pwn2BlockGraphPanel } from './graph-panel';
 import type { RunMenuCommand } from './run-menu';
 import type { ViewContext } from './view-context';
 
@@ -325,7 +324,7 @@ export class Pwn2BlockApp extends LitElement {
   private leaveChallenge(): boolean {
     const state = this.state;
     if (state === undefined || state.busy || state.queued > 0) return false;
-    if (state.challenge !== undefined) this.panel()?.saveArchive();
+    if (state.challenge !== undefined) this.graphPanel()?.saveArchive();
     return this.controller?.browseChallenges() ?? false;
   }
 
@@ -439,26 +438,16 @@ export class Pwn2BlockApp extends LitElement {
   }
 
   private renderPayloadPanel(state: ControllerState, challenge: PublicChallenge) {
-    // 受控入口：`?editor=graph` 换上新画布，积木保持原样，便于两套编辑方式对照（07 §P2/P9）。
-    if (graphEditorRequested()) {
-      return html`<pwn2block-graph-panel
-        .challenge=${challenge}
-        .store=${this.activeStore}
-        @p2b-graph-compiled=${this.onGraphCompiled}
-        @p2b-graph-edited=${() => this.controller?.noteEdit()}
-      ></pwn2block-graph-panel>`;
-    }
-    return html`<pwn2block-payload-panel
+    return html`<pwn2block-graph-panel
       .challenge=${challenge}
-      .sessionId=${state.sessionId}
-      .state=${state}
-      .controls=${this.payloadModel(state)}
-      .highlightBlockId=${this.autoHighlight(state)}
       .store=${this.activeStore}
-      @p2b-run=${this.onRun}
-      @p2b-compile=${this.onCompile}
-      @p2b-edit=${this.onEdit}
-    ></pwn2block-payload-panel>`;
+      .controls=${this.payloadModel(state)}
+      .highlightNodeId=${this.autoHighlight(state) ?? undefined}
+      @p2b-graph-compiled=${this.onGraphCompiled}
+      @p2b-graph-compile-failed=${this.onGraphCompileFailed}
+      @p2b-graph-edited=${() => this.controller?.noteEdit()}
+      @p2b-graph-run=${this.onRun}
+    ></pwn2block-graph-panel>`;
   }
 
   /**
@@ -495,16 +484,20 @@ export class Pwn2BlockApp extends LitElement {
   /**
    * 画布存档的还原出口（05 §3.1 的「先画布、再会话」靠它保证）。
    *
-   * 控制器发出第一相位状态之后调用：这里等页面壳自己渲染完（payload 窗口这时才存在）、
-   * 再等窗口把 Blockly 挂上，然后把存档交给窗口去装。装不进去只是「程序没恢复」，
-   * 窗口会返回原因、控制器负责提示，画布内容由桥保证逐块不变（09 §3.2）。
+   * 控制器发出第一相位状态之后调用：这里等页面壳自己渲染完（画布这时才存在），
+   * 再把存档交给画布。画布在读档时完成旧存档迁移；迁移失败只影响「程序没恢复」，
+   * 原因由画布自己显示，原文保留可导出。
    */
   private async restoreCanvas(): Promise<string | undefined> {
     await this.updateComplete;
-    const panel = this.renderRoot.querySelector<Pwn2BlockPayloadPanel>('pwn2block-payload-panel');
-    if (panel === null) return undefined;
-    await panel.updateComplete;
-    return panel.restoreArchive();
+    const graph = this.graphPanel();
+    if (graph === undefined) return undefined;
+    await graph.updateComplete;
+    const reason = graph.restoreArchive();
+    // 旧 Blockly 面板在装回存档后会顺手编译一次；画布没有「装载事件」，这里显式补上，
+    // 保证「刷新 → 画布和产物都回来」仍是同一体验（05 §3.1）。
+    await graph.recompile();
+    return reason;
   }
 
   /** 首屏：题目列表来自 `GET /api/challenges`，`/` 总是停在列表；`/challenges/<id>` 由控制器直接开局。 */
@@ -663,8 +656,8 @@ export class Pwn2BlockApp extends LitElement {
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLButtonElement>('.boot button')?.focus());
   };
 
-  private panel(): Pwn2BlockPayloadPanel | undefined {
-    return this.renderRoot.querySelector<Pwn2BlockPayloadPanel>('pwn2block-payload-panel') ?? undefined;
+  private graphPanel(): Pwn2BlockGraphPanel | undefined {
+    return this.renderRoot.querySelector<Pwn2BlockGraphPanel>('pwn2block-graph-panel') ?? undefined;
   }
 
   /** 两处「运行」菜单共用：命令原样交给控制器，门禁由控制器复查（05 §1 两处等价）。 */
@@ -680,18 +673,14 @@ export class Pwn2BlockApp extends LitElement {
     this.controller?.publish(detail.actions, detail.origins);
   };
 
-  private onCompile = (event: Event): void => {
-    const { program } = (event as CustomEvent<{ readonly program: NormalizedWorkspace }>).detail;
-    this.controller?.compile(program);
-  };
-
-  private onEdit = (): void => {
-    this.controller?.noteEdit();
+  private onGraphCompileFailed = (event: Event): void => {
+    const detail = (event as CustomEvent<{ readonly errors: readonly CompileError[] }>).detail;
+    this.controller?.publishErrors(detail.errors);
   };
 
   private onBlockSelect = (event: Event): void => {
     const { blockId } = (event as CustomEvent<{ readonly blockId: string }>).detail;
-    this.panel()?.highlight(blockId);
+    this.graphPanel()?.locate({ nodeId: blockId });
   };
 
   private onBackToDebug = (): void => {
@@ -709,16 +698,7 @@ export class Pwn2BlockApp extends LitElement {
   };
 }
 
-/**
- * 是否走节点画布入口（07 §P2 的受控入口）。
- *
- * 只认地址栏的 `?editor=graph`：默认仍是积木，换题不会意外切换编辑器；等 P9 迁移完成后
- * 这条判断连同积木面板一起删掉。
- */
-function graphEditorRequested(): boolean {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('editor') === 'graph';
-}
+
 
 customElements.define('pwn2block-app', Pwn2BlockApp);
 

@@ -116,6 +116,11 @@ export class Pwn2BlockGraphCanvas extends LitElement {
         fill: var(--p2b-changed);
         stroke: var(--p2b-fg);
       }
+      .executing rect.node {
+        stroke: var(--p2b-ip);
+        stroke-width: 3;
+        filter: drop-shadow(0 0 4px var(--p2b-ip));
+      }
       .hintline {
         stroke: var(--p2b-focus);
         stroke-dasharray: 4 4;
@@ -133,12 +138,18 @@ export class Pwn2BlockGraphCanvas extends LitElement {
     context: { attribute: false },
     previews: { attribute: false },
     issues: { attribute: false },
+    highlightNodeId: { attribute: false },
+    focusPort: { attribute: false },
   };
 
   declare state: GraphEditorState | undefined;
   declare context: PortContext | undefined;
   declare previews: readonly NodePreview[] | undefined;
   declare issues: readonly WorkflowIssue[] | undefined;
+  /** 执行结果驱动的节点高亮；由页面壳按**当前产物**的节点 id 传入，不猜。 */
+  declare highlightNodeId: string | undefined;
+  /** 组装预览里选中的分段：高亮该输入端口。 */
+  declare focusPort: { readonly nodeId: string; readonly port: string } | undefined;
 
   private viewport: Viewport = { x: 20, y: 20, zoom: 1 };
   private drag?: DragState;
@@ -197,6 +208,25 @@ export class Pwn2BlockGraphCanvas extends LitElement {
       zoom,
       x: rect.width / 2 - (box.x + box.width / 2) * zoom,
       y: rect.height / 2 - (box.y + box.height / 2) * zoom,
+    };
+    this.requestUpdate();
+  }
+
+  /** 聚焦某个数据端口（组装分段选中时用）；找不到端口就退化成聚焦节点。 */
+  centerOnPort(nodeId: string, port: string): void {
+    const box = this.boxes().find((candidate) => candidate.id === nodeId);
+    if (box === undefined) return;
+    const anchor = box.inputs.find((candidate) => candidate.port === port);
+    if (anchor === undefined) {
+      this.focusNode(nodeId);
+      return;
+    }
+    const rect = this.getBoundingClientRect();
+    const zoom = this.viewport.zoom;
+    this.viewport = {
+      zoom,
+      x: rect.width / 2 - (box.x + NODE_WIDTH / 2) * zoom,
+      y: rect.height / 2 - anchor.y * zoom,
     };
     this.requestUpdate();
   }
@@ -722,6 +752,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
   private renderNode(box: NodeBox, highlighted: { node: string; port: string } | undefined) {
     const preview = this.previewOf(box.id);
     const error = this.issueOf(box.id);
+    const execution = this.highlightNodeId === box.id;
     const node = this.state?.document.nodes.find((candidate) => candidate.id === box.id);
     const collapsed = node !== undefined && this.state?.document.layout[box.id]?.collapsed === true;
     const simplified = this.viewport.zoom < SIMPLIFY_ZOOM;
@@ -729,7 +760,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
     return svg`<g
       data-node=${box.id}
       transform="translate(${box.x} ${box.y})"
-      class=${box.selected ? 'select' : nothing}
+      class=${[box.selected ? 'select' : '', execution ? 'executing' : ''].filter(Boolean).join(' ') || nothing}
     >
       <rect
         class="node"
@@ -754,7 +785,9 @@ export class Pwn2BlockGraphCanvas extends LitElement {
             fill="var(--p2b-fg)" />`}
       ${box.inputs.map((port) => {
         const y = port.y - box.y;
-        const active = highlighted?.node === port.nodeId && highlighted.port === port.port;
+        const active =
+          (highlighted?.node === port.nodeId && highlighted.port === port.port) ||
+          (this.focusPort?.nodeId === box.id && this.focusPort.port === port.port);
         return svg`<g>
           <rect class="port" data-node=${box.id} data-port=${port.port} data-kind="in" data-flow="data"
             x=${-PORT_SIZE / 2} y=${y - PORT_SIZE / 2} width=${PORT_SIZE} height=${PORT_SIZE}

@@ -189,6 +189,9 @@ export class Pwn2BlockVerdictPanel extends LitElement {
         <span class="pos" role="status" aria-live="polite">${positionSummary(replay, verdict.position)}</span>
       </div>
       ${this.renderInstructions(replay, verdict.position)}
+      <p class="note">
+        回放是判题实例留下的历史录像：拖动时间线只切换显示，不用当前图重新计算；从来源定位会展开并选中节点，但不会重放 Python 求值。
+      </p>
       <p class="note">提交不限次数：这里不显示剩余次数，也没有任何劝阻。判题实例与调试实例互不影响。</p>
     `;
   }

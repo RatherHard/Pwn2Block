@@ -1,5 +1,6 @@
 import type { PublicChallenge } from '@pwn2block/shared';
 import { compileProgram } from './compile';
+import { ACTION_ORIGIN_VERSION } from './types';
 import type {
   ActionOrigin,
   CompiledAction,
@@ -51,6 +52,8 @@ export interface ArtifactTracker {
    * 替换产物、`revision + 1`、`stale = false`。来源的 `blockId` 在画布路径里是节点 id。
    */
   adopt(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): PayloadArtifact;
+  /** 记录一次失败的编译：清空产物、保留错误，运行/提交门禁据此拦住。 */
+  fail(errors: readonly CompileError[]): void;
   /**
    * 标记产物已过期（编辑事件、程序化装载之后由调用方主动调用）。
    * 没有产物时是空操作：没有东西可供过期。
@@ -105,10 +108,15 @@ export function createArtifactTracker(limits?: Partial<CompilerLimits>): Artifac
       return artifact;
     },
 
+    fail(errors: readonly CompileError[]): void {
+      state = { artifact: undefined, errors, stale: false, revision: state.revision };
+    },
+
     adopt(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): PayloadArtifact {
       assertOriginsAligned(actions, origins);
       const revision = state.revision + 1;
-      const artifact: PayloadArtifact = { actions, origins, originsVersion: revision, revision };
+      // `originsVersion` 是来源表**格式**版本，不是产物修订号；两者混用会让第二次编译后的定位失效。
+      const artifact: PayloadArtifact = { actions, origins, originsVersion: ACTION_ORIGIN_VERSION, revision };
       state = { artifact, errors: [], stale: false, revision };
       return artifact;
     },

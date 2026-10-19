@@ -23,6 +23,7 @@ import {
 } from '@pwn2block/shared';
 import type { ApiClient } from '../src/api';
 import type { ArtifactTracker, PayloadArtifact, PayloadCompileState } from '../src/compiler/artifact';
+import { ACTION_ORIGIN_VERSION } from '../src/compiler/types';
 import type { CompiledAction, NormalizedWorkspace } from '../src/compiler/types';
 import type { ControllerState } from '../src/viewmodel/controller';
 import { createPageState } from '../src/viewmodel/session';
@@ -177,9 +178,14 @@ export function createFakeTracker(): FakeTracker {
       return state.artifact;
     },
     adopt(actions, origins): PayloadArtifact {
-      produced = { actions, origins, originsVersion: state.revision + 1, revision: state.revision + 1 };
+      produced = { actions, origins, originsVersion: ACTION_ORIGIN_VERSION, revision: state.revision + 1 };
       state = { artifact: produced, errors: [], stale: false, revision: state.revision + 1 };
       return produced;
+    },
+    fail(next): void {
+      produced = undefined;
+      errors = [...next];
+      state = { artifact: undefined, errors, stale: false, revision: state.revision };
     },
     noteEdit(): void {
       if (state.artifact === undefined || state.stale) return;

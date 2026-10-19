@@ -5,12 +5,11 @@ import { describe, expect, it } from 'vitest';
 /**
  * TUI 样式清扫的回归测试（任务 2，`docs/superpowers/specs/2026-10-17-frontend-tui-design.md` §1）。
  *
- * 直接读源码文本做正则断言：不依赖 Blockly / jsdom 渲染，只保证装饰性 CSS、旧 token
- * 名字和终端装饰文案不会再出现在 `theme.ts`、`mount.ts` 与各组件源码里。
+ * 直接读源码文本做正则断言：不依赖 DOM 渲染，只保证装饰性 CSS、旧 token
+ * 名字和终端装饰文案不会再出现在 `theme.ts` 与各组件源码里。
  */
 
 const THEME_PATH = fileURLToPath(new URL('../src/theme.ts', import.meta.url));
-const MOUNT_PATH = fileURLToPath(new URL('../src/blocks/mount.ts', import.meta.url));
 const TOP_BAR_PATH = fileURLToPath(new URL('../src/components/top-bar.ts', import.meta.url));
 
 /** 引号字符串：值里不含同种引号，否则 `'x' / ''` 整段会被当成一个值。 */
@@ -128,13 +127,6 @@ describe('TUI 样式清扫（设计 §1）', () => {
     expect(source).not.toMatch(/[⌄⌃›]/u);
     expect(source).toMatch(/\.menu > summary::after \{[^}]*border-right:[^}]*border-bottom:[^}]*transform: rotate\(-45deg\);/);
     expect(source).toMatch(/\.menu\[open\] > summary::after \{[^}]*rotate\(45deg\)/);
-  });
-
-  it('mount.ts 不含装饰性 CSS、旧 token 或禁用标记', async () => {
-    const source = readSource(MOUNT_PATH);
-    for (const pattern of BANNED_PATTERNS) {
-      expect(source, `mount.ts 命中 ${pattern}`).not.toMatch(pattern);
-    }
   });
 
   it('components/*.ts 不含装饰性 CSS、旧 token 或禁用标记', async () => {
