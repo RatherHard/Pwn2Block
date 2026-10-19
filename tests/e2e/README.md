@@ -38,10 +38,8 @@ pnpm e2e
 
 `.github/workflows/ci.yml` 在构建后启动真实后端并跑完整 `pnpm e2e`，失败时上传 `.tmp/ci-e2e` 与服务端日志。Python 侧另用 `PWN2BLOCK_REQUIRE_PYTHON=1` 和预先拉取的 `python:3.12-alpine` 强制真实 Docker 隔离用例执行，缺镜像直接失败。
 
-## 最近一次本地结果
+## 历史记录与下一轮验收
 
-2026-11-05，Windows + Playwright bundled Chromium + 生产构建 + 真实后端 `127.0.0.1:8787`：
+基础阶段的本地结果已移至 [历史验收记录](../../docs/archive/graph-2026-10-19/浏览器验收记录.md)，其中日期与截图可用性有说明。当前手册只维护用例覆盖和运行方式，不以历史通过记录代表新一轮通过。
 
-- `pnpm e2e`：8/8 通过（closed-loop 1 + frontend-details 4 + 三尺寸 smoke 3），0 skipped，0 flaky。
-- 截图复制为 `docs/evidence-graph-1280x720.png`、`docs/evidence-graph-1440x900.png`、`docs/evidence-graph-1920x1080.png`、`docs/evidence-graph-won.png`；其余运行产物在 `.tmp/`，已被 git 忽略。
-- 人工视觉、真实读屏、Firefox/WebKit 与移动端仍不在自动验收范围内。
+下一轮按 [10-需求](../../docs/10-节点画布交互与布局优化需求.md) 的 A01–A17 更新浏览器用例，覆盖真实拖拽、页面滚动、双入口编辑、双模式接线和空画布；开发顺序见 [00-开发入口](../../docs/00-开发入口.md)。

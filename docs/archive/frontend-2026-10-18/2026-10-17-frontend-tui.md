@@ -1,5 +1,7 @@
 # 前端 TUI 化与交互简化 Implementation Plan
 
+> 已归档（2026-10-19）。旧阶段设计与任务安排，仅作历史参考；现存问题见 [05-未完成工作](../../05-未完成工作.md)，当前开发见 [00-开发入口](../../00-开发入口.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 `packages/web` 改成严格 TUI 风格：单面板标签式视图、pwndbg 排版、payload 区只剩画布与「运行 / 终止」、通栏输出区、整行状态栏、自研 Markdown 渲染。
@@ -8,7 +10,7 @@
 
 **Tech Stack:** TypeScript、Lit 3、Blockly 13、Vite、vitest（组件测试首行 `// @vitest-environment jsdom`）、Playwright（e2e，可选）。
 
-**Spec:** `docs/superpowers/specs/2026-10-17-frontend-tui-design.md`
+**Spec:** [原设计（已归档）](2026-10-17-frontend-tui-design.md)
 
 ## Global Constraints
 
@@ -91,7 +93,7 @@
     { kind: 'code', text: 'd' },
   ]));
   it('链接只留文字', () => expect(parseInline('[x](javascript:alert(1))')).toEqual([{ kind: 'link', children: [{ kind: 'text', text: 'x' }] }]));
-  it('未闭合标记按原文', () => expect(parseInline('**a `b [c](')).toEqual([{ kind: 'text', text: '**a `b [c](' }]));
+  it('未闭合标记按原文', () => expect(parseInline('**a `b [c](../../superpowers/plans/')).toEqual([{ kind: 'text', text: '**a `b [c](../../superpowers/plans/' }]));
   it('<script> 与 <img onerror> 只是文本', () => expect(parseInline('<script>x</script><img src=x onerror=y>')).toEqual([{ kind: 'text', text: '<script>x</script><img src=x onerror=y>' }]));
   it('CRLF 与 LF 等价', () => expect(parseMarkdown('# a\r\n\r\n- b\r\n  - c')).toEqual(parseMarkdown('# a\n\n- b\n  - c')));
   it('空串返回空数组', () => expect(parseMarkdown('')).toEqual([]));

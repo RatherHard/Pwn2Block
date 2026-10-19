@@ -1,5 +1,7 @@
 # 节点画布与 Python 数据处理实施计划
 
+> 已归档（2026-10-19）。这是已完成基础阶段的历史材料；当前工作从 [开发入口](../../00-开发入口.md) 开始。日期与证据限制见 [本阶段索引](README.md)。
+
 状态：已完成（P0–P9 全部落地；节点画布已是默认编辑器，Blockly 界面与运行时依赖已移除，旧存档只读迁移保留。证据见各阶段勾选、第 5/6 节与 `docs/evidence-graph-*.png`）
 
 日期：2026-10-18（2026-11-05 完成收尾）
@@ -74,7 +76,7 @@ P6 可独立推进，不依赖画布功能全部完成。其余阶段按表中�
 
 - [x] 建立基础 payload、条件分支、循环和旧存档样例，保存现有编译动作及判题结果作为对照。（对照样例即 workflow 编译测试与 acceptance 套件；旧存档对照随 P8 迁移补。）
 - [x] 在开发入口验证 Rete/Lit：基础节点、嵌套容器、折叠后连接、折线端口、缩放、键盘连接和销毁重建。（结论：自绘 Lit 画布，不引入 Rete；折叠、缩放、键盘连接与重建均已有测试。）
-- [x] 在 1280×720 下验证画布、VM 与侧栏能够完成关键操作；原型使用现有主题。（真实 Chromium + 生产构建 + 真实后端：`tests/e2e/desktop-smoke.spec.ts` 与 `closed-loop.spec.ts` 通过；截图 [evidence-graph-1280x720.png](evidence-graph-1280x720.png)、[evidence-graph-won.png](evidence-graph-won.png)。）
+- [x] 在 1280×720 下验证画布、VM 与侧栏能够完成关键操作；原型使用现有主题。（真实 Chromium + 生产构建 + 真实后端：`tests/e2e/desktop-smoke.spec.ts` 与 `closed-loop.spec.ts` 通过；截图 evidence-graph-1280x720.png（历史文件 `docs/evidence-graph-1280x720.png`，当前缺失）、evidence-graph-won.png（历史文件 `docs/evidence-graph-won.png`，当前缺失）。）
 - [x] 跑通 Python 最小隔离任务：大整数输入、字节输出、异常、超时，以及网络和宿主文件访问拒绝。（本机 Docker Desktop + python:3.12-alpine 实跑，python-real 19/19 通过，含 7 项隔离用例；目标部署环境仍需复跑。）
 - [x] 记录第 2 节决策、限制值、依赖版本及开发/部署要求。
 
@@ -145,7 +147,7 @@ P6 可独立推进，不依赖画布功能全部完成。其余阶段按表中�
 - [x] 按 P0 方案限制网络、文件访问、子进程及资源；仅提供运行库与任务临时资源，任务之间不共享可写状态。（docker：`--network=none`、`--read-only`、`--pids-limit=64`、`--user nobody`、`--memory`、`--rm`。）
 - [x] 超时、取消、客户端断开或任务结束后回收整个任务及临时资源；错误不泄露宿主路径或秘密。（墙钟超时杀子进程并按容器名补杀，`rm` 临时目录，错误只给节点级原因。）
 - [x] 增加服务健康、启动失败和执行环境不可用的明确反馈，不回退为宿主直接执行。（`GET /api/capabilities` + `python_unavailable` / `python_spawn_failed` 诊断事件。）
-- [x] 为实际部署环境提供启动、依赖安装、资源配置和诊断说明。（见 [09-部署与诊断](09-Python求值部署与诊断.md)。）
+- [x] 为实际部署环境提供启动、依赖安装、资源配置和诊断说明。（见 [09-部署与诊断](../../09-Python求值部署与诊断.md)。）
 
 **验证：** 正常工具调用、大整数、错误类型、语法/运行异常、死循环、内存/日志/输出超额、取消、排队上限、环境变量/文件/网络访问、任务间状态隔离。`python-real.test.ts` 19 项全部通过：process 后端 12 项 + Docker 隔离 7 项（本机 Docker Desktop + python:3.12-alpine 实跑）；部署前仍按 09 的验收清单在目标环境复跑。
 
@@ -175,7 +177,7 @@ P6 可独立推进，不依赖画布功能全部完成。其余阶段按表中�
 ### P9：验收、切换与清理
 
 - [x] 按第 5 节逐条提供验证记录；所有支持的题目通过既有参考解法回归，代表性基础题通过新画布端到端判胜。（`pnpm challenge:check --all` 7/7、`pnpm challenge:solve --all` 7/7；ret2win 由 `pnpm e2e` 的画布闭环判胜，见 `docs/evidence-graph-won.png`。）
-- [x] 在 1280×720、1440×900、1920×1080 检查 TUI 风格、关键操作、侧栏、长内容和键盘路径。（`desktop-smoke.spec.ts` 三个 viewport 全通过：画布/工具箱/检查器可见、无横向越界、方向键移动、`f` 适应、刷新恢复；证据 [1280×720](evidence-graph-1280x720.png)、[1440×900](evidence-graph-1440x900.png)、[1920×1080](evidence-graph-1920x1080.png)。）
+- [x] 在 1280×720、1440×900、1920×1080 检查 TUI 风格、关键操作、侧栏、长内容和键盘路径。（`desktop-smoke.spec.ts` 三个 viewport 全通过：画布/工具箱/检查器可见、无横向越界、方向键移动、`f` 适应、刷新恢复；证据 1280×720（历史文件 `docs/evidence-graph-1280x720.png`，当前缺失）、1440×900（历史文件 `docs/evidence-graph-1440x900.png`，当前缺失）、1920×1080（历史文件 `docs/evidence-graph-1920x1080.png`，当前缺失）。）
 - [x] CI 加入 Python 单元、真实隔离集成和画布 E2E 检查，缺少后端时明确失败，不以跳过冒充通过。（`.github/workflows/ci.yml`：Python runner unittest、拉取 `python:3.12-alpine` 后 `PWN2BLOCK_REQUIRE_PYTHON=1` 跑真实隔离、生产构建后启动真实后端跑 `pnpm e2e`；缺 Python/镜像直接失败，E2E 失败上传现场。）
 - [x] 默认切换到节点画布；删除 Blockly 界面和运行时依赖，保留迁移所需解析与旧格式样例。（`app-shell` 直接渲染 `pwn2block-graph-panel`；`packages/web/src/blocks/`、`payload-panel.ts` 与 Blockly 依赖已删，`migrate-blockly.ts`、`pwn2block.canvas.v1.*` 读取与旧存档样例保留。）
 - [x] 更新根 README、01 架构、02 已实现需求、03/05 待办及运行说明，写明新增 Python 部署条件。（本次同步更新根 README、01/02/03/05、`docs/README.md` 与 08 的状态；Python 部署条件仍以 09 为准。）
