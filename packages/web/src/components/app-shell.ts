@@ -138,15 +138,15 @@ export class Pwn2BlockApp extends LitElement {
       .left {
         display: flex;
         flex-direction: column;
-        height: max(20rem, 46dvh);
-        min-height: 20rem;
+        height: max(32rem, 72dvh);
+        min-height: 32rem;
         background: var(--p2b-bg);
       }
       .right {
         display: flex;
         flex-direction: column;
-        height: max(34rem, 76dvh);
-        min-height: 34rem;
+        height: max(44rem, 96dvh);
+        min-height: 44rem;
         background: var(--p2b-bg);
       }
       .right > pwn2block-graph-panel {
@@ -194,15 +194,14 @@ export class Pwn2BlockApp extends LitElement {
       .boot .lead {
         color: var(--p2b-dim);
       }
-      @media (max-width: 980px) {
-        main {
-          overflow: visible;
-        }
-        .left,
-        .right {
-          height: auto;
-          min-height: 26rem;
-        }
+      /* 宽而矮的窗口优先给工作区完整的一屏；窄高屏仍保持明确高度。 */
+      @media (min-aspect-ratio: 2/1) {
+        .left { height: max(32rem, 85dvh); }
+        .right { height: max(44rem, 108dvh); }
+      }
+      @media (max-aspect-ratio: 1/1) {
+        .left { height: max(32rem, 62dvh); }
+        .right { height: max(48rem, 88dvh); }
       }
       @media (max-width: 620px) {
         .briefing,

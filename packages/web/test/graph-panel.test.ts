@@ -52,8 +52,14 @@ async function settle(panel: Pwn2BlockGraphPanel): Promise<void> {
 }
 
 /** 节点库与属性面板各自有影子根：跨一层的查询单独收在这里，测试里只看行为。 */
-function libraryButton(panel: Pwn2BlockGraphPanel, kind: string): HTMLButtonElement | null {
+async function libraryButton(panel: Pwn2BlockGraphPanel, kind: string): Promise<HTMLButtonElement | null> {
   const library = panel.shadowRoot?.querySelector('pwn2block-node-library');
+  const search = library?.shadowRoot?.querySelector<HTMLInputElement>('input[type="search"]');
+  if (search !== null && search !== undefined) {
+    search.value = kind;
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    await library?.updateComplete;
+  }
   return library?.shadowRoot?.querySelector<HTMLButtonElement>(`button[data-kind="${kind}"]`) ?? null;
 }
 
@@ -122,9 +128,9 @@ describe('画布面板：工具箱与存档', () => {
   it('节点库按分类列出节点，点一下就加进画布', async () => {
     const { panel } = await mount();
     const library = panel.shadowRoot?.querySelector('pwn2block-node-library');
-    const entries = library?.shadowRoot?.querySelectorAll('button[data-kind]') ?? [];
-    expect(entries.length).toBeGreaterThan(10);
-    const fill = libraryButton(panel, 'data.fill');
+    const entries = library?.shadowRoot?.querySelectorAll('button[data-category]') ?? [];
+    expect(entries.length).toBe(10);
+    const fill = await libraryButton(panel, 'data.fill');
     expect(fill).not.toBeNull();
     fill?.click();
     await settle(panel);
@@ -145,7 +151,7 @@ describe('画布面板：工具箱与存档', () => {
 
   it('编辑后写回存档', async () => {
     const { panel, store } = await mount();
-    libraryButton(panel, 'data.fill')?.click();
+    (await libraryButton(panel, 'data.fill'))?.click();
     await settle(panel);
     const saved = store.getItem(graphStorageKey(ret2winPublic.id));
     expect(saved).not.toBeNull();
@@ -244,7 +250,7 @@ describe('画布面板：编译', () => {
     await vi.waitFor(() => {
       expect(panel.shadowRoot?.textContent ?? '').toContain('编译成功');
     });
-    libraryButton(panel, 'data.fill')?.click();
+    (await libraryButton(panel, 'data.fill'))?.click();
     await settle(panel);
     // 加了节点但没编译：状态行仍写上次结果，另外用红色标记过期。
     const header = panel.shadowRoot?.querySelector('header');
@@ -273,7 +279,7 @@ describe('画布面板：把产物交给运行链路', () => {
     panel.addEventListener('p2b-graph-edited', () => {
       edited += 1;
     });
-    libraryButton(panel, 'data.fill')?.click();
+    (await libraryButton(panel, 'data.fill'))?.click();
     await settle(panel);
     expect(edited).toBe(1);
   });
@@ -329,7 +335,7 @@ describe('画布面板：模块列表', () => {
     expect(bodyCanvas?.shadowRoot?.querySelector('[data-node="get"]')).not.toBeNull();
     expect(bodyCanvas?.shadowRoot?.querySelector('[data-node="run"]')).toBeNull();
 
-    libraryButton(panel, 'data.fill')?.click();
+    (await libraryButton(panel, 'data.fill'))?.click();
     await settle(panel);
     const saved = JSON.parse(store.getItem(graphStorageKey(ret2winPublic.id)) ?? '{}') as {
       document?: { modules?: { nodes?: { kind: string }[] }[] };
@@ -358,7 +364,7 @@ describe('画布面板：来源定位后的编辑与动态参数', () => {
 
   it('题目积木的动态输入在检查器里可手填，且按字节串保存（全数字也仍是十六进制）', async () => {
     const { panel } = await mount();
-    libraryButton(panel, 'action.author')?.click();
+    (await libraryButton(panel, 'action.author'))?.click();
     await settle(panel);
     const id = panel.currentDocument().nodes.find((node) => node.kind === 'action.author')?.id;
     if (id === undefined) throw new Error('没有 author 节点');
@@ -377,5 +383,35 @@ describe('画布面板：来源定位后的编辑与动态参数', () => {
 
     const params = panel.currentDocument().nodes.find((node) => node.id === id)?.params;
     expect(params).toMatchObject({ id: 'gets', data: '4141', dataMode: 'inline' });
+  });
+});
+
+
+describe('节点库题目权限', () => {
+  it('目录与搜索仅展示当前题目允许的动作，专用动作以题目声明为准', async () => {
+    const { panel } = await mount();
+    expect(await libraryButton(panel, NODE.run)).not.toBeNull();
+    expect(await libraryButton(panel, NODE.write)).toBeNull();
+    expect(await libraryButton(panel, NODE.push)).toBeNull();
+    expect(await libraryButton(panel, NODE.author)).not.toBeNull();
+    expect(panel.shadowRoot?.textContent).not.toContain('Python 模板');
+
+    panel.challenge = { ...ret2winPublic, allowedActions: ['push'], authorBlocks: [] };
+    await settle(panel);
+    expect(await libraryButton(panel, NODE.push)).not.toBeNull();
+    expect(await libraryButton(panel, NODE.run)).toBeNull();
+    expect(await libraryButton(panel, NODE.author)).toBeNull();
+  });
+
+  it('过期的添加和拖拽事件不能插入当前不可用的动作', async () => {
+    const { panel } = await mount();
+    const library = panel.shadowRoot?.querySelector('pwn2block-node-library');
+    for (const type of ['p2b-library-add', 'p2b-library-dragstart', 'p2b-library-dragend']) {
+      library?.dispatchEvent(new CustomEvent(type, {
+        detail: { kind: NODE.write, clientX: 0, clientY: 0, canceled: false }, bubbles: true, composed: true,
+      }));
+    }
+    await settle(panel);
+    expect(panel.currentDocument().nodes).toHaveLength(0);
   });
 });

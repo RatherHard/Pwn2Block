@@ -187,6 +187,10 @@ describe('画布手势', () => {
     expect(events.filter((event) => event.type === 'move')).toEqual([]);
     head.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 90, clientY: 70 }));
     expect(events.filter((event) => event.type === 'move')).toEqual([]);
+    await canvas.updateComplete;
+    const node = canvas.shadowRoot?.querySelector<HTMLElement>('.node[data-node="fill"]');
+    expect(node?.style.left).toBe(`${origin.x + 50}px`);
+    expect(node?.style.top).toBe(`${origin.y + 30}px`);
     head.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 90, clientY: 70 }));
     expect(events).toContainEqual({
       type: 'move',

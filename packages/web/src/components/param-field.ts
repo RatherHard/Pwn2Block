@@ -115,10 +115,7 @@ function renderControl(
       const summary = param.kind === 'code'
         ? `${typeof current === 'string' ? current.split('\n').length : 0} 行代码`
         : Array.isArray(current) ? `${current.length} 个命名输入` : '未配置';
-      return html`<span class="param-summary">${summary}</span>
-        <button type="button" class="configure" data-configure=${param.name} @click=${() => options.onConfigure?.()}>
-          配置
-        </button>`;
+      return html`<span class="param-summary">${summary}</span>`;
     }
     if (param.kind === 'code') {
       return html`<pwn2block-code-editor

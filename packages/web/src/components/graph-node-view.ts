@@ -75,13 +75,6 @@ export function renderNodeView(options: NodeViewOptions): unknown {
     <div class="node-head" data-drag-handle="true" title="拖动这里移动节点">
       <span class="node-title" title=${spec.label}>${box.header}</span>
       ${statusLabel === '' ? nothing : html`<span class="node-status">${statusLabel}</span>`}
-      <button
-        type="button"
-        class="node-config"
-        data-configure=${box.id}
-        title="在右侧属性面板里编辑这个节点的全部配置"
-        @click=${() => options.onConfigure()}
-      >配置</button>
     </div>
     ${options.simplified
       ? nothing
@@ -92,7 +85,7 @@ export function renderNodeView(options: NodeViewOptions): unknown {
 }
 
 function statusText(status: 'selected' | 'error' | 'running'): string {
-  if (status === 'selected') return '选中';
+  if (status === 'selected') return '';
   if (status === 'error') return '错误';
   return '执行中';
 }

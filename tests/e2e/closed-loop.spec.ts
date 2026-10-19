@@ -56,11 +56,9 @@ async function selectNode(page: Page, kind: string): Promise<Locator> {
 }
 
 async function addNode(page: Page, label: string): Promise<void> {
-  await page
-    .locator('pwn2block-graph-panel')
-    .getByRole('complementary', { name: '节点库' })
-    .getByRole('button', { name: label, exact: true })
-    .click();
+  const library = page.locator('pwn2block-graph-panel').getByRole('complementary', { name: '节点库' });
+  await library.getByRole('searchbox', { name: '搜索节点' }).fill(label);
+  await library.getByRole('button', { name: label, exact: true }).click();
 }
 
 async function setAuthorData(page: Page, hex: string): Promise<void> {

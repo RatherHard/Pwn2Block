@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 /**
  * 节点画布交互回归（10 §3–§5 的浏览器侧证据）：
  *
- * - 节点库：7 个分类、搜索、预览、拖入画布落点；
+ * - 节点库：两级目录、搜索、预览、拖入画布落点；
  * - 拖动节点：位置跟着指针走、不跳变、拖拽期间不选中文字；
  * - 双模式接线：点击—点击与拖拽都能连上，折线是正交路径且带箭头；
  * - 选中连线后 Delete 删除、Ctrl+Z 撤销；双击断线也能撤销；
@@ -40,11 +40,9 @@ async function nodeIdOf(page: Page, kind: string): Promise<string> {
 }
 
 async function addNode(page: Page, label: string): Promise<void> {
-  await page
-    .locator('pwn2block-graph-panel')
-    .getByRole('complementary', { name: '节点库' })
-    .getByRole('button', { name: label, exact: true })
-    .click();
+  const library = page.locator('pwn2block-graph-panel').getByRole('complementary', { name: '节点库' });
+  await library.getByRole('searchbox', { name: '搜索节点' }).fill(label);
+  await library.getByRole('button', { name: label, exact: true }).click();
 }
 
 /** 选中节点并把它挪进视野，返回画布上的节点元素。 */
@@ -223,32 +221,97 @@ test('Python 编辑：没有文件导入入口，行号与扩大可用，代码�
     .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.python')?.params.code)
     .toBe(afterTab);
 
+  const canvas = panel.locator('pwn2block-graph-canvas');
+  const node = canvas.locator(`.node[data-node="${id}"]`);
+  const original = await stableBox(page, node);
+  const originalZoom = await canvas.evaluate((element) => (element as unknown as { zoom: number }).zoom);
+  const smallBox = await editor.boundingBox();
+  const fieldBox = await inspector.locator('select').first().boundingBox();
+  expect(smallBox).not.toBeNull();
+  expect(fieldBox).not.toBeNull();
+  expect(Math.abs((smallBox?.width ?? 0) - (fieldBox?.width ?? 0))).toBeLessThanOrEqual(2);
+  expect(Math.abs((smallBox?.x ?? 0) - (fieldBox?.x ?? 0))).toBeLessThanOrEqual(2);
+  await expect(node.getByRole('button', { name: '配置', exact: true })).toHaveCount(0);
+  await expect(node.locator('.node-status')).toHaveCount(0);
+
   await editor.getByRole('button', { name: '扩大编辑' }).click();
-  await expect(editor).toHaveAttribute('expanded', '');
-  await editor.getByRole('button', { name: '退出扩大' }).click();
-  await expect(editor).not.toHaveAttribute('expanded', '');
-  await expect(area).toHaveValue(afterTab);
+  const expanded = panel.locator('.canvas-code-editor');
+  await expect(expanded).toBeVisible();
+  await expect(canvas).toBeHidden();
+  await expect(expanded.locator('textarea')).toHaveValue(afterTab);
+  const largeBox = await expanded.boundingBox();
+  const hostBox = await panel.locator('.canvas-host').boundingBox();
+  expect(Math.abs((largeBox?.width ?? 0) - (hostBox?.width ?? 0))).toBeLessThanOrEqual(2);
+  expect(Math.abs((largeBox?.height ?? 0) - (hostBox?.height ?? 0))).toBeLessThanOrEqual(2);
+  const finalCode = 'result = b"expanded"';
+  await expanded.locator('textarea').fill(finalCode);
+  await expanded.locator('textarea').press('Escape');
+  await expect(expanded).toHaveCount(0);
+  await expect(area).toHaveValue(finalCode);
+  await expect(canvas).toBeVisible();
+  expect(await canvas.evaluate((element) => (element as unknown as { zoom: number }).zoom)).toBe(originalZoom);
+  const restored = await stableBox(page, node);
+  expect(Math.abs(restored.x - original.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(restored.y - original.y)).toBeLessThanOrEqual(2);
+  await expect(node).toHaveClass(/selected/);
+  await editor.getByRole('button', { name: '扩大编辑' }).click();
+  await expanded.locator('textarea').fill('result = b"saved"');
+  await expanded.getByRole('button', { name: '返回画布' }).click();
+  await expect(area).toHaveValue('result = b"saved"');
+  await page.reload();
+  await expect.poll(async () => (await readDoc(page)).nodes.find((node) => node.id === id)?.params.code).toBe('result = b"saved"');
 });
 
-test('节点库：7 个分类、搜索过滤、悬停预览、拖入画布落点（10 §4）', async ({ page }) => {
+test('节点库：两级目录、搜索过滤、常驻预览、拖入画布落点（10 §4）', async ({ page }) => {
   await openChallenge(page);
   const panel = page.locator('pwn2block-graph-panel');
   const library = panel.getByRole('complementary', { name: '节点库' });
   const canvas = panel.getByRole('application', { name: '节点画布' });
 
-  // 7 个分类，层级最多两级（分类 → 分组 → 条目）。
-  await expect(library.locator('details')).toHaveCount(7);
-  expect(await library.locator('details details').count()).toBe(0);
+  // 两级目录：分类 → 节点，不再进入子分类。
+  await expect(library.locator('button[data-category]')).toHaveCount(10);
+  await expect(library.locator('button[data-kind]')).toHaveCount(0);
 
   // 搜索按名字过滤，并显示路径。
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill('异或');
-  await expect(library.getByRole('button', { name: /逐字节异或/ })).toBeVisible();
+  await library.getByRole('searchbox', { name: '搜索节点' }).fill('Python');
+  await expect(library.getByRole('button', { name: 'Python 处理', exact: true })).toBeVisible();
+  await expect(library.getByText('Python 模板')).toHaveCount(0);
   await expect(library.getByRole('button', { name: '填充字节', exact: true })).toHaveCount(0);
   await library.getByRole('searchbox', { name: '搜索节点' }).fill('');
 
-  // 悬停预览：只读预览，不执行、不请求。
-  await library.getByRole('button', { name: '填充字节', exact: true }).hover();
-  await expect(library.getByRole('region', { name: '节点预览' })).toBeVisible();
+  await library.getByRole('button', { name: '字节与载荷', exact: true }).click();
+  await expect(library.locator('button[data-section]')).toHaveCount(0);
+  const fill = library.getByRole('button', { name: '填充字节', exact: true });
+  const back = library.getByRole('button', { name: '返回上一级', exact: true });
+  const backBox = await back.boundingBox();
+  const fillBox = await fill.boundingBox();
+  const titleBox = await library.getByRole('heading', { name: '节点库', exact: true }).boundingBox();
+  expect(Math.abs((backBox?.width ?? 0) - (fillBox?.width ?? 0))).toBeLessThanOrEqual(2);
+  expect(Math.abs((backBox?.x ?? 0) - (fillBox?.x ?? 0))).toBeLessThanOrEqual(2);
+  expect(backBox?.y).toBeGreaterThan((titleBox?.y ?? 0) + (titleBox?.height ?? 0));
+  await fill.hover();
+  const colors = await fill.evaluate((element) => {
+    const view = element.ownerDocument.defaultView;
+    return {
+      background: view?.getComputedStyle(element).backgroundColor,
+      title: view?.getComputedStyle(element.querySelector('.node-title')!).color,
+      summary: view?.getComputedStyle(element.querySelector('.preview-summary')!).color,
+    };
+  });
+  expect(colors).toEqual({ background: 'rgb(255, 255, 255)', title: 'rgb(12, 12, 12)', summary: 'rgb(12, 12, 12)' });
+
+  await expect(fill.locator('.static-node')).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(fill.locator('.static-node')).toBeVisible();
+  // 搜索其他分类后，清空搜索仍回到原目录。
+  await library.getByRole('searchbox', { name: '搜索节点' }).fill('data.int');
+  await expect(library.locator('button[data-kind="data.int"] .preview')).toBeVisible();
+  await library.getByRole('searchbox', { name: '搜索节点' }).fill('');
+  await expect(fill).toBeVisible();
+  await library.getByRole('button', { name: '返回上一级', exact: true }).click();
+  await expect(library.getByRole('button', { name: '字节与载荷', exact: true })).toBeVisible();
+  await library.getByRole('button', { name: '字节与载荷', exact: true }).click();
+  await fill.scrollIntoViewIfNeeded();
 
   // 拖入画布：落点附近生成节点，且不落在画布外。
   const entry = await library.getByRole('button', { name: '填充字节', exact: true }).boundingBox();
@@ -278,38 +341,75 @@ test('节点库：7 个分类、搜索过滤、悬停预览、拖入画布落点
   expect(Math.abs((created?.y ?? 0) - worldX.y)).toBeLessThan(40);
 });
 
-test('拖动节点：位置跟着指针走、不跳变、拖拽期间不选中文字（10 §3.2）', async ({ page }) => {
+test('拖动节点：不同缩放下连续拖动时预览跟随指针，松手不跳变（10 §3.2）', async ({ page }) => {
   await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const canvas = panel.getByRole('application', { name: '节点画布' });
+  const canvas = page.locator('pwn2block-graph-canvas');
   await addNode(page, '填充字节');
+  for (const zoom of [0.65, 1, 1.5]) {
+    await canvas.evaluate((element, value) => (element as unknown as { setZoom(value: number): void }).setZoom(value), zoom);
+    const node = await focusNode(page, 'fill');
+    await node.scrollIntoViewIfNeeded();
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      const before = (await readDoc(page)).layout.fill;
+      if (before === undefined) throw new Error('节点没有布局');
+      const head = await stableBox(page, node.locator('.node-head'));
+      const startX = head.x + 28;
+      const startY = head.y + head.height / 2;
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      for (const [dx, dy] of [[0, 0], [20, 10], [40, 30], [70, 40]] as const) {
+        await page.mouse.move(startX + dx, startY + dy);
+        // 检查真实渲染位置，不能只检查松手后写回的文档坐标。
+        await expect.poll(async () => {
+          const current = await node.locator('.node-head').boundingBox();
+          if (current === null) return Infinity;
+          return Math.max(Math.abs(current.x - head.x - dx), Math.abs(current.y - head.y - dy));
+        }).toBeLessThanOrEqual(2);
+        expect((await readDoc(page)).layout.fill).toEqual(before);
+        expect(await page.evaluate<string>('getSelection()?.toString() ?? ""')).toBe('');
+      }
+      await page.mouse.up();
+      const after = (await readDoc(page)).layout.fill;
+      expect(Math.abs((after?.x ?? 0) - (before.x + 70 / zoom))).toBeLessThanOrEqual(2);
+      expect(Math.abs((after?.y ?? 0) - (before.y + 40 / zoom))).toBeLessThanOrEqual(2);
+      const released = await stableBox(page, node.locator('.node-head'));
+      expect(Math.abs(released.x - head.x - 70)).toBeLessThanOrEqual(2);
+      expect(Math.abs(released.y - head.y - 40)).toBeLessThanOrEqual(2);
+    }
+  }
+});
+
+test('画布标签不能被拖选，参数输入框仍能选择和编辑文字（10 §3.2）', async ({ page }) => {
+  await openChallenge(page);
+  const canvas = page.locator('pwn2block-graph-canvas');
+  await addNode(page, '填充字节');
+  await canvas.evaluate((element) => (element as unknown as { setZoom(value: number): void }).setZoom(1));
   const node = await focusNode(page, 'fill');
-
+  await node.scrollIntoViewIfNeeded();
   const before = (await readDoc(page)).layout.fill;
-  const head = await stableBox(page, node.locator('.node-head'));
-  if (before === undefined) throw new Error('节点没有布局');
-  // 按在标题左侧（避开右上角的「配置」按钮），这是节点的拖动把手。
-  const startX = Math.round(head.x + 28);
-  const startY = Math.round(head.y + head.height / 2);
-
+  const label = await stableBox(page, node.locator('.row-label').first());
+  const startX = label.x + Math.min(28, label.width / 3);
+  const startY = label.y + label.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  // 按下后立刻检查：还没移动时位置不能变（这就是「跳变」的判定）。
-  expect((await readDoc(page)).layout.fill).toEqual(before);
-  // 拖拽期间正文不可选中。
-  expect(await page.evaluate<string>('getSelection()?.toString() ?? ""')).toBe('');
-
-  await page.mouse.move(startX + 40, startY + 30, { steps: 4 });
-  await page.mouse.move(startX + 90, startY + 60, { steps: 6 });
+  for (let step = 1; step <= 4; step += 1) {
+    await page.mouse.move(startX + 20 * step, startY + 10 * step);
+    expect(await page.evaluate<string>('getSelection()?.toString() ?? ""')).toBe('');
+  }
   await page.mouse.up();
+  expect((await readDoc(page)).layout.fill).toEqual(before);
 
-  const after = (await readDoc(page)).layout.fill;
-  // 图坐标位移 = 指针位移 ÷ 缩放（适应窗口后默认不是 1 倍），允许 ±2px 的取整误差。
-  const zoom = await canvas.evaluate((element) => (element as unknown as { zoom: number }).zoom);
-  expect(Math.abs((after?.x ?? 0) - (before.x + 90 / zoom))).toBeLessThanOrEqual(2);
-  expect(Math.abs((after?.y ?? 0) - (before.y + 60 / zoom))).toBeLessThanOrEqual(2);
-  expect(await page.evaluate<string>('getSelection()?.toString() ?? ""')).toBe('');
-  await expect(canvas.locator('.node[data-node="fill"]')).toBeVisible();
+  const input = node.locator('input').first();
+  await input.fill('42');
+  await input.press('ControlOrMeta+A');
+  expect(await input.evaluate((element) => {
+    const field = element as unknown as { selectionStart: number | null; selectionEnd: number | null };
+    return [field.selectionStart, field.selectionEnd];
+  })).toEqual([0, 2]);
+  await input.press('4');
+  await input.press('Tab');
+  await expect(input).toHaveValue('4');
+  expect((await readDoc(page)).layout.fill).toEqual(before);
 });
 
 test('双模式接线：点击—点击与拖拽都能连上，折线正交且带箭头（10 §3.3、§3.4）', async ({ page }) => {
@@ -325,6 +425,8 @@ test('双模式接线：点击—点击与拖拽都能连上，折线正交且�
   await setAuthorBlock(page, author, 'gets');
   const hexFirst = await nodeIdOf(page, 'data.hex');
   await focusNode(page, hexFirst);
+  // 节点栏宽度随屏幕调整：先让两个端口同时位于画布内，再执行真实点击。
+  await canvas.evaluate((element) => (element as unknown as { fit(): void }).fit());
 
   // ① 点击—点击：先点输出端口，再点兼容的输入端口。
   await canvas.locator(`.port-hit.out[data-node="${hexFirst}"]`).click();
@@ -522,4 +624,19 @@ test('空存档刷新后仍是空的；缺「开始」只提示、不自动补�
   await expect(panel).toContainText('编译失败');
   await expect(panel.locator('.issues')).toContainText('开始');
   expect((await readDoc(page)).nodes.map((node) => node.kind)).toEqual(['action.author']);
+});
+
+
+test('交互动作按题目过滤，搜索也不能添加禁用动作', async ({ page }) => {
+  await openChallenge(page);
+  const library = page.getByRole('complementary', { name: '节点库' });
+  await library.getByRole('button', { name: '交互动作', exact: true }).click();
+  await expect(library.locator('.entry')).toHaveCount(3);
+  for (const kind of ['action.step', 'action.run', 'action.author']) {
+    await expect(library.locator(`[data-kind="${kind}"]`)).toBeVisible();
+  }
+  await library.getByRole('searchbox').fill('action.write');
+  await expect(library.locator('.entry')).toHaveCount(0);
+  await library.getByRole('searchbox').fill('action.push');
+  await expect(library.locator('.entry')).toHaveCount(0);
 });

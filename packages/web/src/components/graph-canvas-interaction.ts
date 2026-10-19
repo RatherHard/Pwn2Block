@@ -96,6 +96,7 @@ export interface InteractionState {
   pending?: PendingConnect;
   selectedEdge?: GraphConnection;
   cursorWorld?: Point;
+  /** 拖拽预览的绝对图坐标，与 move 编辑命令使用同一语义。 */
   liveMoves: Readonly<Record<string, Point>>;
   message: string;
 }

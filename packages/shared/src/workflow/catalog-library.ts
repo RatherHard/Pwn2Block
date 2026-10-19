@@ -1,5 +1,5 @@
 /**
- * 节点库分类（10 §4.1）：按用途把节点目录切成七个一级分类，最多两级。
+ * 节点库分类（10 §4.1）：按用途把节点目录切成一级分类，分类内直接展示节点。
  *
  * **分类是节点目录的派生视图**：它不改节点定义、不新增节点能力，只回答“这个节点在节点库里放哪”；
  * 标签、摘要、端口一律从 `NodeKindSpec` 读，这里只维护 kind → 分类的归属表，表里漏掉的种类
@@ -8,7 +8,7 @@
 import { NODE } from './kinds';
 import type { NodeCategory, NodeKindSpec } from './types';
 
-export const LIBRARY_CATEGORY_IDS = ['data', 'compute', 'payload', 'control', 'action', 'python', 'module'] as const;
+export const LIBRARY_CATEGORY_IDS = ['data', 'compute', 'payload', 'pattern', 'control', 'loop', 'variable', 'action', 'python', 'module'] as const;
 
 export type LibraryCategoryId = (typeof LIBRARY_CATEGORY_IDS)[number];
 
@@ -24,10 +24,13 @@ export interface LibraryCategoryInfo {
 export const LIBRARY_CATEGORIES: readonly LibraryCategoryInfo[] = [
   { id: 'data', label: '数据与常量', summary: '整数、文本、字节与题目公开常量：值是现成的，拿来就能用。' },
   { id: 'compute', label: '运算与判断', summary: '算术、比较、布尔逻辑与类型转换：在一段值上做计算。' },
-  { id: 'payload', label: '字节与载荷', summary: '填充、拼接、打包与解包、定位序列：把字节排成 payload。' },
-  { id: 'control', label: '流程与变量', summary: '开始、分支、循环与变量读写：决定语句按什么顺序执行。' },
+  { id: 'payload', label: '字节与载荷', summary: '填充、拼接、打包与解包：把字节排成 payload。' },
+  { id: 'pattern', label: '定位序列', summary: '生成定位序列，查找字节偏移。' },
+  { id: 'control', label: '流程控制', summary: '开始、分支与结果输出。' },
+  { id: 'loop', label: '循环', summary: '重复执行、循环控制、索引与累加。' },
+  { id: 'variable', label: '变量', summary: '声明、读取与修改变量。' },
   { id: 'action', label: '交互动作', summary: '当前实际支持的动作用节点：真正推进 VM 的只有这些。' },
-  { id: 'python', label: 'Python', summary: 'Python 数据处理节点与代码模板，代码只在服务端隔离运行器里跑。' },
+  { id: 'python', label: 'Python', summary: 'Python 数据处理节点，代码只在服务端隔离运行器里跑。' },
   { id: 'module', label: '我的模块', summary: '自己封装并保存的可复用模块，以及模块内的结果出口。' },
 ];
 
@@ -77,32 +80,32 @@ const PLACEMENTS: Readonly<Record<string, Placement | undefined>> = {
   [NODE.text]: { category: 'data' },
   [NODE.hex]: { category: 'data' },
   [NODE.address]: { category: 'data' },
-  // 运算与判断：按“在值上做什么”拆二级。
-  [NODE.arith]: { category: 'compute', section: '算术' },
-  [NODE.compare]: { category: 'compute', section: '比较与逻辑' },
-  [NODE.logic]: { category: 'compute', section: '比较与逻辑' },
-  [NODE.bytesToInt]: { category: 'compute', section: '类型转换' },
-  [NODE.select]: { category: 'compute', section: '条件' },
-  // 字节与载荷：按“怎么摆字节”拆二级。
-  [NODE.fill]: { category: 'payload', section: '填充与拼接', aliases: ['pad'] },
-  [NODE.concat]: { category: 'payload', section: '填充与拼接', aliases: ['concat', 'join', 'assembly'] },
-  [NODE.slice]: { category: 'payload', section: '打包与解包', aliases: ['slice', 'substr'] },
-  [NODE.assemble]: { category: 'payload', section: '打包与解包', aliases: ['assembly', 'pack', 'layout'] },
-  [NODE.cyclic]: { category: 'payload', section: '定位序列', aliases: ['cyclic', 'debruijn'] },
-  [NODE.find]: { category: 'payload', section: '定位序列', aliases: ['cyclic_find', 'offset'] },
-  // 流程与变量：入口/循环一类，名字绑定一类。
-  [NODE.start]: { category: 'control', section: '入口与流程' },
-  [NODE.if]: { category: 'control', section: '入口与流程' },
-  [NODE.repeat]: { category: 'control', section: '入口与流程' },
-  [NODE.while]: { category: 'control', section: '入口与流程' },
-  [NODE.break]: { category: 'control', section: '入口与流程' },
-  [NODE.continue]: { category: 'control', section: '入口与流程' },
-  [NODE.result]: { category: 'control', section: '入口与流程' },
-  [NODE.index]: { category: 'control', section: '入口与流程' },
-  [NODE.accumulator]: { category: 'control', section: '入口与流程' },
-  [NODE.varDeclare]: { category: 'control', section: '变量' },
-  [NODE.varGet]: { category: 'control', section: '变量' },
-  [NODE.varSet]: { category: 'control', section: '变量' },
+  // 运算与判断：直接列出运算节点。
+  [NODE.arith]: { category: 'compute' },
+  [NODE.compare]: { category: 'compute' },
+  [NODE.logic]: { category: 'compute' },
+  [NODE.bytesToInt]: { category: 'compute' },
+  [NODE.select]: { category: 'compute' },
+  // 字节与载荷：定位序列单独归类。
+  [NODE.fill]: { category: 'payload', aliases: ['pad'] },
+  [NODE.concat]: { category: 'payload', aliases: ['concat', 'join', 'assembly'] },
+  [NODE.slice]: { category: 'payload', aliases: ['slice', 'substr'] },
+  [NODE.assemble]: { category: 'payload', aliases: ['assembly', 'pack', 'layout'] },
+  [NODE.cyclic]: { category: 'pattern', aliases: ['cyclic', 'debruijn'] },
+  [NODE.find]: { category: 'pattern', aliases: ['cyclic_find', 'offset'] },
+  // 流程与变量：入口、循环与名字绑定各自归类。
+  [NODE.start]: { category: 'control' },
+  [NODE.if]: { category: 'control' },
+  [NODE.repeat]: { category: 'loop' },
+  [NODE.while]: { category: 'loop' },
+  [NODE.break]: { category: 'loop' },
+  [NODE.continue]: { category: 'loop' },
+  [NODE.result]: { category: 'control' },
+  [NODE.index]: { category: 'loop' },
+  [NODE.accumulator]: { category: 'loop' },
+  [NODE.varDeclare]: { category: 'variable' },
+  [NODE.varGet]: { category: 'variable' },
+  [NODE.varSet]: { category: 'variable' },
   // 交互动作：条目自解释，只有一级。
   [NODE.feed]: { category: 'action' },
   [NODE.write]: { category: 'action' },
@@ -128,7 +131,7 @@ export function libraryEntryOf(spec: NodeKindSpec): LibraryEntry {
   return placement?.section === undefined ? entry : { ...entry, section: placement.section };
 }
 
-/** 把目录切成七个分类（只保留传入 specs 里出现的条目；空分类不返回）。 */
+/** 把目录按用途分类（只保留传入 specs 里出现的条目；空分类不返回）。 */
 export function libraryGroups(specs: readonly NodeKindSpec[]): readonly LibraryGroup[] {
   const entries = entriesOf(specs);
   const groups: LibraryGroup[] = [];
@@ -160,45 +163,6 @@ export function searchLibrary(specs: readonly NodeKindSpec[], query: string): re
   }
   return matches;
 }
-
-/** Python 节点的代码模板（不属于节点目录，只用于“带模板新建 Python 节点”）。 */
-export interface PythonTemplate {
-  readonly id: string;
-  readonly name: string;
-  readonly summary: string;
-  readonly code: string;
-  /** 命名输入，`name:类型`。 */
-  readonly inputs: readonly string[];
-  readonly outputType: 'int' | 'bool' | 'bytes' | 'text';
-}
-
-/** 三个入门模板：只用 `in0`… 与 `result`；代码在服务端隔离运行器里执行，本编辑器不执行代码。 */
-export const PYTHON_TEMPLATES: readonly PythonTemplate[] = [
-  {
-    id: 'pack-address',
-    name: '小端打包整数',
-    summary: '把输入整数按 8 字节小端打包成字节；在服务端隔离运行器里执行，本编辑器不执行代码。',
-    code: '# 输入：in0（整数，例如地址）\nresult = in0.to_bytes(8, "little")\n',
-    inputs: ['a:int'],
-    outputType: 'bytes',
-  },
-  {
-    id: 'slice-join',
-    name: '截取并拼接字节',
-    summary: '取第一段的头 4 字节再接上第二段；在服务端隔离运行器里执行，本编辑器不执行代码。',
-    code: '# 输入：in0、in1（字节）\nresult = in0[:4] + in1\n',
-    inputs: ['a:bytes', 'b:bytes'],
-    outputType: 'bytes',
-  },
-  {
-    id: 'xor-loop',
-    name: '逐字节异或',
-    summary: '把每个字节与一个整数异或，得到新的字节；在服务端隔离运行器里执行，本编辑器不执行代码。',
-    code: '# 输入：in0（字节）、in1（整数密钥）\nresult = bytes(b ^ in1 for b in in0)\n',
-    inputs: ['a:bytes', 'key:int'],
-    outputType: 'bytes',
-  },
-];
 
 // 下面是纯函数实现：去重、分组与匹配。
 

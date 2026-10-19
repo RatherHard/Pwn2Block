@@ -7,12 +7,12 @@ import {
   searchLibrary,
 } from '@pwn2block/shared';
 import type { Pwn2BlockNodeLibrary } from '../src/components/node-library';
-import { LIBRARY_EXPANDED_KEY } from '../src/components/node-library';
+import { LIBRARY_PATH_KEY } from '../src/components/node-library';
 import '../src/components/node-library';
 import type { KeyValueStore } from '../src/viewmodel/storage';
 
 /**
- * 节点库（10 §4）：分类、搜索、只读预览、拖拽添加与展开状态恢复。
+ * 节点库（10 §4）：分类、搜索、只读预览、拖拽添加与目录路径恢复。
  *
  * 全部用真实节点目录，不 mock shared 的纯函数；只替换存储和 `fetch`，
  * 后者用来证明预览不会偷偷发起求值请求。
@@ -55,10 +55,15 @@ function entryOf(library: Pwn2BlockNodeLibrary, kind: string): HTMLButtonElement
   return entry;
 }
 
-function detailsOf(library: Pwn2BlockNodeLibrary, category: string): HTMLDetailsElement {
-  const details = shadow(library).querySelector<HTMLDetailsElement>(`details[data-category="${category}"]`);
-  if (details === null) throw new Error(`找不到分类：${category}`);
-  return details;
+async function openFolder(library: Pwn2BlockNodeLibrary, selector: string): Promise<void> {
+  const folder = shadow(library).querySelector<HTMLButtonElement>(selector);
+  if (folder === null) throw new Error(`找不到目录入口：${selector}`);
+  folder.click();
+  await library.updateComplete;
+}
+
+async function openFillFolder(library: Pwn2BlockNodeLibrary): Promise<void> {
+  await openFolder(library, '[data-category="payload"]');
 }
 
 function listen<T>(library: Pwn2BlockNodeLibrary, name: string): T[] {
@@ -88,16 +93,31 @@ afterEach(() => {
 });
 
 describe('节点库：分类与条目', () => {
-  it('渲染七个一级分类，并列出 data.fill', async () => {
+  it('首页只有分类，进入即显示节点并能返回', async () => {
     const library = mount();
     await library.updateComplete;
-    const details = [...shadow(library).querySelectorAll<HTMLDetailsElement>('details.group')];
-    expect(details).toHaveLength(LIBRARY_CATEGORIES.length);
-    expect(details.map((item) => item.querySelector('h3')?.textContent)).toEqual(
+    const folders = [...shadow(library).querySelectorAll('button[data-category]')];
+    expect(folders.map((item) => item.getAttribute('aria-label'))).toEqual(
       LIBRARY_CATEGORIES.map((category) => category.label),
     );
-    expect(details.every((item) => item.open)).toBe(true);
-    expect(entryOf(library, NODE.fill)).not.toBeNull();
+    expect(shadow(library).querySelectorAll('.entry')).toHaveLength(0);
+    await openFolder(library, '[data-category="payload"]');
+    expect(shadow(library).querySelectorAll('[data-section]')).toHaveLength(0);
+    expect(entryOf(library, NODE.fill).querySelector('.static-node')).not.toBeNull();
+    expect(shadow(library).querySelector('.path')?.textContent).toBe('节点库 / 字节与载荷');
+    await openFolder(library, '.back');
+    expect(shadow(library).querySelectorAll('[data-category]')).toHaveLength(LIBRARY_CATEGORIES.length);
+    await openFolder(library, '[data-category="data"]');
+    expect(entryOf(library, NODE.int).querySelector('.preview')).not.toBeNull();
+    expect(shadow(library).querySelectorAll('[data-section]')).toHaveLength(0);
+  });
+
+  it('没有可用节点时隐藏空分类', async () => {
+    const library = mount();
+    library.specs = [];
+    await library.updateComplete;
+    expect(shadow(library).textContent).toContain('暂无可用节点');
+    expect(shadow(library).querySelectorAll('[data-category]')).toHaveLength(0);
   });
 });
 
@@ -105,6 +125,7 @@ describe('节点库：添加与搜索', () => {
   it('点击条目派发 p2b-library-add，detail.kind 是节点种类', async () => {
     const library = mount();
     await library.updateComplete;
+    await openFillFolder(library);
     const added = listen<{ kind: string }>(library, 'p2b-library-add');
     entryOf(library, NODE.fill).click();
     expect(added).toEqual([{ kind: NODE.fill }]);
@@ -132,57 +153,75 @@ describe('节点库：添加与搜索', () => {
 });
 
 describe('节点库：只读预览', () => {
-  it('聚焦显示实际节点外观、类型与默认参数，离开后关闭', async () => {
+  it('目录内所有节点常驻预览，失焦或离开指针后仍显示', async () => {
     const library = mount();
     await library.updateComplete;
-    const previews = listen<{ kind: string | undefined }>(library, 'p2b-library-preview');
+    await openFillFolder(library);
     const entry = entryOf(library, NODE.fill);
+    expect(shadow(library).querySelectorAll('.preview').length).toBe(
+      shadow(library).querySelectorAll('.entry').length,
+    );
+    const text = entry.querySelector('.preview')?.textContent ?? '';
+    for (const value of ['填充字节', '整数', '字节', '65', '16']) expect(text).toContain(value);
     entry.focus();
-    await library.updateComplete;
-
-    const preview = shadow(library).querySelector('.preview');
-    expect(preview).not.toBeNull();
-    const text = preview?.textContent ?? '';
-    expect(text).toContain('填充字节');
-    expect(text).toContain('整数');
-    expect(text).toContain('字节');
-    expect(text).toContain('65');
-    expect(text).toContain('16');
-    expect(previews.at(-1)).toEqual({ kind: NODE.fill });
-
     entry.blur();
-    await library.updateComplete;
-    expect(shadow(library).querySelector('.preview')).toBeNull();
-    expect(previews.at(-1)).toEqual({ kind: undefined });
-
     entry.dispatchEvent(new Event('pointerenter'));
-    await library.updateComplete;
-    expect(shadow(library).querySelector('.preview')).not.toBeNull();
     entry.dispatchEvent(new Event('pointerleave'));
     await library.updateComplete;
-    expect(shadow(library).querySelector('.preview')).toBeNull();
+    expect(entry.querySelector('.preview')).not.toBeNull();
+  });
+
+  it('跨目录搜索显示预览，清空或返回目录恢复原路径', async () => {
+    const library = mount();
+    await library.updateComplete;
+    await openFillFolder(library);
+    search(library, NODE.int);
+    await library.updateComplete;
+    expect(entryOf(library, NODE.int).querySelector('.preview')).not.toBeNull();
+    search(library, '');
+    await library.updateComplete;
+    expect(entryOf(library, NODE.fill)).not.toBeNull();
+    search(library, NODE.int);
+    await library.updateComplete;
+    await openFolder(library, '.back');
+    expect(entryOf(library, NODE.fill)).not.toBeNull();
+    expect(shadow(library).querySelector('.path')?.textContent).toContain('字节与载荷');
   });
 });
 
-describe('节点库：展开状态', () => {
-  it('折叠后写入 store，重新挂载仍保持折叠', async () => {
+describe('节点库：目录状态', () => {
+  it('重新挂载恢复目录路径', async () => {
     const store = new MemoryStore();
-    const category = LIBRARY_CATEGORIES[0];
-    if (category === undefined) throw new Error('目录没有分类');
     const library = mount(store);
     await library.updateComplete;
-    const details = detailsOf(library, category.id);
-    details.open = false;
-    details.dispatchEvent(new Event('toggle'));
-    await library.updateComplete;
-
-    const saved = JSON.parse(store.getItem(LIBRARY_EXPANDED_KEY) ?? '{}') as Record<string, unknown>;
-    expect(saved[category.id]).toBe(false);
-
+    await openFillFolder(library);
+    expect(JSON.parse(store.getItem(LIBRARY_PATH_KEY) ?? '[]')).toEqual(['payload']);
     library.remove();
     const rebuilt = mount(store);
     await rebuilt.updateComplete;
-    expect(detailsOf(rebuilt, category.id).open).toBe(false);
+    expect(entryOf(rebuilt, NODE.fill)).not.toBeNull();
+  });
+
+  it.each(['{bad-json', '[1]', '["unknown"]', '{}'])(
+    '损坏的路径 %s 回退到首页', async (raw) => {
+      const store = new MemoryStore();
+      store.setItem(LIBRARY_PATH_KEY, raw);
+      const library = mount(store);
+      await library.updateComplete;
+      expect(shadow(library).querySelectorAll('[data-category]')).toHaveLength(LIBRARY_CATEGORIES.length);
+    },
+  );
+
+  it('失效的子目录回到父目录，禁写存储不影响导航', async () => {
+    const store: KeyValueStore = {
+      getItem: () => '["payload", "removed"]',
+      setItem: () => { throw new Error('storage disabled'); },
+      removeItem: () => {},
+    };
+    const library = mount(store);
+    await library.updateComplete;
+    expect(shadow(library).querySelector('[data-section]')).toBeNull();
+    expect(entryOf(library, NODE.fill)).not.toBeNull();
   });
 });
 
@@ -196,6 +235,7 @@ describe('节点库：拖拽', () => {
       library,
       'p2b-library-dragend',
     );
+    await openFillFolder(library);
     const added = listen<{ kind: string }>(library, 'p2b-library-add');
 
     const entry = entryOf(library, NODE.fill);
@@ -224,6 +264,7 @@ describe('节点库：拖拽', () => {
     const library = mount();
     await library.updateComplete;
     const ends = listen<{ kind: string; canceled: boolean }>(library, 'p2b-library-dragend');
+    await openFillFolder(library);
     const entry = drag(library, NODE.fill);
     await library.updateComplete;
     expect(library.hasAttribute('data-dragging')).toBe(true);
@@ -247,6 +288,7 @@ describe('节点库：预览不触发求值', () => {
     try {
       const library = mount();
       await library.updateComplete;
+      await openFillFolder(library);
       const entry = entryOf(library, NODE.fill);
       entry.focus();
       entry.dispatchEvent(new Event('pointerenter'));
@@ -254,8 +296,8 @@ describe('节点库：预览不触发求值', () => {
       expect(shadow(library).querySelector('.preview')).not.toBeNull();
       search(library, '填充');
       await library.updateComplete;
-      // 输入搜索时预览关闭；整段过程都不该请求网络。
-      expect(shadow(library).querySelector('.preview')).toBeNull();
+      // 搜索结果也常驻预览，整段过程不请求网络。
+      expect(shadow(library).querySelector('.preview')).not.toBeNull();
       expect(calls).toBe(0);
     } finally {
       globalThis.fetch = original;

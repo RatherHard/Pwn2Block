@@ -57,6 +57,7 @@ import { sharedStyles, terminalTheme } from '../theme';
 import './graph-canvas';
 import './node-library';
 import './node-inspector';
+import type { Pwn2BlockCodeEditor } from './code-editor';
 import {
   moduleCallParams,
   renderGroups,
@@ -65,7 +66,6 @@ import {
   renderModules,
   renderPythonStatus,
   renderRunControls,
-  renderTemplates,
   renderTrace,
   type ChromeHandlers,
 } from './graph-panel-chrome';
@@ -125,7 +125,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
         flex: 1 1 auto;
         min-height: 30rem;
         display: grid;
-        grid-template-columns: 13rem minmax(0, 1fr) 19rem;
+        grid-template-columns: clamp(15rem, 20vw, 19rem) minmax(0, 1fr) 19rem;
         gap: 0.5rem;
         align-items: stretch;
       }
@@ -139,6 +139,28 @@ export class Pwn2BlockGraphPanel extends LitElement {
         overflow: auto;
         scrollbar-color: var(--p2b-line) transparent;
       }
+      .toolbox > pwn2block-node-library {
+        flex: 1 0 18rem;
+        min-height: 0;
+        height: auto;
+      }
+      .toolbox button::before,
+      .toolbox button::after {
+        content: none;
+      }
+      @media (max-width: 1100px) {
+        .workspace { grid-template-columns: 15rem minmax(0, 1fr) 15rem; }
+      }
+      @media (max-width: 800px) {
+        .workspace {
+          grid-template-columns: minmax(12rem, 32%) minmax(0, 1fr);
+          grid-template-rows: minmax(30rem, 1fr) 14rem;
+        }
+        aside.inspector {
+          grid-column: 1 / -1;
+          overflow: auto;
+        }
+      }
       .extras h3 {
         margin: 0.4rem 0 0.2rem;
       }
@@ -149,9 +171,17 @@ export class Pwn2BlockGraphPanel extends LitElement {
         margin-bottom: 0.2rem;
       }
       .canvas-host {
+        position: relative;
         min-height: 0;
         min-width: 0;
         display: flex;
+      }
+      .canvas-host pwn2block-graph-canvas[hidden] { display: none; }
+      .canvas-host > pwn2block-code-editor {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
       }
       .canvas-host pwn2block-graph-canvas {
         flex: 1 1 auto;
@@ -270,13 +300,13 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private editingNodeId?: string;
   /** 从节点库拖入时的节点种类：用于画布上的落点预览。 */
   private dragKind?: string;
+  private expandedCodeNodeId?: string;
 
   private readonly chrome: ChromeHandlers = {
     onCommand: (command) => {
       this.dispatchEvent(new CustomEvent('p2b-graph-run', { detail: command, bubbles: true, composed: true }));
     },
     onLocate: (nodeId, extra) => this.locate({ nodeId, ...(extra ?? {}) }),
-    onTemplate: (template) => this.addPythonTemplate(template),
     onAddModule: (moduleId) => this.addModuleCall(moduleId),
     onEditModule: (moduleId) => this.enterModule(moduleId),
     onExportModule: (moduleId) => this.exportModule(moduleId),
@@ -306,6 +336,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const selected = state.selection
       .map((id) => state.document.nodes.find((node) => node.id === id))
       .find((node) => node !== undefined);
+    const expandedNode = selected !== undefined && selected.id === this.expandedCodeNodeId && selected.kind === NODE.python ? selected : undefined;
     const stale = this.compiledRevision !== state.semanticRevision;
     return html`
       <header>
@@ -351,7 +382,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
       <section class="workspace">
         <aside class="toolbox" aria-label="节点库">
           <pwn2block-node-library
-            .specs=${availableNodeSpecs(CURRENT_STAGE)}
+            .specs=${this.librarySpecs()}
             .context=${this.portContext(challenge)}
             .store=${this.storage()}
             @p2b-library-add=${(event: CustomEvent<{ kind: string }>) => this.addFromLibrary(event.detail.kind)}
@@ -361,11 +392,12 @@ export class Pwn2BlockGraphPanel extends LitElement {
               this.moveLibraryDrag(event.detail)}
             @p2b-library-dragend=${(event: CustomEvent<LibraryDragEndDetail>) => this.endLibraryDrag(event.detail)}
           ></pwn2block-node-library>
-          ${renderTemplates(this.chrome)} ${renderModules(state.document, this.chrome)}
+          ${renderModules(state.document, this.chrome)}
           ${renderGroups(state.document, this.chrome)}
         </aside>
         <div class="canvas-host">
           <pwn2block-graph-canvas
+            ?hidden=${expandedNode !== undefined}
             .state=${state}
             .context=${this.portContext(challenge)}
             .previews=${this.artifact?.previews ?? []}
@@ -383,6 +415,16 @@ export class Pwn2BlockGraphPanel extends LitElement {
             @p2b-graph-open=${(event: CustomEvent<{ nodeId: string }>) => this.openInspector(event.detail.nodeId)}
             @p2b-graph-message=${(event: CustomEvent<{ message: string }>) => this.say(event.detail.message)}
           ></pwn2block-graph-canvas>
+          ${expandedNode === undefined ? nothing : html`<pwn2block-code-editor
+            class="canvas-code-editor"
+            .label=${`Python 代码 · ${expandedNode.id}`}
+            .value=${typeof expandedNode.params.code === 'string' ? expandedNode.params.code : ''}
+            .expanded=${true}
+            @p2b-code-change=${(event: CustomEvent<{ value: string }>) =>
+              this.setEditor(setInlineParam(this.editor, expandedNode.id, 'code', event.detail.value, this.portContextOf()))}
+            @p2b-code-expand=${() => this.closeCodeEditor()}
+            @p2b-code-cancel=${() => this.closeCodeEditor()}
+          ></pwn2block-code-editor>`}
         </div>
         <aside class="inspector" aria-label="属性">
           <pwn2block-node-inspector
@@ -395,6 +437,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
               : this.artifact?.previews.find((item) => item.nodeId === selected.id)}
             .selectionCount=${state.selection.length}
             .collapsed=${selected !== undefined && state.document.layout[selected.id]?.collapsed === true}
+            @p2b-inspector-code-expand=${() => this.openCodeEditor()}
             @p2b-inspector-param=${(event: CustomEvent<{ name: string; value: ParamValue }>) =>
               this.onInspectorParam(event.detail.name, event.detail.value)}
             @p2b-inspector-mode=${(event: CustomEvent<{ port: string; mode: 'inline' | 'port' }>) =>
@@ -413,9 +456,20 @@ export class Pwn2BlockGraphPanel extends LitElement {
     `;
   }
 
-  // ------------------------------------------------------------ 节点库与模板
+  // ------------------------------------------------------------ 节点库与模块
+
+  private librarySpecs() {
+    const challenge = this.challenge;
+    if (challenge === undefined) return [];
+    return availableNodeSpecs(CURRENT_STAGE).filter((spec) =>
+      spec.authorBlock === true
+        ? (challenge.authorBlocks?.length ?? 0) > 0
+        : spec.action === undefined || challenge.allowedActions.includes(spec.action),
+    );
+  }
 
   private addFromLibrary(kind: string): void {
+    if (!this.librarySpecs().some((spec) => spec.kind === kind)) return;
     this.run((state) => addNode(state, { kind, at: this.visiblePlacement() }));
   }
 
@@ -454,6 +508,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
   }
 
   private startLibraryDrag(detail: { kind: string; clientX: number; clientY: number }): void {
+    if (!this.librarySpecs().some((spec) => spec.kind === detail.kind)) return;
     this.dragKind = detail.kind;
     this.moveLibraryDrag(detail);
   }
@@ -475,7 +530,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const kind = this.dragKind;
     this.dragKind = undefined;
     this.canvas()?.showDropHint(undefined);
-    if (kind === undefined || detail.canceled === true) return;
+    if (kind === undefined || detail.canceled === true || !this.librarySpecs().some((spec) => spec.kind === kind)) return;
     if (!this.insideCanvas(detail.clientX, detail.clientY)) return;
     const point = this.canvas()?.worldFromClient(detail.clientX, detail.clientY) ?? { x: 40, y: 40 };
     this.run((state) =>
@@ -488,20 +543,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
     if (canvas === undefined) return false;
     const rect = canvas.getBoundingClientRect();
     return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  }
-
-  /** 带模板新建 Python 节点：代码与输入/输出类型一起写进参数，编辑器里可继续改。 */
-  private addPythonTemplate(template: {
-    readonly code: string;
-    readonly inputs: readonly string[];
-    readonly outputType: string;
-  }): void {
-    this.run((state) =>
-      addNode(state, {
-        kind: NODE.python,
-        params: { code: template.code, inputs: [...template.inputs], outputType: template.outputType },
-      }),
-    );
   }
 
   /** 插入模块调用节点（流程模块 → `module.call`，数据模块 → `module.data`）。 */
@@ -534,6 +575,7 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.loadNote = '';
     this.archiveLocked = false;
     this.editingNodeId = undefined;
+    this.expandedCodeNodeId = undefined;
     if (!loaded.ok) {
       this.editor = createEditor(emptyGraphDocument());
       this.status = '画布是空的：从左侧节点库添加节点。';
@@ -645,6 +687,9 @@ export class Pwn2BlockGraphPanel extends LitElement {
   // ------------------------------------------------------------ 编辑器状态
 
   private setEditor(next: GraphEditorState): void {
+    if (next.selection[0] !== this.expandedCodeNodeId || !next.document.nodes.some((node) => node.id === this.expandedCodeNodeId)) {
+      this.expandedCodeNodeId = undefined;
+    }
     if (this.mainEditor !== undefined && this.editingModuleId !== undefined) {
       // 只改选中：画布与属性面板要立刻反映，但不写回主图、不涨语义版本。
       if (next.document === this.editor.document) {
@@ -925,6 +970,24 @@ export class Pwn2BlockGraphPanel extends LitElement {
         this.setEditor(setCollapsed(this.editor, edit.nodeId, edit.collapsed));
         return;
     }
+  }
+
+  private async openCodeEditor(): Promise<void> {
+    const node = this.editor.document.nodes.find((item) => item.id === this.editor.selection[0]);
+    if (node?.kind !== NODE.python) return;
+    this.expandedCodeNodeId = node.id;
+    this.requestUpdate();
+    await this.updateComplete;
+    const editor = this.renderRoot.querySelector<Pwn2BlockCodeEditor>('pwn2block-code-editor.canvas-code-editor');
+    await editor?.updateComplete;
+    editor?.shadowRoot?.querySelector('textarea')?.focus();
+  }
+
+  private async closeCodeEditor(): Promise<void> {
+    this.expandedCodeNodeId = undefined;
+    this.requestUpdate();
+    await this.updateComplete;
+    this.canvas()?.focus({ preventScroll: true });
   }
 
   /** 属性面板的修改：走与节点内完全相同的编辑命令，所以撤销一次就是一次修改。 */

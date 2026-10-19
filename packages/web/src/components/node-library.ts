@@ -1,7 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import {
   LIBRARY_CATEGORIES,
-  LIBRARY_CATEGORY_IDS,
   defaultParams,
   libraryGroups,
   nodeInputs,
@@ -17,19 +16,18 @@ import type { StaticNodeRow } from './node-skin';
 import { sharedStyles, terminalTheme } from '../theme';
 
 /**
- * 节点库（10 §4）：七个一级分类 + 搜索 + 只读预览 + 拖拽添加。
+ * 节点库（10 §4）：两级目录（分类 → 节点） + 搜索 + 只读预览 + 拖拽添加。
  *
  * 组件只读节点目录、只发事件：
  * - `p2b-library-add`：点击或键盘添加；落点由父组件决定。
  * - `p2b-library-dragstart/dragmove/dragend`：拖拽全过程，父组件按落点建节点。
- * - `p2b-library-preview`：预览打开/关闭，供状态栏提示。
  *
  * 预览走 `renderStaticNode`，与画布上的节点同一套外观；它只调用目录里的纯函数，
- * 不执行 Python、不发起请求。展开状态是纯便利数据，存不进去只影响下次打开。
+ * 不执行 Python、不发起请求。目录路径是纯便利数据，存不进去只影响下次打开。
  */
 
-/** 展开状态的存储键名（值是分类 id → 是否展开的 JSON 对象）。 */
-export const LIBRARY_EXPANDED_KEY = 'p2b:library:expanded';
+/** 独立于旧版折叠状态，保存当前目录路径。 */
+export const LIBRARY_PATH_KEY = 'p2b:library:path';
 
 /** 超过 4px 才算拖拽，避免点击时手抖被当成拖拽。 */
 const DRAG_THRESHOLD = 4;
@@ -57,10 +55,6 @@ export interface LibraryDragEndDetail extends LibraryDragMoveDetail {
   readonly canceled: boolean;
 }
 
-export interface LibraryPreviewDetail {
-  readonly kind: string | undefined;
-}
-
 interface DragState {
   readonly kind: string;
   readonly startX: number;
@@ -72,36 +66,16 @@ interface DragState {
   active: boolean;
 }
 
-/** 默认全部展开；读不到或读到坏数据时也用它。 */
-function defaultExpansion(): Record<string, boolean> {
-  const expanded: Record<string, boolean> = {};
-  for (const id of LIBRARY_CATEGORY_IDS) expanded[id] = true;
-  return expanded;
-}
-
-/** 读展开状态：只接受布尔值，坏 JSON / 非对象 / 缺字段都回退到默认展开。 */
-function readExpansion(store: KeyValueStore | undefined): Record<string, boolean> {
-  const expanded = defaultExpansion();
-  if (store === undefined) return expanded;
-  let raw: string | null;
+/** 目录路径最多两级；过期路径在 willUpdate 中回退到可用的父目录。 */
+function readPath(store: KeyValueStore | undefined): string[] {
   try {
-    raw = store.getItem(LIBRARY_EXPANDED_KEY);
+    const parsed: unknown = JSON.parse(store?.getItem(LIBRARY_PATH_KEY) ?? '[]');
+    return Array.isArray(parsed) && parsed.length <= 2 && parsed.every((part) => typeof part === 'string')
+      ? parsed as string[]
+      : [];
   } catch {
-    return expanded;
+    return [];
   }
-  if (raw === null || raw === '') return expanded;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return expanded;
-    const record = parsed as Record<string, unknown>;
-    for (const id of LIBRARY_CATEGORY_IDS) {
-      const value = record[id];
-      if (typeof value === 'boolean') expanded[id] = value;
-    }
-  } catch {
-    return defaultExpansion();
-  }
-  return expanded;
 }
 
 /** 参数默认值的短摘要：长文本截断，数组用顿号连接。 */
@@ -146,7 +120,7 @@ export class Pwn2BlockNodeLibrary extends LitElement {
         display: flex;
         flex-direction: column;
         gap: 0.3rem;
-        padding: 0.4rem;
+        padding: 0.5rem;
         border-bottom: 1px solid var(--p2b-line);
         background: var(--p2b-bg);
       }
@@ -171,86 +145,84 @@ export class Pwn2BlockNodeLibrary extends LitElement {
         color: var(--p2b-dim);
       }
 
-      .group {
-        border-bottom: 1px solid var(--p2b-line);
+      button::before,
+      button::after {
+        content: none;
       }
-
-      .group > summary {
+      .navigation {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .back {
+        width: 100%;
+        text-align: left;
+      }
+      .path,
+      .match-path,
+      .preview-summary {
+        margin: 0;
+        color: var(--p2b-dim);
+        overflow-wrap: anywhere;
+      }
+      .directory,
+      .matches {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.5rem;
+      }
+      .folder {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 0.4rem;
-        padding: 0.2rem 0.4rem;
-        cursor: pointer;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.65rem 0.5rem;
+        text-align: left;
       }
-
-      .group > summary:hover {
-        color: var(--p2b-bg);
-        background: var(--p2b-fg);
+      .folder-label {
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
-
-      .group > summary:hover h3,
-      .group > summary:hover .count {
-        color: var(--p2b-bg);
-      }
-
-      .group h3 {
-        margin: 0;
-      }
-
       .count {
-        color: var(--p2b-dim);
+        flex: none;
       }
-
-      .section-title {
-        margin: 0;
-        padding: 0.2rem 0.6rem 0.1rem;
-        color: var(--p2b-dim);
-        font-size: inherit;
-        font-weight: 700;
-      }
-
       .entry {
         display: block;
         width: 100%;
-        min-height: 1.9rem;
-        padding: 0.2rem 0.6rem;
-        border: 0;
-        border-top: 1px dotted var(--p2b-line);
-        border-radius: 0;
+        padding: 0.35rem;
         text-align: left;
+        touch-action: pan-y;
       }
-
-      .entry-label,
+      button:is(:hover, :active, :focus-visible):not(:disabled) {
+        background: var(--p2b-fg);
+        color: var(--p2b-bg);
+        border-color: var(--p2b-focus);
+      }
+      button:is(:hover, :active, :focus-visible):not(:disabled) * {
+        color: var(--p2b-bg);
+        border-color: var(--p2b-bg);
+      }
+      .entry:is(:hover, :active, :focus-visible) .static-node,
+      .entry:is(:hover, :active, :focus-visible) .node-head {
+        background: var(--p2b-fg);
+      }
+      .entry:focus-visible {
+        outline: 2px solid var(--p2b-focus);
+        outline-offset: 1px;
+      }
+      .node-title {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .static-node .node-head {
+        cursor: grab;
+      }
+      .preview-summary,
       .match-path {
         display: block;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-      }
-
-      .match-path {
-        color: var(--p2b-dim);
-      }
-
-      .entry:hover .match-path {
-        color: var(--p2b-bg);
-      }
-
-      .preview {
-        position: sticky;
-        bottom: 0;
-        margin-top: auto;
-        padding: 0.4rem;
-        border-top: var(--p2b-border) solid var(--p2b-line);
-        background: var(--p2b-bg);
-        /* 纯只读信息：不接指针事件，否则会挡住滚动到底部的节点条目（10 §4）。 */
-        pointer-events: none;
-      }
-
-      .preview-summary {
-        margin: 0.35rem 0 0;
-        color: var(--p2b-dim);
+        margin-top: 0.35rem;
       }
     `,
   ];
@@ -266,18 +238,17 @@ export class Pwn2BlockNodeLibrary extends LitElement {
   declare specs: readonly NodeKindSpec[];
   /** 端口推导上下文（题目位宽 / 出题人积木）。 */
   declare context: PortContext | undefined;
-  /** 展开状态的键值存储；缺省时尝试 `defaultStore()`。 */
+  /** 当前目录的键值存储；缺省时尝试 `defaultStore()`。 */
   declare store: KeyValueStore | undefined;
   /** 可选的阶段说明，例如「按当前学习阶段可用」。 */
   declare stageLabel: string | undefined;
 
-  private expanded: Record<string, boolean> = defaultExpansion();
-  private expansionLoaded = false;
+  private path: string[] = [];
+  private pathLoaded = false;
   private loadedStore: KeyValueStore | undefined;
   private fallbackStore: KeyValueStore | undefined;
   private fallbackResolved = false;
   private query = '';
-  private previewKind: string | undefined;
   private drag: DragState | undefined;
   /** 拖拽后浏览器还会补一个 click；用它拦住那次添加，下一次 pointerdown 重置。 */
   private suppressClick = false;
@@ -299,75 +270,76 @@ export class Pwn2BlockNodeLibrary extends LitElement {
 
   override willUpdate(): void {
     const store = this.storeOrFallback();
-    if (this.expansionLoaded && this.loadedStore === store) return;
-    this.loadedStore = store;
-    this.expansionLoaded = true;
-    this.expanded = readExpansion(store);
+    if (!this.pathLoaded || this.loadedStore !== store) {
+      this.loadedStore = store;
+      this.pathLoaded = true;
+      this.path = readPath(store);
+    }
+    // 旧目录路径可能包含子分类；新目录最多只保留一级分类。
+    this.path = this.path.slice(0, 1);
+    if (!libraryGroups(this.specs).some((group) => group.id === this.path[0])) this.path = [];
   }
 
   override render() {
-    const preview = this.previewSpec();
+    const category = LIBRARY_CATEGORIES.find((item) => item.id === this.path[0]);
+    const searching = this.query.trim() !== '';
+    const pathLabel = ['节点库', category?.label].filter(Boolean).join(' / ');
     return html`<div class="library" @keydown=${this.onKeyDown}>
       <div class="search">
-        <input
-          type="search"
-          aria-label="搜索节点"
-          placeholder="搜索节点"
-          .value=${this.query}
-          @input=${this.onSearchInput}
-        />
+        <h3>节点库</h3>
+        <nav class="navigation" aria-label="节点库目录">
+          ${this.path.length === 0 && !searching ? nothing : html`<button
+            type="button" class="back"
+            @click=${() => searching ? this.clearSearch() : this.navigate(this.path.slice(0, -1))}
+          >${searching ? '返回目录' : '返回上一级'}</button>`}
+          <p class="path" aria-live="polite">${searching ? '搜索结果 · 全部节点' : pathLabel}</p>
+        </nav>
+        <input type="search" aria-label="搜索节点" placeholder="搜索全部节点"
+          .value=${this.query} @input=${this.onSearchInput} />
         ${this.stageLabel === undefined || this.stageLabel === ''
-          ? nothing
-          : html`<p class="stage-note">${this.stageLabel}</p>`}
+          ? nothing : html`<p class="stage-note">${this.stageLabel}</p>`}
       </div>
-      ${this.query.trim() === '' ? this.renderGroups() : this.renderMatches()}
-      ${preview === undefined ? nothing : this.renderPreview(preview)}
+      ${searching ? this.renderMatches() : this.renderDirectory()}
     </div>`;
   }
 
-  // -------------------------------------------------------------------------
-  // 分类与搜索
-  // -------------------------------------------------------------------------
-
-  private renderGroups() {
-    const groups = new Map(libraryGroups(this.specs).map((group) => [group.id, group]));
-    return html`${LIBRARY_CATEGORIES.map((category) => {
-      const group = groups.get(category.id);
-      return this.renderGroup(category.id, category.label, category.summary, group?.sections ?? []);
-    })}`;
+  private renderDirectory() {
+    const groups = libraryGroups(this.specs);
+    const group = groups.find((candidate) => candidate.id === this.path[0]);
+    if (groups.length === 0) return html`<p class="empty">暂无可用节点</p>`;
+    if (group === undefined) {
+      return html`<div class="directory">${groups.map((category) => {
+        const count = category.sections.reduce((total, section) => total + section.entries.length, 0);
+        return html`<button class="folder" type="button" data-category=${category.id}
+          aria-label=${category.label} title=${category.summary}
+          @click=${() => this.navigate([category.id])}>
+          <span class="folder-label">${category.label}</span><span class="count">${count}</span>
+          <span aria-hidden="true">›</span>
+        </button>`;
+      })}</div>`;
+    }
+    return html`<div class="directory">
+      ${group.sections.flatMap((section) => section.entries).map((entry) => this.renderEntry(entry.kind, entry.label))}
+    </div>`;
   }
 
-  private renderGroup(
-    id: string,
-    label: string,
-    summary: string,
-    sections: readonly { readonly name?: string; readonly entries: readonly { readonly kind: string; readonly label: string }[] }[],
-  ) {
-    const count = sections.reduce((total, section) => total + section.entries.length, 0);
-    // 只有真的存在二级目录时才显示标题：唯一且无名的分组直接平铺。
-    const showSectionNames =
-      sections.length > 1 || (sections.length === 1 && (sections[0]?.name ?? '') !== '');
-    return html`<details
-      class="group"
-      data-category=${id}
-      ?open=${this.expanded[id] ?? true}
-      @toggle=${(event: Event) => this.onGroupToggle(id, event)}
-    >
-      <summary title=${summary}>
-        <h3>${label}</h3>
-        <span class="count">${count}</span>
-      </summary>
-      ${count === 0
-        ? html`<p class="empty">暂无可用节点</p>`
-        : sections.map(
-            (section) => html`
-              ${showSectionNames && (section.name ?? '') !== ''
-                ? html`<h4 class="section-title">${section.name}</h4>`
-                : nothing}
-              ${section.entries.map((entry) => this.renderEntry(entry.kind, entry.label))}
-            `,
-          )}
-    </details>`;
+  private navigate(path: string[]): void {
+    this.path = path;
+    this.persistPath();
+    this.resetDirectoryView();
+  }
+
+  private clearSearch(): void {
+    this.query = '';
+    this.resetDirectoryView();
+  }
+
+  private resetDirectoryView(): void {
+    this.scrollTop = 0;
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector<HTMLButtonElement>('.back, .folder, .entry')?.focus({ preventScroll: true });
+    });
   }
 
   private renderMatches() {
@@ -379,21 +351,21 @@ export class Pwn2BlockNodeLibrary extends LitElement {
   }
 
   private renderEntry(kind: string, label: string, path?: string) {
+    const spec = this.specs.find((candidate) => candidate.kind === kind) ?? nodeSpec(kind);
+    if (spec === undefined) return nothing;
     return html`<button
       type="button"
       class="entry"
       data-kind=${kind}
+      aria-label=${label}
+      title="点击添加，或拖入画布"
       @click=${(event: MouseEvent) => this.onEntryClick(event, kind)}
       @pointerdown=${(event: PointerEvent) => this.onPointerDown(event, kind)}
       @pointermove=${(event: PointerEvent) => this.onPointerMove(event)}
       @pointerup=${(event: PointerEvent) => this.onPointerUp(event)}
       @pointercancel=${(event: PointerEvent) => this.onPointerCancel(event)}
-      @pointerenter=${() => this.showPreview(kind)}
-      @pointerleave=${() => this.hidePreview(kind)}
-      @focus=${() => this.showPreview(kind)}
-      @blur=${() => this.hidePreview(kind)}
     >
-      <span class="entry-label">${label}</span>
+      ${this.renderPreview(spec)}
       ${path === undefined ? nothing : html`<span class="match-path">${path}</span>`}
     </button>`;
   }
@@ -402,45 +374,7 @@ export class Pwn2BlockNodeLibrary extends LitElement {
     const value = (event.currentTarget as HTMLInputElement).value;
     if (value === this.query) return;
     this.query = value;
-    this.hidePreview();
-    this.requestUpdate();
-  }
-
-  private onGroupToggle(id: string, event: Event): void {
-    const details = event.currentTarget as HTMLDetailsElement | null;
-    if (details === null) return;
-    const open = details.open;
-    if ((this.expanded[id] ?? true) === open) return;
-    this.expanded = { ...this.expanded, [id]: open };
-    this.persistExpansion();
-    this.requestUpdate();
-  }
-
-  // -------------------------------------------------------------------------
-  // 只读预览
-  // -------------------------------------------------------------------------
-
-  private previewSpec(): NodeKindSpec | undefined {
-    const kind = this.previewKind;
-    if (kind === undefined) return undefined;
-    return this.specs.find((spec) => spec.kind === kind) ?? nodeSpec(kind);
-  }
-
-  private showPreview(kind: string): void {
-    if (this.drag !== undefined) return;
-    if (this.previewKind === kind) return;
-    const spec = this.specs.find((candidate) => candidate.kind === kind) ?? nodeSpec(kind);
-    if (spec === undefined) return;
-    this.previewKind = kind;
-    this.emit<LibraryPreviewDetail>('p2b-library-preview', { kind });
-    this.requestUpdate();
-  }
-
-  private hidePreview(kind?: string): void {
-    if (this.previewKind === undefined) return;
-    if (kind !== undefined && this.previewKind !== kind) return;
-    this.previewKind = undefined;
-    this.emit<LibraryPreviewDetail>('p2b-library-preview', { kind: undefined });
+    this.scrollTop = 0;
     this.requestUpdate();
   }
 
@@ -464,14 +398,14 @@ export class Pwn2BlockNodeLibrary extends LitElement {
         value: summarizeParam(param, params[param.name]),
       })),
     ];
-    return html`<section class="preview" aria-label="节点预览">
+    return html`<div class="preview">
       ${renderStaticNode({
         title: spec.label,
         rows,
-        footer: truncated ? '… 只读预览，不执行代码' : '只读预览，不执行代码',
+        footer: truncated ? '… 更多参数可在添加后配置' : undefined,
       })}
       <p class="preview-summary">${spec.summary}</p>
-    </section>`;
+    </div>`;
   }
 
   // -------------------------------------------------------------------------
@@ -537,7 +471,6 @@ export class Pwn2BlockNodeLibrary extends LitElement {
       drag.active = true;
       this.toggleAttribute('data-dragging', true);
       window.addEventListener('keydown', this.onKeyDown);
-      this.hidePreview();
       this.suppressClick = true;
       this.emit<LibraryDragStartDetail>('p2b-library-dragstart', {
         kind: drag.kind,
@@ -638,13 +571,13 @@ export class Pwn2BlockNodeLibrary extends LitElement {
     return this.fallbackStore;
   }
 
-  private persistExpansion(): void {
+  private persistPath(): void {
     const store = this.storeOrFallback();
     if (store === undefined) return;
     try {
-      store.setItem(LIBRARY_EXPANDED_KEY, JSON.stringify(this.expanded));
+      store.setItem(LIBRARY_PATH_KEY, JSON.stringify(this.path));
     } catch {
-      // 配额满 / 被禁写：展开状态丢了，但节点库本身必须继续可用。
+      // 配额满 / 被禁写：目录路径丢了，但节点库本身必须继续可用。
     }
   }
 

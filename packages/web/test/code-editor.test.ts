@@ -244,7 +244,7 @@ describe('pwn2block-code-editor', () => {
     editor.expanded = true;
     await editor.updateComplete;
     expect(editor.hasAttribute('expanded')).toBe(true);
-    expect(shadowOf(editor).querySelector('button')?.textContent?.trim()).toBe('退出扩大');
+    expect(shadowOf(editor).querySelector('button')?.textContent?.trim()).toBe('返回画布');
     shadowOf(editor).querySelector('button')?.click();
     expect(seen).toEqual([true, false]);
   });

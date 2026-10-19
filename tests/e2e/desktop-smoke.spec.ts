@@ -1,7 +1,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 /**
- * 节点画布桌面冒烟：三种 16:9 尺寸下的布局、键盘与刷新恢复基线。
+ * 节点画布桌面冒烟：多种屏幕比例下的布局、键盘与刷新恢复基线。
  *
  * 每个 project 用不同 viewport 跑同一份断言：画布、节点库、检查器都在视口内，
  * 上下排布后整页可以竖直滚动、没有横向越界，选中节点后方向键能移动、`f` 能适应窗口。
@@ -47,7 +47,8 @@ test('桌面冒烟：上下布局、键盘、节点库、检查器与刷新恢�
     if (viewsBox === null || canvasBox === null) throw new Error('视图区或画布没有实际尺寸');
     expect(canvasBox.y).toBeGreaterThanOrEqual(viewsBox.y + viewsBox.height - 4);
     expect(canvasBox.width).toBeGreaterThan(240);
-    expect(canvasBox.height).toBeGreaterThan(200);
+    expect(viewsBox.height).toBeGreaterThanOrEqual(500);
+    expect(canvasBox.height).toBeGreaterThanOrEqual(480);
     // 窄高排布后靠页面滚动，不能出现横向越界。
     expect(await page.evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
     expect(await page.evaluate<boolean>('document.documentElement.scrollHeight > innerHeight')).toBe(true);
@@ -55,7 +56,12 @@ test('桌面冒烟：上下布局、键盘、节点库、检查器与刷新恢�
   });
 
   await test.step('节点库加节点后选中，方向键移动、f 适应窗口', async () => {
-    await library.getByRole('button', { name: '填充字节', exact: true }).click();
+    await library.getByRole('button', { name: '字节与载荷', exact: true }).click();
+    const fillCard = library.getByRole('button', { name: '填充字节', exact: true });
+    await expect(fillCard.locator('.preview')).toBeVisible();
+    expect(await fillCard.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element, '::before').content)).toBe('none');
+    expect(await fillCard.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element, '::after').content)).toBe('none');
+    await fillCard.click();
     const fill = canvas.locator('.node[data-node="fill"]');
     await expect(fill).toBeVisible();
     await panel.evaluate((element) => {

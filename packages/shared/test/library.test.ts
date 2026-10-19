@@ -3,7 +3,6 @@ import {
   LIBRARY_CATEGORIES,
   LIBRARY_CATEGORY_IDS,
   NODE,
-  PYTHON_TEMPLATES,
   availableNodeSpecs,
   libraryEntryOf,
   libraryGroups,
@@ -14,7 +13,7 @@ import type { LibraryCategoryId, LibraryEntry, LibraryGroup, NodeKindSpec } from
 /**
  * 节点库分类的契约测试（10 §4.1）。
  *
- * 分类是节点目录的派生视图：这里既断言「七个一级分类固定」，也断言「目录里的节点一个不少、一个不多」，
+ * 分类是节点目录的派生视图：这里既断言「用途分类齐全」，也断言「目录里的节点一个不少、一个不多」，
  * 免得以后新增节点时忘了归类、或把同一个节点摆进两个分类。
  */
 
@@ -50,10 +49,10 @@ const UNKNOWN_DATA: NodeKindSpec = {
 };
 
 describe('节点库一级分类', () => {
-  it('七个分类的 id 与顺序固定', () => {
-    expect(LIBRARY_CATEGORY_IDS).toEqual(['data', 'compute', 'payload', 'control', 'action', 'python', 'module']);
+  it('分类的 id 与顺序固定', () => {
+    expect(LIBRARY_CATEGORY_IDS).toEqual(['data', 'compute', 'payload', 'pattern', 'control', 'loop', 'variable', 'action', 'python', 'module']);
     expect(LIBRARY_CATEGORIES.map((info) => info.id)).toEqual([...LIBRARY_CATEGORY_IDS]);
-    expect(new Set(LIBRARY_CATEGORIES.map((info) => info.id)).size).toBe(7);
+    expect(new Set(LIBRARY_CATEGORIES.map((info) => info.id)).size).toBe(10);
   });
 
   it('每个分类的中文名与用途说明齐全', () => {
@@ -61,7 +60,10 @@ describe('节点库一级分类', () => {
       '数据与常量',
       '运算与判断',
       '字节与载荷',
-      '流程与变量',
+      '定位序列',
+      '流程控制',
+      '循环',
+      '变量',
       '交互动作',
       'Python',
       '我的模块',
@@ -102,23 +104,12 @@ describe('目录 → 分类的派生视图', () => {
     );
     // 字节与载荷：填充、拼接、组装、定位序列
     expect(kindsIn('payload')).toEqual(
-      expect.arrayContaining([NODE.fill, NODE.concat, NODE.slice, NODE.assemble, NODE.cyclic, NODE.find]),
+      expect.arrayContaining([NODE.fill, NODE.concat, NODE.slice, NODE.assemble]),
     );
-    // 流程与变量
-    expect(kindsIn('control')).toEqual(
-      expect.arrayContaining([
-        NODE.start,
-        NODE.if,
-        NODE.while,
-        NODE.repeat,
-        NODE.result,
-        NODE.index,
-        NODE.accumulator,
-        NODE.varDeclare,
-        NODE.varGet,
-        NODE.varSet,
-      ]),
-    );
+    expect(kindsIn('pattern')).toEqual(expect.arrayContaining([NODE.cyclic, NODE.find]));
+    expect(kindsIn('control')).toEqual(expect.arrayContaining([NODE.start, NODE.if, NODE.result]));
+    expect(kindsIn('loop')).toEqual(expect.arrayContaining([NODE.while, NODE.repeat, NODE.index, NODE.accumulator]));
+    expect(kindsIn('variable')).toEqual(expect.arrayContaining([NODE.varDeclare, NODE.varGet, NODE.varSet]));
     expect(kindsIn('control')).not.toContain(NODE.moduleCall);
     // 交互动作
     expect(kindsIn('action')).toEqual(
@@ -133,24 +124,12 @@ describe('目录 → 分类的派生视图', () => {
   });
 });
 
-describe('二级分组', () => {
-  it('条目少的分类只有一级，不强行拆二级', () => {
-    for (const id of ['data', 'action', 'python', 'module'] as const) {
-      const group = groupOf(id);
+describe('两级目录', () => {
+  it('每个分类直接展示节点，没有子分类', () => {
+    for (const group of GROUPS) {
       expect(group.sections).toHaveLength(1);
       expect(group.sections[0]?.name).toBeUndefined();
       expect(group.sections[0]?.entries.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('条目多的分类拆二级，且每个分组都有名字', () => {
-    for (const id of ['compute', 'payload', 'control'] as const) {
-      const group = groupOf(id);
-      expect(group.sections.length).toBeGreaterThan(1);
-      for (const section of group.sections) {
-        expect(typeof section.name).toBe('string');
-        expect(section.name?.length).toBeGreaterThan(0);
-      }
     }
   });
 });
@@ -162,7 +141,7 @@ describe('节点库搜索', () => {
     if (hit === undefined) throw new Error('搜索「填充」应命中填充节点');
     expect(hit.category).toBe('payload');
     expect(hit.categoryLabel).toBe('字节与载荷');
-    expect(hit.path).toBe('字节与载荷 / 填充与拼接');
+    expect(hit.path).toBe('字节与载荷');
   });
 
   it('英文查询命中拼接与组装', () => {
@@ -196,29 +175,6 @@ describe('节点库搜索', () => {
       const kinds = searchLibrary(SPECS, query).map((match) => match.kind);
       expect(new Set(kinds).size).toBe(kinds.length);
     }
-  });
-});
-
-describe('Python 代码模板', () => {
-  it('三个入门模板的代码与输入声明合法', () => {
-    expect(PYTHON_TEMPLATES.map((template) => template.id)).toEqual(['pack-address', 'slice-join', 'xor-loop']);
-    for (const template of PYTHON_TEMPLATES) {
-      expect(template.name.length).toBeGreaterThan(0);
-      expect(template.summary).toContain('隔离');
-      expect(template.code.trim().length).toBeGreaterThan(0);
-      expect(template.code).toContain('result');
-      expect(template.code).not.toContain('import');
-      for (const input of template.inputs) {
-        expect(input).toMatch(/^[a-z][a-z0-9_]*:(int|bool|bytes|text)$/);
-      }
-      expect(['int', 'bool', 'bytes', 'text']).toContain(template.outputType);
-    }
-  });
-
-  it('模板只通过 in0… 读输入', () => {
-    expect(PYTHON_TEMPLATES[0]?.code).toContain('in0');
-    expect(PYTHON_TEMPLATES[1]?.code).toContain('in1');
-    expect(PYTHON_TEMPLATES[2]?.code).toContain('in1');
   });
 });
 

@@ -4,10 +4,8 @@ import type {
   GraphModule,
   ParamValue,
   PythonCapability,
-  PythonTemplate,
   WorkflowIssue,
 } from '@pwn2block/shared';
-import { PYTHON_TEMPLATES } from '@pwn2block/shared';
 import type { PayloadControlsModel } from '../viewmodel/toolbar';
 
 /**
@@ -23,7 +21,6 @@ export interface ChromeHandlers {
   readonly onCommand: (command: 'run-all' | 'abort') => void;
   /** 定位节点：问题列表、编译轨迹共用。 */
   readonly onLocate: (nodeId: string, extra?: { path?: readonly string[]; rounds?: Readonly<Record<string, number>> }) => void;
-  readonly onTemplate: (template: PythonTemplate) => void;
   readonly onAddModule: (moduleId: string) => void;
   readonly onEditModule: (moduleId: string) => void;
   readonly onExportModule: (moduleId: string) => void;
@@ -69,20 +66,6 @@ export function renderPythonStatus(capability: PythonCapability | undefined): un
   }
   const isolation = capability.isolated ? '已隔离' : '未隔离，仅开发';
   return html`<span class="ok">Python：${capability.backend} · ${isolation}</span>`;
-}
-
-/** Python 代码模板：一键新建 Python 节点并把模板代码填进去（10 §4.1、§6）。 */
-export function renderTemplates(handlers: ChromeHandlers): unknown {
-  return html`<section class="extras">
-    <h3>Python 模板</h3>
-    ${PYTHON_TEMPLATES.map(
-      (template) => html`<button
-        data-template=${template.id}
-        title=${template.summary}
-        @click=${() => handlers.onTemplate(template)}
-      >${template.name}</button>`,
-    )}
-  </section>`;
 }
 
 /** 已定义的模块：显示种类/版本/被调用次数，并可插入调用节点（模块体在提取时生成）。 */

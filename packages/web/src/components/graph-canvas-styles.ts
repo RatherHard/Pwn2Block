@@ -5,7 +5,7 @@ import { PORT_SIZE, ROW_HEIGHT } from '../graph/geometry';
  * 画布自身的 TUI 样式（10 §7）：只引用主题变量，不用阴影、圆角、渐变与半透明。
  *
  * 单独成文件是为了让手势与渲染代码留在可读长度内；端口形状用 clip-path 区分类型，
- * 拖拽期间禁止选中文字由 `:host([data-gesture])` 统一处理。
+ * 画布标签不可拖选，输入控件保留原生文字选择；手势期间统一禁止拖选。
  */
 export const canvasStyles = css`
       :host {
@@ -21,7 +21,22 @@ export const canvasStyles = css`
       :host(:focus-visible) {
         border-color: var(--p2b-focus);
       }
-      /* 拖拽期间禁止选中文字；结束后立刻恢复，输入框与代码编辑器照常可选（10 §3.2）。 */
+      /* 标题、参数标签与连线文字不可拖选，输入控件仍可编辑（10 §3.2）。 */
+      .viewport {
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      input,
+      textarea,
+      [contenteditable="true"] {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      :host([data-gesture]) .viewport,
+      :host([data-gesture]) .viewport * {
+        -webkit-user-select: none;
+        user-select: none;
+      }
       :host([data-gesture]) {
         user-select: none;
         cursor: grabbing;

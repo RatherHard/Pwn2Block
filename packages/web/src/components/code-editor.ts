@@ -50,6 +50,8 @@ export class Pwn2BlockCodeEditor extends LitElement {
     css`
       :host {
         display: block;
+        min-width: 0;
+        max-width: 100%;
       }
 
       .editor {
@@ -159,9 +161,9 @@ export class Pwn2BlockCodeEditor extends LitElement {
         color: var(--p2b-fg);
       }
 
-      /* 扩大：只放大高度，文本仍在 textarea 里，切换不会丢内容。 */
+      /* 扩大编辑由父级放入画布区域，内部填满可用高度。 */
       :host([expanded]) .editor {
-        min-height: 22rem;
+        height: 100%;
       }
 
       :host([expanded]) .input {
@@ -260,7 +262,7 @@ export class Pwn2BlockCodeEditor extends LitElement {
         aria-pressed=${this.expanded ? 'true' : 'false'}
         @click=${this.onToggleExpand}
       >
-        ${this.expanded ? '退出扩大' : '扩大编辑'}
+        ${this.expanded ? '返回画布' : '扩大编辑'}
       </button>
     `;
   }
@@ -346,6 +348,7 @@ export class Pwn2BlockCodeEditor extends LitElement {
   /** Escape 在整组里都算取消（父组件据此退出扩大或关掉编辑器）。 */
   private onEditorKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return;
+    this.emitChange(this.text);
     this.dispatchEvent(new CustomEvent('p2b-code-cancel', { bubbles: true, composed: true }));
   };
 

@@ -23,7 +23,7 @@ import './code-editor';
  *
  * 与节点内的编辑框共用 `param-field` 的同一个渲染器与同一套校验：改一处，另一处立刻同步，
  * 因为两处都只读文档、只派发命令，不各自持有一份参数值。复杂配置（Python 代码、命名输入、
- * 题目动作选择）完整放在这里；节点内只留摘要与「配置」入口。
+ * 题目动作选择）完整放在这里；节点内只留摘要，选中节点即可在侧栏编辑。
  */
 
 export type InspectorAction =
@@ -78,6 +78,10 @@ export class Pwn2BlockNodeInspector extends LitElement {
         align-items: center;
         gap: 0.3rem;
         flex-wrap: wrap;
+      }
+      .param-line pwn2block-code-editor {
+        width: 100%;
+        min-width: 0;
       }
       .param-line input[type='text'],
       .param-line select,
@@ -163,7 +167,6 @@ export class Pwn2BlockNodeInspector extends LitElement {
   /** 容器节点当前是否折叠。 */
   declare collapsed: boolean;
 
-  private codeExpanded = false;
 
   override render() {
     const node = this.node;
@@ -208,13 +211,9 @@ export class Pwn2BlockNodeInspector extends LitElement {
           value: node.params[param.name],
           mode: mode?.mode ?? 'inline',
           ...(mode?.source === undefined ? {} : { source: mode.source }),
-          expanded: this.codeExpanded,
           onValue: (value: ParamValue) => this.emitParam(param.name, value),
           onMode: (next) => this.emitMode(param.name, next),
-          onExpand: (expanded) => {
-            this.codeExpanded = expanded;
-            this.requestUpdate();
-          },
+          onExpand: () => this.dispatchEvent(new CustomEvent('p2b-inspector-code-expand', { bubbles: true, composed: true })),
         });
       })}
     </section>`;

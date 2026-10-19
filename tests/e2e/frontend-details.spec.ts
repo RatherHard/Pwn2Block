@@ -30,6 +30,8 @@ test('编译错误在输出区列出，点「定位」选中出错的节点', as
   const panel = page.locator('pwn2block-graph-panel');
   // 默认 author 没选题目积木：编译一定失败。
   await panel.getByRole('complementary', { name: '节点库' })
+    .getByRole('searchbox', { name: '搜索节点' }).fill('题目专用动作');
+  await panel.getByRole('complementary', { name: '节点库' })
     .getByRole('button', { name: '题目专用动作', exact: true })
     .click();
   await panel.getByRole('button', { name: '编译', exact: true }).click();
@@ -73,6 +75,8 @@ test('画布键盘：Delete 删除、Ctrl+Z 撤销、方向键移动选中节点
   await openChallenge(page);
   const panel = page.locator('pwn2block-graph-panel');
   const canvas = panel.getByRole('application', { name: '节点画布' });
+  await panel.getByRole('complementary', { name: '节点库' })
+    .getByRole('searchbox', { name: '搜索节点' }).fill('填充字节');
   await panel.getByRole('complementary', { name: '节点库' })
     .getByRole('button', { name: '填充字节', exact: true })
     .click();

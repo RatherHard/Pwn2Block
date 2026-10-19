@@ -196,7 +196,7 @@ export class Pwn2BlockGraphCanvas extends LitElement {
       const live = this.interaction.liveMoves[node.id];
       const box = nodeBox(
         node,
-        live === undefined ? placement : { x: placement.x + live.x, y: placement.y + live.y },
+        live ?? placement,
         { context, selection: state.selection, errorNodes },
       );
       if (box !== undefined) boxes.push(box);
