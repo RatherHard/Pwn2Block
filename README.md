@@ -1,6 +1,6 @@
 # Pwn2Block
 
-面向 CTF 新生赛的内存可视化 Pwn 实验室。学习者用 Blockly 积木拼装 payload，交给后端权威 VM 执行，观察栈、寄存器、指令和 I/O 的变化，在过程中理解栈帧、缓冲区溢出和返回地址劫持。
+面向 CTF 新生赛的内存可视化 Pwn 实验室。学习者用节点画布拼装 payload，交给后端权威 VM 执行，观察栈、寄存器、指令和 I/O 的变化，在过程中理解栈帧、缓冲区溢出和返回地址劫持。
 
 它不是浏览器里的 Linux 或 x86 模拟器，只实现教学所需的受控指令、内存区域（VMA）、syscall 和判题能力。
 
@@ -8,7 +8,7 @@
 
 1. 选一道题，阅读题面和公开内存布局。
 2. 在调试实例里单步、运行、后退、撤销，观察状态变化。
-3. 用积木组合 padding、字节、地址和原子动作，改动后自动编译。
+3. 在节点画布上用字节、地址、运算、分支/循环和题目动作拼装 payload，改动后在浏览器内自动编译。
 4. 提交判题：服务端从初始状态回放 payload，判胜后下发 flag。
 
 调试实例里的「已满足」只表示当前试验状态满足条件，不发 flag；只有判题实例的回放结果算数。
@@ -43,6 +43,7 @@ node --env-file=.env.example --import tsx packages/server/src/index.ts
 - 每道题的 flag 变量名是 `FLAG_<ID大写>`，例如 `FLAG_RET2WIN`。缺失或为空时该题拒绝加载。
 - 端口用 `PORT` 覆盖，默认 8787；监听地址固定为 `127.0.0.1`。
 - 会话只存在服务端内存里，重启后丢失。
+- Python 节点默认不可用；要在部署环境启用隔离求值，按 [09-Python 求值部署与诊断](docs/09-Python求值部署与诊断.md) 配置 `PWN2BLOCK_PYTHON_BACKEND=docker` 并准备镜像。普通 `process` 后端只用于开发，不算隔离。
 
 开发时用 `pnpm dev` 同时起 server 和 Vite（5173 端口，`/api` 代理到后端），同样需要先在环境中设置 `FLAG_*`。
 
@@ -80,7 +81,7 @@ node --env-file=.env.example --import tsx packages/server/src/index.ts
 packages/shared/     前后端共享的类型与 Schema
 packages/engine/     VM 引擎：纯函数 + COW 内存，不依赖 HTTP
 packages/server/     Fastify：题目加载、会话、REST、静态托管
-packages/web/        Vite + Lit + Blockly 单页应用
+packages/web/        Vite + Lit 单页应用：节点画布、状态视图与回放
 packages/authoring/  出题 CLI：new、asm、check、solve
 challenges/          题目包（public.json 对外，private.json 只在服务端）
 presets/             默认编码表
@@ -95,6 +96,8 @@ presets/             默认编码表
 - [基本架构](docs/01-基本架构.md)：分层、请求流和安全边界
 - [已实现需求](docs/02-已实现需求.md) / [未实现需求](docs/03-未实现需求.md)
 - [已完成工作](docs/04-已完成工作.md) / [未完成工作](docs/05-未完成工作.md)
+- [节点画布与 Python 数据处理需求](docs/06-节点画布与Python数据处理需求.md) / [实施计划](docs/07-节点画布与Python数据处理实施计划.md) / [技术决策](docs/08-节点画布技术决策.md)
+- [Python 求值部署与诊断](docs/09-Python求值部署与诊断.md)
 - [MVP 归档](docs/archive/mvp-2026-10-16/README.md)：VM、题目包格式、API、出题指南、部署说明等详细规范
 
 贡献约定（分支、提交、测试要求）见 [CLAUDE.md](CLAUDE.md)。flag 真值、`.env` 和凭证不得进 git。

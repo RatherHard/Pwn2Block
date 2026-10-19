@@ -1,4 +1,4 @@
-﻿# Pwn2Block
+# Pwn2Block
 
 Pwn2Block 是面向 CTF 新生赛的内存可视化实验室：学习者用积木拼装 payload，交给**后端权威 VM**执行，观察栈、寄存器和指令变化。
 
@@ -25,7 +25,7 @@ Pwn2Block 是面向 CTF 新生赛的内存可视化实验室：学习者用积�
 packages/shared/     类型与 Schema，单一事实来源
 packages/engine/     VM 引擎，纯函数 + COW 内存，不依赖 HTTP
 packages/server/     Fastify：会话、题目加载、REST、静态托管
-packages/web/        Vite + Lit + Blockly 单页应用
+packages/web/        Vite + Lit 单页应用：节点画布、状态视图与回放
 packages/authoring/  出题 CLI：asm、check、solve、new
 challenges/          题目包
 presets/             默认编码表

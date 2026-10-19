@@ -53,7 +53,7 @@ pnpm start
 
 - `GET /api/capabilities`：后端、是否隔离、不可用原因。启动失败也走这里，不会静默回退。
 - 日志事件 `python_unavailable` / `python_spawn_failed` / `python_timeout` / `python_overflow` / `python_cancelled`：都带节点级原因，不泄露宿主路径或秘密。
-- 本机自检：`pnpm test:python`（真实后端用例；没有 Docker 守护进程时相关 7 项**跳过**，跳过不等于通过）。
+- 本机自检：`pnpm test:python`（真实后端用例；没有 Docker 守护进程时相关 7 项**跳过**，跳过不等于通过）。CI 与发布前用 `PWN2BLOCK_REQUIRE_PYTHON=1` 跑同一组用例，缺解释器或镜像直接失败。
 - 浏览器端：画布面板顶部显示 Python 状态；语义编辑会取消在途请求，迟到结果不覆盖新产物。
 
 ## 5. 部署验收清单（缺一不可）
@@ -62,6 +62,6 @@ pnpm start
 2. 容器内无网络：`socket` 连接被拒；无宿主文件：读取 `/etc/passwd` 之外的挂载点不存在；`subprocess`/`fork` 受 pids 限制。
 3. 大整数、字节输出、异常、死循环、输出超额、取消、排队上限各跑一遍，错误文案不含宿主路径。
 4. 任务间状态隔离：连续两次求值互不可见，临时目录在结束后被删除。
-5. 在目标机器上重跑 `pnpm test:python`，确认那 7 项**真正执行**且通过。
+5. 在目标机器上重跑 `pnpm test:python`，确认那 7 项**真正执行**且通过；发布验收用 `PWN2BLOCK_REQUIRE_PYTHON=1`，禁止把跳过当通过。
 
-第 5 项已在本机（Docker Desktop + python:3.12-alpine）跑通：python-real 19/19 通过；目标部署环境仍需按本清单复跑后再对外声称已验证。
+第 5 项已在本机（Docker Desktop + python:3.12-alpine）与 CI 跑通：python-real 19/19 通过，CI 会先 `docker pull python:3.12-alpine` 再以 `PWN2BLOCK_REQUIRE_PYTHON=1` 执行；目标部署环境仍需按本清单复跑后再对外声称已验证。
