@@ -21,6 +21,8 @@ jobs:
       FLAG_STACKFRAME: pwn2block-ci-sentinel
       FLAG_LOCALVAR: pwn2block-ci-sentinel
       FLAG_RET2ROP: pwn2block-ci-sentinel
+      # CI 里 docker 与 python3 都在：要求真实隔离后端真的跑起来，缺一就失败而不是 skip。
+      PWN2BLOCK_REQUIRE_PYTHON: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +34,10 @@ jobs:
           cache: pnpm
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
+      # `python-real.test.ts` 不在测试里拉镜像（避免依赖网络）；CI 先显式拉好，再让真实
+      # docker 后端用例执行。`PWN2BLOCK_REQUIRE_PYTHON=1` 会把「镜像缺席」从 skip 变成失败。
+      - name: 拉取 Python 隔离镜像
+        run: docker pull python:3.12-alpine
       - name: 类型检查
         run: pnpm typecheck
       - name: Lint
@@ -53,3 +59,33 @@ jobs:
         run: pnpm challenge:check --all
       - name: 跑全部题目参考解法
         run: pnpm challenge:solve --all
+      - name: 安装 Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: 启动真实后端
+        env:
+          FLAG_RET2WIN: flag{e2e-graph}
+          PORT: '8787'
+        run: |
+          pnpm start > /tmp/pwn2block-server.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8787/api/health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/pwn2block-server.log
+          exit 1
+      - name: 浏览器端到端（真实后端 + 生产构建）
+        env:
+          PWN2BLOCK_E2E: '1'
+          PWN2BLOCK_BASE_URL: http://127.0.0.1:8787
+          PWN2BLOCK_E2E_OUTPUT_DIR: .tmp/ci-e2e
+          FLAG_RET2WIN: flag{e2e-graph}
+        run: pnpm e2e
+      - name: 保存 E2E 失败现场
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: |
+            .tmp/ci-e2e
+            /tmp/pwn2block-server.log
+          if-no-files-found: ignore

@@ -59,6 +59,12 @@ const PYTHON = findPython();
 const IMAGE = process.env.PWN2BLOCK_PYTHON_IMAGE ?? 'python:3.12-alpine';
 const DOCKER = dockerImageReady(IMAGE);
 
+// CI 要的是「真实隔离后端被真的执行」：缺解释器或镜像时直接失败，而不是整组 skip 后假装通过。
+if (process.env.PWN2BLOCK_REQUIRE_PYTHON === '1') {
+  if (PYTHON === undefined) throw new Error('PWN2BLOCK_REQUIRE_PYTHON=1，但找不到 Python 3 解释器');
+  if (!DOCKER) throw new Error(`PWN2BLOCK_REQUIRE_PYTHON=1，但 docker 镜像 ${IMAGE} 不可用`);
+}
+
 /**
  * 无限循环用例：确认「墙钟超时 → 杀掉 → 回 timeout」。
  *
