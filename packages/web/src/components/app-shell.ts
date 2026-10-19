@@ -122,7 +122,8 @@ export class Pwn2BlockApp extends LitElement {
         height: max(28rem, calc(100dvh - var(--p2b-topbar-h)));
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        /* 画布是主工作区：右栏占两份，左栏留一份；1280 宽度下画布仍有可操作空间。 */
+        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
         gap: 0.8rem;
         padding: 0.8rem;
         overflow: hidden;

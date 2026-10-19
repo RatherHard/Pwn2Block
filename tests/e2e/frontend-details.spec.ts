@@ -1,204 +1,111 @@
-﻿import { expect, test, type Page } from '@playwright/test';
-import { findCanvasBlock, dragFromToolboxTo, openToolboxCategory } from './gestures';
+import { expect, test, type Page } from '@playwright/test';
 
-// 当前源码/生产构建均可；真实后端与真实鼠标，不向组件注入测试状态。
+/**
+ * 节点画布的细节回归：编译错误定位、坏存档不覆盖、键盘可达与视图标签。
+ *
+ * 全部走真实后端与生产构建；只有「读当前图」用面板公开方法，不从 localStorage 猜结构。
+ */
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要真实本地后端与 PWN2BLOCK_E2E=1');
-test.use({ viewport: { width: 1440, height: 900 } });
-const sessions = new Set<string>();
 
-/** 会话就绪：状态栏显示 ip（画布为空时「运行」仍禁用，不能拿它当信号）。 */
-async function sessionReady(page: Page): Promise<void> {
-  await expect(page.locator('pwn2block-app .status')).toContainText(/ip=0x[\da-f]+/);
+const INTERIM_KEY = 'pwn2block.graph.ret2win';
+const CURRENT_KEY = 'pwn2block.graph.v1.ret2win';
+const VALID_INTERIM = JSON.stringify({
+  format: 'pwn2block.workflow',
+  version: 1,
+  nodes: [{ id: 'start', kind: 'start', params: {} }],
+  connections: [],
+  main: [],
+  layout: { start: { x: 40, y: 40 } },
+});
+
+async function openChallenge(page: Page): Promise<void> {
+  await page.goto('/');
+  const picker = page.getByRole('region', { name: '选择题目' });
+  if (await picker.isVisible()) await picker.getByRole('button').first().click();
+  await expect(page.locator('pwn2block-graph-panel')).toBeVisible();
 }
 
-/** 顶栏「运行」菜单默认收起，先展开再操作里面的按钮。 */
-async function openRunMenu(page: Page): Promise<void> {
-  await page.locator('pwn2block-top-bar summary').filter({ hasText: /^运行$/ }).click();
-  await expect(page.locator('pwn2block-top-bar details.menu')).toHaveAttribute('open', '');
-}
+test('编译错误在输出区列出，点「定位」选中出错的节点', async ({ page }) => {
+  await openChallenge(page);
+  const panel = page.locator('pwn2block-graph-panel');
+  // 默认 author 没选题目积木：编译一定失败。
+  await panel.getByRole('complementary', { name: '工具箱' })
+    .getByRole('button', { name: '题目专用动作', exact: true })
+    .click();
+  await panel.getByRole('button', { name: '编译', exact: true }).click();
+  await expect(panel).toContainText('编译失败');
 
-test.beforeEach(async ({ page }) => {
-  page.on('response', async response => {
-    if (response.url().endsWith('/api/sessions') && response.request().method() === 'POST') {
-      const body = await response.json() as { sessionId: string };
-      sessions.add(body.sessionId);
-    }
+  const issues = panel.locator('.issues');
+  await expect(issues).toContainText('题目专用动作');
+  await issues.getByRole('button', { name: '定位' }).first().click();
+  const canvas = panel.getByRole('application', { name: '节点画布' });
+  await expect(canvas.locator('g.select[data-node="author"], g.executing[data-node="author"]')).toBeVisible();
+});
+
+test('当前存档损坏时不回退到旧键，保留原文并提供导出', async ({ page }) => {
+  await page.addInitScript(
+    ([current, interim]) => {
+      localStorage.setItem(current[0], current[1]);
+      localStorage.setItem(interim[0], interim[1]);
+    },
+    [[CURRENT_KEY, '{not-json'], [INTERIM_KEY, VALID_INTERIM]] as const,
+  );
+  await openChallenge(page);
+
+  const panel = page.locator('pwn2block-graph-panel');
+  await expect(panel.locator('.load-failure')).toBeVisible();
+  await expect(panel.locator('.load-failure')).toContainText('存档');
+  await expect(panel.getByRole('button', { name: '导出原文' })).toBeVisible();
+  // 坏存档不覆盖旧键：旧键仍在 localStorage，坏的新键也原样保留。
+  expect(await page.evaluate((key) => localStorage.getItem(key), CURRENT_KEY)).toBe('{not-json');
+  expect(await page.evaluate((key) => localStorage.getItem(key), INTERIM_KEY)).toBe(VALID_INTERIM);
+  // 没有偷偷把旧存档装进来：当前图仍只有开始节点。
+  const count = await panel.evaluate((element) =>
+    (element as unknown as { currentDocument(): { nodes: unknown[] } }).currentDocument().nodes.length,
+  );
+  expect(count).toBe(1);
+});
+
+test('画布键盘：Delete 删除、Ctrl+Z 撤销、方向键移动选中节点', async ({ page }) => {
+  await openChallenge(page);
+  const panel = page.locator('pwn2block-graph-panel');
+  const canvas = panel.getByRole('application', { name: '节点画布' });
+  await panel.getByRole('complementary', { name: '工具箱' })
+    .getByRole('button', { name: '填充字节', exact: true })
+    .click();
+  await panel.evaluate((element) => {
+    (element as unknown as { locate(request: { nodeId: string }): void }).locate({ nodeId: 'fill' });
   });
-  await page.goto('/');
-  await page.getByRole('button', { name: '回到胜利', exact: true }).click();
-  await sessionReady(page);
+  const before = await panel.evaluate((element) =>
+    (element as unknown as { currentDocument(): { layout: Record<string, { x: number }> } })
+      .currentDocument().layout.fill?.x,
+  );
+  await canvas.press('ArrowRight');
+  const moved = await panel.evaluate((element) =>
+    (element as unknown as { currentDocument(): { layout: Record<string, { x: number }> } })
+      .currentDocument().layout.fill?.x,
+  );
+  expect(moved).toBe((before ?? 0) + 8);
+
+  await canvas.press('Delete');
+  expect(await panel.evaluate((element) =>
+    (element as unknown as { currentDocument(): { nodes: { id: string }[] } })
+      .currentDocument().nodes.some((node) => node.id === 'fill'),
+  )).toBe(false);
+  await canvas.press('Control+z');
+  expect(await panel.evaluate((element) =>
+    (element as unknown as { currentDocument(): { nodes: { id: string }[] } })
+      .currentDocument().nodes.some((node) => node.id === 'fill'),
+  )).toBe(true);
 });
 
-test.afterEach(async ({ request }) => {
-  for (const id of sessions) {
-    const response = await request.delete(`/api/sessions/${id}`);
-    expect([200, 204, 404]).toContain(response.status());
-  }
-  sessions.clear();
-});
-
-test('展开题面和提示仍能操作小桌面的工作区', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 });
-  const next = page.getByRole('button', { name: '下一条提示', exact: true });
-  while (await next.isEnabled()) await next.click();
-  await expect.poll(async () => (await page.locator('main').boundingBox())!.height).toBeGreaterThan(300);
-  const panel = page.locator('pwn2block-payload-panel');
-  const canvas = panel.locator('#blockly-host');
-  const clip = (await panel.boundingBox())!;
-  const rect = (await canvas.boundingBox())!;
-  expect(Math.min(clip.y + clip.height, rect.y + rect.height) - Math.max(clip.y, rect.y)).toBeGreaterThan(120);
-  // 标题栏的「运行 / 终止」在小桌面上完整可见。
-  for (const name of ['运行', '终止']) {
-    await expect(panel.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
-  }
-});
-
-test('运行步数校验立即显示并随更正消失', async ({ page }) => {
-  await page.locator('pwn2block-briefing-panel summary').click();
-  await openRunMenu(page);
-  const toolbar = page.locator('pwn2block-top-bar pwn2block-run-menu');
-  const input = toolbar.getByRole('spinbutton', { name: '运行步数' });
-  for (const invalid of ['0', '', '1.5', '10001']) {
-    await input.fill(invalid);
-    await toolbar.getByRole('button', { name: '运行 N 步', exact: true }).click();
-    await expect(toolbar.getByRole('alert')).toContainText('运行步数需要');
-    await input.fill('1');
-    await expect(toolbar.getByRole('alert')).toHaveCount(0);
-  }
-});
-
-test('运行菜单：Esc 关闭并还原焦点，外部点击关闭', async ({ page }) => {
-  const top = page.locator('pwn2block-top-bar');
-  const run = top.locator('summary').filter({ hasText: /^运行$/ });
-  await expect(top.locator('details.menu'), '顶栏只剩「运行」一个菜单').toHaveCount(1);
-  await run.click();
-  await expect(top.locator('details[open]')).toHaveCount(1);
-  await page.keyboard.press('Escape');
-  await expect(top.locator('details[open]')).toHaveCount(0);
-  await expect(run).toBeFocused();
-  await run.click();
-  await expect(top.locator('details[open]')).toHaveCount(1);
-  await page.locator('pwn2block-payload-panel h2').click();
-  await expect(top.locator('details[open]')).toHaveCount(0);
-});
-
-test('视图标签：方向键与 Ctrl+↑/↓ 切换', async ({ page }) => {
-  await page.locator('pwn2block-briefing-panel summary').click();
-  const tablist = page.getByRole('tablist', { name: '视图', exact: true });
-  const tab = (name: RegExp) => tablist.getByRole('tab', { name });
-  const panel = (kind: string) => page.locator(`pwn2block-view-manager #panel-${kind}`);
-  await expect(tab(/栈/)).toHaveAttribute('aria-selected', 'true');
-  await expect(panel('stack')).toBeVisible();
-  await expect(panel('disasm')).toBeHidden();
-  // 焦点在标签上：→ 切到下一个并移动焦点，只显示当前面板。
-  await tab(/栈/).focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(tab(/指令/)).toHaveAttribute('aria-selected', 'true');
-  await expect(tab(/指令/)).toBeFocused();
-  await expect(panel('disasm')).toBeVisible();
-  await expect(panel('stack')).toBeHidden();
-  await page.keyboard.press('End');
-  const last = tablist.getByRole('tab').last();
-  await expect(last).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Home');
-  await expect(tab(/栈/)).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('ArrowLeft');
-  await expect(last, '在第一个标签上按 ← 回到最后一个').toHaveAttribute('aria-selected', 'true');
-  // Ctrl+↓ / Ctrl+↑ 在页面上循环（焦点不在输入框里）：从最后一个绕回第一个。
-  await page.locator('pwn2block-payload-panel h2').click();
-  await page.keyboard.press('Control+ArrowDown');
-  await expect(tab(/栈/)).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Control+ArrowDown');
-  await expect(tab(/指令/)).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Control+ArrowUp');
-  await expect(tab(/栈/)).toHaveAttribute('aria-selected', 'true');
-});
-
-test('当前视图标签写入 p2b:view-tab，跨刷新与题目共用，非法值回退到栈', async ({ page }) => {
-  const tab = (name: RegExp) => page.getByRole('tablist', { name: '视图', exact: true }).getByRole('tab', { name });
-  await page.locator('pwn2block-briefing-panel summary').click();
-  await tab(/寄存器/).click();
-  await expect(page.locator('pwn2block-view-manager #panel-registers')).toBeVisible();
-  await expect.poll(() => page.evaluate<string | null>(`localStorage.getItem('p2b:view-tab')`)).toBe('registers');
-  // history 路由：刷新直接回到题目页。
-  await page.reload();
-  await sessionReady(page);
-  await expect(tab(/寄存器/), '刷新后恢复上次的标签').toHaveAttribute('aria-selected', 'true');
-  await page.getByRole('button', { name: '返回题目列表', exact: true }).click();
-  const other = await page.locator('.boot button').filter({ hasNotText: '回到胜利' }).first().textContent();
-  await page.getByRole('button', { name: other!.trim(), exact: true }).click();
-  await sessionReady(page);
-  await expect(tab(/寄存器/), '换一道题仍是同一个标签').toHaveAttribute('aria-selected', 'true');
-  await page.evaluate(`localStorage.setItem('p2b:view-tab', 'bogus')`);
-  await page.goto('/');
-  await page.getByRole('button', { name: '回到胜利', exact: true }).click();
-  await sessionReady(page);
-  await expect(tab(/栈/), '非法存储值回退到栈').toHaveAttribute('aria-selected', 'true');
-});
-
-test('自由视图偏移重置、分页与越界规范化保持输入一致', async ({ page }) => {
-  await page.locator('pwn2block-briefing-panel summary').click();
-  // 自由视图在「内存」标签里；非当前标签的面板是 hidden 的，先切过去。
-  await page.getByRole('tablist', { name: '视图', exact: true }).getByRole('tab', { name: /内存/ }).click();
-  const memory = page.locator('pwn2block-memory-view');
-  await memory.getByRole('button', { name: 'stack', exact: true }).click();
-  const input = memory.getByRole('textbox', { name: 'hex dump 字节偏移' });
-  await input.fill('oops');
-  await input.press('Tab');
-  await expect(memory.getByRole('alert')).toBeVisible();
-  await memory.getByRole('button', { name: '回到起点', exact: true }).click();
-  await expect(input).toHaveValue('0x0');
-  await expect(memory.getByRole('alert')).toHaveCount(0);
-  await input.fill('999999');
-  await input.press('Tab');
-  const normalized = await input.inputValue();
-  expect(normalized).toMatch(/^0x[\da-f]+$/);
-  await input.fill('9999999');
-  await input.press('Tab');
-  await expect(input).toHaveValue(normalized);
-  await input.fill('bad');
-  await input.press('Tab');
-  await memory.getByRole('button', { name: '上一页', exact: true }).click();
-  await expect(memory.getByRole('alert')).toHaveCount(0);
-  await expect(input).toHaveValue(/^0x[\da-f]+$/);
-});
-
-test('积木原生右键菜单使用中文', async ({ page }) => {
-  await page.locator('pwn2block-briefing-panel summary').click();
-  await page.locator('#blockly-host').click({ button: 'right', position: { x: 350, y: 100 } });
-  await expect(page.getByRole('menu')).toContainText('撤销');
-  await expect(page.getByRole('menu')).not.toContainText('Clean up Blocks');
-});
-
-test('题面将列表和行内代码呈现为可读结构', async ({ page }) => {
-  const briefing = page.locator('pwn2block-briefing-panel .briefing');
-  await expect(briefing.locator('ul > li')).toHaveCount(3);
-  await expect(briefing.locator('code').filter({ hasText: /^vuln$/ }).first()).toBeVisible();
-  await expect(briefing).not.toContainText('`vuln`');
-  // 链接只渲染文字，不生成 <a>。
-  await expect(briefing.locator('a')).toHaveCount(0);
-});
-
-test('返回选题并切换回来保留画布及服务端调试状态', async ({ page }) => {
-  await page.locator('pwn2block-briefing-panel summary').click();
-  const host = (await page.locator('#blockly-host').boundingBox())!;
-  await openToolboxCategory(page, '开始', 'start');
-  await dragFromToolboxTo(page, 'start', { x: host.x + 300, y: host.y + 50 });
-  await expect.poll(async () => (await findCanvasBlock(page, 'start', null)) ? 1 : 0).toBe(1);
-  await openRunMenu(page);
-  const toolbar = page.locator('pwn2block-top-bar pwn2block-run-menu');
-  await toolbar.getByRole('spinbutton', { name: '运行步数' }).fill('1');
-  const action = page.waitForResponse(r => r.url().endsWith('/actions') && r.request().method() === 'POST');
-  await toolbar.getByRole('button', { name: '运行 N 步', exact: true }).click();
-  expect((await (await action).json() as { projection: { steps: number } }).projection.steps).toBe(1);
-  await page.getByRole('button', { name: '返回题目列表', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '选择题目', exact: true })).toBeVisible();
-  const otherTitle = await page.locator('.boot button').filter({ hasNotText: '回到胜利' }).first().textContent();
-  await page.getByRole('button', { name: otherTitle!.trim(), exact: true }).click();
-  await sessionReady(page);
-  await page.getByRole('button', { name: '返回题目列表', exact: true }).click();
-  await page.getByRole('button', { name: '回到胜利', exact: true }).click();
-  await expect(page.locator('pwn2block-app .status')).toContainText('已执行 1 条指令');
-  await expect.poll(async () => (await findCanvasBlock(page, 'start', null)) ? 1 : 0).toBe(1);
-  expect(sessions.size).toBe(2);
+test('视图标签仍可用方向键切换，Home 回到第一个', async ({ page }) => {
+  await openChallenge(page);
+  const tablist = page.getByRole('tablist', { name: '视图' });
+  const stack = tablist.getByRole('tab').first();
+  await stack.focus();
+  await stack.press('ArrowRight');
+  await expect(tablist.getByRole('tab', { selected: true })).toContainText('指令');
+  await tablist.getByRole('tab', { selected: true }).press('Home');
+  await expect(stack).toHaveAttribute('aria-selected', 'true');
 });

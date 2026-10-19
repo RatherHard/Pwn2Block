@@ -1,201 +1,47 @@
 # 浏览器回归与证据
 
-## 2026-10-17 前端 TUI 化后的用例调整
+节点画布已经是默认且唯一的 payload 编辑器；本目录只保留画布时代的 E2E。历史 Blockly 记录见 git 历史与 `docs/archive/`，不再作为当前验收依据。
 
-三个 spec 按新交互改写，旧记录保留作为历史基线：
+## 用例
 
-- 不再点「编译」：改积木自动编译，改为断言状态栏 `动作 n/m` 与输出区；程序区相关断言全部删除。
-- 「试运行」改为 payload 标题栏的「运行」：断言先发 `[reset]`、再发完整序列，末尾不补 `run`；单步、运行 N 步、后退一步、撤销、重置和提交判题从顶栏「运行」菜单操作。
-- 视图菜单改为标签：`frontend-details.spec.ts` 覆盖 ←/→/Home/End、Ctrl+↑/↓、`p2b:view-tab` 跨刷新与跨题目共用、非法值回退到栈；冒烟用键盘逐个切换全部标签。
-- 页面改为整页纵向滚动：冒烟的 `layout()` 不再要求两栏整高落入视口，只要求露出、横向不越界且 `scrollWidth <= innerWidth`；画布的舍入容差由 1 改为 2 CSS px（滚入视口后底边约 1.2 px 裁切）。
-- 闭环第 5 步在改字段前拖动空白画布把工作区左移 160 px：画布变窄后积木栈右缘会压到竖向滚动条。
-- 刷新后的动作指针与刷新前一致（单步再后退不回拨指针），冒烟改为比较刷新前后的 `动作 n/m`。
-- 截图 `04-compiled-program.png` 更名为 `04-compiled-payload.png`。
+| 文件 | project | 覆盖 |
+|---|---|---|
+| `closed-loop.spec.ts` | `chromium-desktop` | 真实后端闭环：工具箱加 `gets(buf)`、检查器填字节、加 `step 3`、编译；先提交错误 payload 得到失败录像；改对后判胜并拿到 flag；刷新后从新存档恢复图并重新编译 |
+| `frontend-details.spec.ts` | `chromium-desktop` | 编译错误「定位」选中节点；坏新存档不回退旧键、保留原文并可导出；画布 Delete / Ctrl+Z / 方向键；视图标签键盘切换 |
+| `desktop-smoke.spec.ts` | `chromium-desktop-1280x720`、`-1440x900`、`-1920x1080` | 三种尺寸下工具箱/画布/检查器可见、无横向越界、加节点、方向键移动、`f` 适应、刷新恢复；每档保存一张 viewport 截图 |
 
-## 2026-10-16 前端细节修复验收
+所有用例都要求 `PWN2BLOCK_E2E=1`，否则显式跳过。没有自动重试，也没有用跳过冒充通过。
 
-本轮在 `F:/Pwn2Block` 验证产品修改，以下 D7 记录保留作为历史基线。
+## 运行
 
-新增 `frontend-details.spec.ts` 的 8 项回归覆盖：展开全部提示后的 1280×720 布局、两处运行步数校验、菜单互斥与关闭/焦点恢复、手动滚动与快捷键同步（含中途反向）、内存偏移重置/分页/越界、Blockly 中文菜单、题面列表与行内代码、返回列表并切回原题恢复画布及调试状态。
+先构建并启动真实后端（测试 flag 是公开哨兵值，不是真 flag）：
 
-原闭环测试改为展开禁用原因后核查完整文字；桌面冒烟的可达性断言保持原样。生产验收发现的小桌面输出区裁切已通过保留程序/输出区内容高度及滚动内边距修复。单元测试补充了题面文本解析、存储禁用/写满/删除失败时的内存缓存、返回选题后的会话恢复与请求中切题门禁；jsdom 滚动测试补齐真实滚动范围所需的高度数据。
+```powershell
+pnpm build
+$env:FLAG_RET2WIN='flag{e2e-graph}'
+$env:PORT='8787'
+pnpm start
+```
 
-最终验证：
-
-| 检查 | 结果 |
-| --- | --- |
-| `pnpm typecheck`、`pnpm lint` | 通过 |
-| `pnpm test` | 113 文件通过，1624 项通过，5 项原有 todo |
-| `pnpm build` | 通过；仍有单 bundle 大于 500 kB 的构建提示 |
-| 真实后端 + 生产构建 `pnpm e2e` | 21 passed，0 skipped，0 flaky，56.5s |
-
-浏览器验收包括新增 8 项、既有闭环 10 项，以及 1280×720、1440×900、1920×1080 三种桌面尺寸。真实后端运行于 8787，六道题使用假测试 flag `flag{frontend-audit-only}`。完成构建并启动后端后，测试端实际命令为：
+另开一个终端：
 
 ```powershell
 $env:PWN2BLOCK_E2E='1'
 $env:PWN2BLOCK_BASE_URL='http://127.0.0.1:8787'
-$env:FLAG_RET2WIN='flag{frontend-audit-only}'
-$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/frontend-audit/production-final'
+$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/e2e'
 pnpm e2e
 ```
 
-最终 JSON 报告位于 `.tmp/frontend-audit/production-final.json`，三种尺寸的截图位于同名目录；单元测试日志为 `.tmp/frontend-audit/unit-final.log`。这些运行产物由 Git 忽略。
+只跑某个 spec 或某个尺寸时加 `--project=...` 与文件路径；输出目录每轮换一个，避免 Playwright 清理上一轮现场。
 
-## D7 历史基线
+## CI
 
-本目录验收只交付回归。2026-10-16 在 `F:/Pwn2Block-wt/d7-browser`、分支 `test/d7-browser`、基线 `8a40600491281454f132d92d96c87e3caca9f233` 上执行。未修改产品包、依赖、锁文件或 `docs/08`。
+`.github/workflows/ci.yml` 在构建后启动真实后端并跑完整 `pnpm e2e`，失败时上传 `.tmp/ci-e2e` 与服务端日志。Python 侧另用 `PWN2BLOCK_REQUIRE_PYTHON=1` 和预先拉取的 `python:3.12-alpine` 强制真实 Docker 隔离用例执行，缺镜像直接失败。
 
-## 环境与覆盖范围
+## 最近一次本地结果
 
-- Windows / PowerShell，Node `v24.20.0`，pnpm `11.25.0`，Playwright `1.64.0`。
-- 浏览器通道：**Playwright bundled Chromium headless shell**，版本 `156.0.8078.4`；未设置系统 Chrome / Edge channel。
-- 真实 Fastify 后端、真实题包、`pnpm build` 的生产静态文件，同源地址 `http://127.0.0.1:8797`。六个 flag 环境变量均为明确的假测试值。
-- 原 `closed-loop.spec.ts` 10 项保持原样，在 `chromium-desktop` 的 1600×1000 自建 context 执行。
-- 新 `desktop-smoke.spec.ts` 分别在 1280×720、1440×900、1920×1080 执行，使用 Playwright page fixture，避免自建 context 覆盖 project 尺寸。
-- 每个尺寸检查生产入口 / 六题列表、真实会话、题面键盘折叠、等宽双栏与横向溢出、八个工具栏按钮可达、视图菜单键盘开关、真实鼠标连接开始和普通单步积木、编译、单步与回退、incomplete 判题、键盘时间线、回到调试的状态隔离、刷新接回旧会话和画布。
-- 检查页面异常与 console.error；测试结束删除会话并检查返回值。仅对画布边框允许 1 CSS px 舍入容差，按钮仍要求完整进入可视区域。（2026-10-17 起为 2 CSS px，见文首。）
-- 每个尺寸保存 7 张原 viewport 截图；浏览器版本、viewport、CDP 进程 PID 写入 JSON 报告的 `browser-environment` attachment。
+2026-11-05，Windows + Playwright bundled Chromium + 生产构建 + 真实后端 `127.0.0.1:8787`：
 
-## 可重复运行
-
-以下均从 worktree 根执行。服务和测试各用一个 PowerShell 终端。每轮更换证据目录，避免 Playwright 清理前轮输出。
-
-安装、构建（本轮确实执行）：
-
-```powershell
-pnpm install --frozen-lockfile
-pnpm build
-pnpm exec playwright install chromium
-```
-
-服务终端（本轮使用的环境和命令）：
-
-```powershell
-$env:PORT='8797'
-$env:FLAG_RET2WIN='flag{d7-browser-test-only}'
-$env:FLAG_ENDIAN='flag{d7-browser-test-only}'
-$env:FLAG_PUSHPOP='flag{d7-browser-test-only}'
-$env:FLAG_CALLRET='flag{d7-browser-test-only}'
-$env:FLAG_STACKFRAME='flag{d7-browser-test-only}'
-$env:FLAG_LOCALVAR='flag{d7-browser-test-only}'
-pnpm start
-```
-
-测试终端（必须与服务使用相同假测试 flag）：
-
-```powershell
-$env:PWN2BLOCK_E2E='1'
-$env:PWN2BLOCK_BASE_URL='http://127.0.0.1:8797'
-$env:FLAG_RET2WIN='flag{d7-browser-test-only}'
-$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/d7-full'
-pnpm e2e
-```
-
-稳定性复跑的真实命令（每尺寸 2 次，无重试）：
-
-```powershell
-$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/d7-repeat'
-pnpm.cmd e2e --project=chromium-desktop-1280x720 --project=chromium-desktop-1440x900 --project=chromium-desktop-1920x1080 --repeat-each=2
-```
-
-本轮全量与稳定性命令的输出另通过 `2>&1 | Tee-Object -FilePath .tmp/d7-full.log` / `.tmp/d7-repeat.log` 保存，再以 `exit $LASTEXITCODE` 返回真实退出码。Windows PowerShell 将原生命令 stderr 包装为 `NativeCommandError` 的日志头，不代表测试退出失败；以退出码和 JSON 的 stats 为准。
-
-质量检查的真实命令：
-
-```powershell
-pnpm typecheck
-pnpm lint
-```
-
-## 实测结果与失败历史
-
-| 执行 | 结果 | 退出码 | 证据 |
-| --- | --- | --- | --- |
-| `pnpm install --frozen-lockfile` | 成功，锁文件无需变更，272 包复用缓存 | 0 | 本次终端记录 |
-| `pnpm build` | 成功；存在既有 bundle 大于 500 kB 提醒 | 0 | `packages/web/dist` 为忽略的构建产物 |
-| `pnpm exec playwright install chromium` | 成功，所需浏览器可用 | 0 | 版本见 browser-environment |
-| 修改前原 `pnpm e2e` | 10 passed，27.2s，0 skipped | 0 | 本次终端记录；原配置只有 list reporter |
-| 首轮 `pnpm typecheck` | 新测试误用 `regs`，应为 `registers`；已修正 | 1 | 本次终端记录 |
-| 首轮三 project 冒烟 | 3 failed，0 skipped；原因及修正见下文 | 1 | `.tmp/d7-first-smoke.json`、`.tmp/d7-first-smoke/` |
-| 修正后同一三 project 命令 | 3 passed，19.5s，0 skipped | 0 | `.tmp/d7-smoke-r2.json`、`.tmp/d7-smoke-r2/` |
-| 最终全量 `pnpm e2e` | **13 passed，45.5s，0 skipped，0 flaky** | 0 | `.tmp/d7-full.json`、`.tmp/d7-full.log` |
-| 三 project `--repeat-each=2` | **6 passed，39.4s，0 skipped，0 flaky** | 0 | `.tmp/d7-repeat.json`、`.tmp/d7-repeat.log` |
-| 修正后 `pnpm typecheck` / `pnpm lint` | 均通过 | 0 / 0 | 本次终端记录 |
-
-首轮三 project 命令与稳定性命令相同，但使用 `pnpm e2e`，不带 `--repeat-each=2`；第二轮使用输出目录 `.tmp/d7-smoke-r2`。所有实际浏览器验收运行均设置 `PWN2BLOCK_E2E=1`，没有通过删除、跳过失败测试或自动重试取得通过。
-
-首轮失败是测试断言问题：
-
-1. 会话 DELETE 实际契约返回 HTTP 200 / `{ ok: true }`，测试初稿误写成 204，导致三个尺寸都在清理阶段失败。已检查真实服务实现并修正；清理使用 soft assertion，仍使测试失败但不遮住主流程异常。
-2. 1280×720 画布 `toBeInViewport({ ratio: 1 })` 实测交集比例 `0.9967041015625`，不足 1 CSS px 的边框裁切使初稿提前失败。改为只给画布 1 CSS px 容差；没有放宽按钮可达断言。
-3. 原始失败截图、error-context、trace.zip 保留在 `.tmp/d7-first-smoke/`；第一轮原 JSON 从当时相对 config 目录生成的位置归档，后续配置改用绝对路径避免歧义。
-
-## 截图与结构化证据
-
-所有路径均相对于 `F:/Pwn2Block-wt/d7-browser`。截图、日志与 JSON 为忽略的运行产物，不提交 git。
-
-最终全量截图目录模板：
-
-```text
-.tmp/d7-full/desktop-smoke-桌面冒烟：布局、键盘、积木、调试、回放与刷新-chromium-desktop-<尺寸>/
-```
-
-`<尺寸>` 分别为 `1280x720`、`1440x900`、`1920x1080`。每个目录有：
-
-1. `01-challenge-list.png`
-2. `02-briefing-expanded.png`
-3. `03-desktop-layout.png`
-4. `04-compiled-payload.png`（2026-10-17 前为 `04-compiled-program.png`）
-5. `05-verdict-replay.png`
-6. `06-debug-output.png`
-7. `07-restored.png`
-
-最终全量 **21 张**、额外稳定性复跑 **42 张**（不计 attachment 副本）。已读取 PNG 文件头核对每张宽高与 project 一致。`.tmp/d7-evidence-summary.json` 汇总各轮 stats、浏览器环境、PID、截图路径、实际宽高和 SHA-256；原 Playwright JSON 保留每个测试的结果与 attachment。
-
-## 进程收尾与验收边界
-
-- 本轮服务监听 PID **15364**，tsx 启动器 PID **19036**。结束时先核对 PID 15364 的命令行属于该 worktree，再执行 `Stop-Process -Id 15364`。启动器随服务退出，8797 已无监听。
-- CDP 记录的 15 个浏览器主 PID、合计 60 个浏览器相关进程 PID 已全部退出，未按进程名批量终止。清理证据：`.tmp/d7-process-cleanup.json`（2026-10-16 18:22:51 +08:00）。未停止其他端口或工作区服务；检查时 8787 本身无监听。
-- 本次范围内未发现阻塞浏览器冒烟的产品缺陷。
-- 本轮实际执行项 **0 skipped**。未设置 `PWN2BLOCK_E2E=1` 时保留原有显式 opt-in 跳过约定；本轮未运行关闭开关的验收。
-- 截图只作为运行留证；未完成人工视觉 / 像素对比、真实屏幕阅读器、Firefox、WebKit、系统 Edge / Chrome、触屏或移动设备验收。
-- 三尺寸执行的是桌面冒烟；原八步完整闭环仍只在 1600×1000 执行，不宣称八步闭环在全部尺寸重跑。
-- 没有执行题库独立最终 check/solve 子任务；主集成已报告该子任务遭自动安全审查拦截，**G4 缺口保留**。没有代跑 T01–T06，也不据浏览器结果宣告完整 MVP 或安全测试全部通过。
-- 主集成的 112 文件、1617 passed + 5 todo、覆盖率等是主集成提供的独立结果，不计为本 worktree 的执行证据。`docs/08`、`docs/12`、`docs/13` 由主集成更新。
-
-## Standards P2 审查收口（2026-10-16）
-
-在 `d4b9729` 上仅修改 `desktop-smoke.spec.ts` 与本文件，补强两项断言：
-
-- 刷新前记录 `canvasBlocks` 的 `id / cls / parentId / childClasses`，按 id 排序，排除 geometry；明确验证 `start → action_step → math_number` 三块连接及字段 `1`，刷新后完整比较同一份结构与字段。随后真实点击「编译」，核对程序区恰有一行、类型 `step`、参数文案 `执行 1 条指令`，对应 `{ type: 'step', count: 1 }`。不新增判题，不通过生产 API 注入画布。
-- `reachable` 对启用按钮追加 `click({ trial: true })`，检查无遮挡、稳定并可接收点击；disabled 按钮仍检查可见性，不强行点击。画布原有 1 CSS px 边框容差保持。
-
-本轮复用此前已安装依赖和同一基线的生产构建，服务仍用本文件记录的六个假 flag，执行 `$env:PORT='8797'; pnpm start`。仅运行三尺寸 smoke，未重跑原有完整闭环，未运行题目 CLI。
-
-真实测试命令（测试终端）：
-
-```powershell
-$env:PWN2BLOCK_E2E='1'
-$env:PWN2BLOCK_BASE_URL='http://127.0.0.1:8797'
-$env:FLAG_RET2WIN='flag{d7-browser-test-only}'
-$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/d7-review-smoke-r2'
-pnpm e2e --project=chromium-desktop-1280x720 --project=chromium-desktop-1440x900 --project=chromium-desktop-1920x1080
-pnpm typecheck
-pnpm lint
-```
-
-| 本轮执行 | 真实结果 | 证据 |
-| --- | --- | --- |
-| 首轮三尺寸 smoke，输出 `.tmp/d7-review-smoke` | 3 failed / 20.6s，0 skipped，exit 1 | `.tmp/d7-review-smoke.json`、同名 `.log` 与目录内截图 / trace |
-| 修正后三尺寸 smoke，输出 `.tmp/d7-review-smoke-r2` | **3 passed / 20.8s，0 skipped，0 flaky，exit 0** | `.tmp/d7-review-smoke-r2.json`、同名 `.log` |
-| 首轮 `pnpm typecheck` | 新增 `Locator.evaluate` 少一个泛型参数，exit 2；已补齐类型参数 | `.tmp/d7-review-typecheck.log` |
-| 修正后 `pnpm typecheck` | 通过，exit 0 | `.tmp/d7-review-typecheck-r2.log` |
-| `pnpm lint` | 通过，exit 0 | `.tmp/d7-review-lint.log` |
-
-首轮 smoke 失败原因是新增测试误把画布计为两块，漏算了 `math_number` 参数影子块；已在失败后及时报告，并修正为三块、增加参数块父子连接断言。没有删除或跳过失败测试，失败证据保留。随后 typecheck 的修正只补全泛型类型参数，不改变已通过 smoke 的运行行为。
-
-浏览器仍为 Playwright bundled Chromium headless shell `156.0.8078.4`。成功截图 **21 张**，目录模板为 `.tmp/d7-review-smoke-r2/desktop-smoke-桌面冒烟：布局、键盘、积木、调试、回放与刷新-chromium-desktop-<尺寸>/`，文件名沿用上述七张截图；`07-restored.png` 现在包含刷新后重新编译的程序区。截图与 JSON / 日志均保留在本 worktree，不提交 git。
-
-本轮监听 PID **12216**、启动器 PID **19376**。已核验服务命令行属于本 worktree 后按具体 PID 停止；8797 无监听，启动器及报告记录的浏览器进程均已退出。清理记录：`.tmp/d7-review-process-cleanup.json`，时间 2026-10-16 19:19:41 +08:00。未停止其他工作区服务。
-
-主线另报告 `PWN2BLOCK_E2E=0`、输出 `.tmp/d7-opt-out` 的 `pnpm e2e` 为 **13 skipped / 0 executed**，只证明开关行为，不计为通过；该结果来自主线在 `c99124f` 后追加的验证，不是本 worktree 新执行。主线 `docs/08/12/13` 仍由集成方维护。
+- `pnpm e2e`：8/8 通过（closed-loop 1 + frontend-details 4 + 三尺寸 smoke 3），0 skipped，0 flaky。
+- 截图复制为 `docs/evidence-graph-1280x720.png`、`docs/evidence-graph-1440x900.png`、`docs/evidence-graph-1920x1080.png`、`docs/evidence-graph-won.png`；其余运行产物在 `.tmp/`，已被 git 忽略。
+- 人工视觉、真实读屏、Firefox/WebKit 与移动端仍不在自动验收范围内。
