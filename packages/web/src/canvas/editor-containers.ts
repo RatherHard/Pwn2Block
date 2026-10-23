@@ -10,14 +10,15 @@ import {
   withNodes,
   type CanvasEdit,
 } from './editor-core';
+import { compactGroupMembers } from './editor-compact';
 import { removeNodes } from './editor-graph';
 
 /**
  * 包络（组合）与流程序列上的编辑命令（阶段三）。
  *
  * 两类命令共用一条原则：**结构容器只描述归属与顺序，不描述值**。
- * - 组合的 `rows` 是权威行列（需求 §2.2）：插入行、删行、移动成员都写 `rows`，
- *   成员的坐标与组合自身的坐标一概不动，所以「整组移动不改值」自动成立。
+ * - 组合的 `rows` 是权威行列（需求 §2.2）：插入行、删行、移动成员都写 `rows`，行列变完再压紧坐标，
+ *   值的计算只读 `rows`，所以「整组移动不改值」自动成立。
  * - 流程用数组表达顺序（需求 §5.2）：语句顺序就是执行顺序，一个流程节点只能出现在一条序列里，
  *   所以「重复放置」在结构上就该被拒绝，而不是靠校验器事后发现。
  */
@@ -144,6 +145,19 @@ export function dissolveGroup(document: canvas.CanvasDocument, groupId: string):
   return edited(dropGroup(document, groupId).document);
 }
 
+// ---------------------------------------------------------------------------
+// 落位后压紧（需求 §6.2「落位后自动压紧并对齐行首，不保留空洞」）
+// ---------------------------------------------------------------------------
+
+/** 改完行以后连同压紧一起生效：结构（`rows`）与坐标写在同一个新文档里，一次撤销就回得去。 */
+function withRows(document: canvas.CanvasDocument, group: canvas.GroupNode): CanvasEdit {
+  return edited(compactGroupMembers(replaceNode(document, group), group));
+}
+
+/** 压紧用的行列间距从 `canvas/editor` 就能拿到（与组合的三种行列操作同一处出口）。 */
+export { COL_PITCH, ROW_PITCH } from './editor-compact';
+
+
 /** 在指定行之后插入一个空行：`atIndex` 越界就追加到末尾。 */
 export function insertRowAfter(
   document: canvas.CanvasDocument,
@@ -155,7 +169,7 @@ export function insertRowAfter(
   const rows = target.group.rows.map((row) => [...row]);
   const at = Math.max(-1, Math.min(atIndex, rows.length - 1));
   rows.splice(at + 1, 0, []);
-  return edited(replaceNode(document, { ...target.group, rows }));
+  return withRows(document, { ...target.group, rows });
 }
 
 /** 删掉一行；删空最后一行时整个组合失去成员，于是组合也一起删（否则留着 `group_empty`）。 */
@@ -165,7 +179,7 @@ export function removeRow(document: canvas.CanvasDocument, groupId: string, rowI
   if (rowIndex < 0 || rowIndex >= target.group.rows.length) return edited(document);
   const rows = target.group.rows.filter((_, index) => index !== rowIndex);
   if (rows.every((row) => row.length === 0)) return edited(dropGroup(document, groupId).document);
-  return edited(replaceNode(document, { ...target.group, rows }));
+  return withRows(document, { ...target.group, rows });
 }
 
 /** 把成员挪到指定行列：源行空了整行移除，目标行越界就新开一行（需求 §6.2 拖动落位）。 */
@@ -184,7 +198,7 @@ export function moveMember(
   }
   const rest = rows.map((row) => row.filter((member) => member !== memberId)).filter((row) => row.length > 0);
   const atRow = Math.max(0, Math.min(rowIndex, rest.length));
-  return edited(replaceNode(document, { ...target.group, rows: insertMember(rest, atRow, columnIndex, memberId) }));
+  return withRows(document, { ...target.group, rows: insertMember(rest, atRow, columnIndex, memberId) });
 }
 
 /** 往第 `rowIndex` 行第 `columnIndex` 列插一个成员；`rowIndex` 等于行数时新开一行。 */
@@ -206,7 +220,8 @@ function insertMember(
 // 流程序列
 // ---------------------------------------------------------------------------
 
-const REGION_LABELS: Readonly<Record<canvas.FlowRegionKind, string>> = {
+/** 区域种类的中文名（`main` 不带「的」，所以单独说成「顶层序列」）。 */
+export const REGION_LABELS: Readonly<Record<canvas.FlowRegionKind, string>> = {
   main: '顶层序列',
   then: '成立分支',
   else: '不成立分支',
@@ -265,12 +280,13 @@ export function regionOfId(
   return undefined;
 }
 
-function regionLabel(region: canvas.FlowRegionRef): string {
+/** 一条序列的中文名：顶层没有容器，其余说成「谁的哪条区域」。 */
+export function regionLabel(region: canvas.FlowRegionRef): string {
   return region.kind === 'main' ? '顶层序列' : `「${region.ownerId}」的${REGION_LABELS[region.kind]}`;
 }
 
 /** 区域不合法时的说明：容器不存在与容器种类不对是两件事，分开说。 */
-function regionIssue(
+export function regionIssue(
   document: canvas.CanvasDocument,
   region: canvas.FlowRegionRef,
 ): canvas.CanvasIssue {

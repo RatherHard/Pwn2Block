@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CANVAS_MAX_ROW_MEMBERS, canvas } from '@pwn2block/shared';
 import {
+  COL_PITCH,
   addNode,
   appendStatement,
   connect,
@@ -13,6 +14,9 @@ import {
   removeNodes,
   removeRow,
   setValue,
+  unwrapBranch,
+  unwrapLoop,
+  wrapInLoop,
   type CanvasEdit,
 } from '../src/canvas/editor';
 import { layoutCanvas, type CanvasLayoutView, type Rect } from '../src/canvas/view-model';
@@ -137,6 +141,19 @@ function branchDocument(): canvas.CanvasDocument {
   return applied(appendStatement(document, 'tail'));
 }
 
+/** 开始 → m1 → m2 → 尾部语句，全部排在 main 里（给「包络为循环」准备素材）。 */
+function straightDocument(): canvas.CanvasDocument {
+  let document = docOf([]);
+  document = applied(addNode(document, 'start', 'start', { x: 0, y: 0 }));
+  document = applied(appendStatement(document, 'start'));
+  document = applied(addNode(document, 'method', 'm1', { x: 0, y: 120 }));
+  document = applied(appendStatement(document, 'm1'));
+  document = applied(addNode(document, 'method', 'm2', { x: 0, y: 240 }));
+  document = applied(appendStatement(document, 'm2'));
+  document = applied(addNode(document, 'method', 'tail', { x: 0, y: 360 }));
+  return applied(appendStatement(document, 'tail'));
+}
+
 describe('AT-15 循环包络与条件分支', () => {
   it('连续流程放进循环体：body 顺序即执行顺序，main 顺序不变', () => {
     const document = loopDocument();
@@ -153,35 +170,41 @@ describe('AT-15 循环包络与条件分支', () => {
     expect(layout.depthOf.get('tail')).toBe(0);
   });
 
-  it('解除循环：命令层没有这条命令，dissolveGroup 明确拒绝而不是悄悄合并', () => {
-    // 验收表 AT-15 与需求 §6.3 要求「包络为循环 / 解除循环（展开循环体）」两条命令；
-    // 编辑命令里只有 `dissolveGroup`（只认数据组合）与 `removeStatement`（连带删除）。
-    // 这条用例锁住「循环不会被当成组合删掉/合并」的事实，缺的入口在验收报告里记一笔。
-    const document = loopDocument();
-    expectRefused(document, dissolveGroup(document, 'loop1'), 'unknown_kind');
-    expect(bodyOf(document, 'loop1')).toEqual(['m1', 'm2']);
-    expect(document.main).toEqual(['start', 'loop1', 'tail']);
-  });
-
-  it('结构等价断言：把循环体按序接回 main 就是「展开」的结果，模型能表达且合法', () => {
-    // 没有「解除循环」命令，所以这里直接构造展开后的文档：删除循环节点，把 body 原序接到
-    // 它原来在 main 里的位置。这是**结构等价**断言（不经过命令层），用来确认「展开后顺序不变」
-    // 这个产品预期与文档模型一致；真正的命令缺口见上一条。
-    const document = loopDocument();
-    const body = bodyOf(document, 'loop1');
-    const unwrapped = docOf(
-      document.nodes.filter((node) => node.id !== 'loop1'),
-      ['start', ...body, 'tail'],
-      document.layout,
+  it('包络为循环：同一区域连续语句进 body，原位置留循环，展开后回到原来的顺序', () => {
+    // 验收表 AT-15「同一区域连续流程包络为循环再解除」：一个来回，两边的顺序都写死。
+    const document = straightDocument();
+    const wrapped = applied(
+      wrapInLoop(document, { ownerId: '', from: 1, to: 2, loopId: 'loop1', count: canvas.UNCONNECTED }),
     );
 
-    expect(canvas.parseCanvasDocument(unwrapped).ok).toBe(true);
+    expect(wrapped.main).toEqual(['start', 'loop1', 'tail']);
+    expect(bodyOf(wrapped, 'loop1')).toEqual(['m1', 'm2']);
+    const wrappedLayout = canvas.analyzeFlow(wrapped);
+    expect(wrappedLayout.issues).toEqual([]);
+    expect(wrappedLayout.regionOf.get('m1')).toEqual({ ownerId: 'loop1', kind: 'body' });
+    expect(wrappedLayout.depthOf.get('m1')).toBe(1);
+
+    const unwrapped = applied(unwrapLoop(wrapped, 'loop1'));
+    expect(unwrapped.main).toEqual(['start', 'm1', 'm2', 'tail']);
+    expect(unwrapped.nodes.some((node) => node.id === 'loop1')).toBe(false);
+  });
+
+  it('解除循环：循环体按原顺序接回 main，循环节点消失，深度回到 0', () => {
+    const document = loopDocument();
+    const unwrapped = applied(unwrapLoop(document, 'loop1'));
+
+    expect(unwrapped.main).toEqual(['start', 'm1', 'm2', 'tail']);
+    expect(unwrapped.nodes.map((node) => node.id)).toEqual(['start', 'count', 'm1', 'm2', 'tail']);
+    expect(unwrapped.layout.loop1).toBeUndefined();
+
     const layout = canvas.analyzeFlow(unwrapped);
     expect(layout.issues).toEqual([]);
     expect(layout.regionOf.get('m1')).toEqual({ ownerId: '', kind: 'main' });
     expect(layout.depthOf.get('m1')).toBe(0);
-    expect(unwrapped.main.slice(1, 1 + body.length)).toEqual(body);
-    expect(unwrapped.main.at(-1)).toBe('tail');
+
+    // 数据组合的命令仍然只认组合：循环不会被当成组合悄悄删掉或合并。
+    expectRefused(document, dissolveGroup(document, 'loop1'), 'unknown_kind');
+    expect(bodyOf(document, 'loop1')).toEqual(['m1', 'm2']);
   });
 
   it('条件分支自带两个区域，两条区域互不干扰', () => {
@@ -215,13 +238,21 @@ describe('AT-15 循环包络与条件分支', () => {
     expect(moved.main).toEqual(document.main);
   });
 
-  it('不存在一键合并分支：结构命令对 if 一律拒绝，删除分支也不会合并两条路径', () => {
+  it('不存在含糊的一键合并分支：解除分支按「成立在前、不成立在后」顺序展开，删除分支也不会合并两条路径', () => {
     const document = branchDocument();
 
+    // 数据组合的命令仍然只认组合：条件分支不是组合，行列命令也不认它。
     expectRefused(document, dissolveGroup(document, 'if1'), 'unknown_kind');
     expectRefused(document, removeRow(document, 'if1', 0), 'unknown_kind');
     expectRefused(document, insertRowAfter(document, 'if1'), 'unknown_kind');
     expectRefused(document, moveMember(document, 'if1', 'then1', 0, 0), 'unknown_kind');
+
+    // 唯一的「解除」是确定的顺序展开：then 在前、else 在后接回原位置。没有合流节点，
+    // 也没有任何一步把两条路径的语句同时放进一条序列（那才是「含糊合并」）。
+    const expanded = applied(unwrapBranch(document, 'if1'));
+    expect(expanded.main).toEqual(['start', 'then1', 'else1', 'tail']);
+    expect(expanded.nodes.some((node) => node.kind === 'if')).toBe(false);
+    expect(expanded.layout.if1).toBeUndefined();
 
     // 删分支是「删除」，连带删两条区域的语句；没有任何序列同时装着两条路径的语句。
     const removal = removeNodes(document, ['if1']);
@@ -309,8 +340,16 @@ describe('AT-16 吸附、脱离、换行、删除组内成员并撤销', () => {
     expect(rows).toEqual([['a', 'd', 'b', 'c']]);
     expect(rows[0]?.[1]).toBe('d');
     expect(rows.every((row) => row.length > 0)).toBe(true);
-    // 换行只改归属：`moveMember` 不写坐标，所以「整组移动不改值」不会因为换行被破坏。
-    expect(moved.layout).toEqual(document.layout);
+    // 落位后压紧（需求 §6.2）：行 y = 组顶 + 行号 × ROW_PITCH、列 x = 组左 + 列号 × COL_PITCH。
+    // 这个组合没有自身坐标，组顶/组左取成员左上角（a 的 (0, 0)），所以 `d` 正好落在 (200, 0)：
+    // 「插到当前行的第 1 列」在坐标上就是它真的排到了 a 右边，而不是只改了 `rows`。
+    expect(moved.layout).toEqual({
+      a: { x: 0, y: 0 },
+      d: { x: COL_PITCH, y: 0 },
+      b: { x: 2 * COL_PITCH, y: 0 },
+      c: { x: 3 * COL_PITCH, y: 0 },
+    });
+    expect(moved.layout).not.toEqual(document.layout);
   });
 
   it('吸附预览「新增一行」，落位后成为最后一行', () => {

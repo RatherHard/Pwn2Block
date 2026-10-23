@@ -47,6 +47,8 @@ export type CanvasFieldEditor =
   | 'hex-bytes'
   | 'bool'
   | 'select'
+  /** 字面值种类选择器：下拉换「字节串/整数/浮点数/文本/布尔」，切换按新种类的零值重建。 */
+  | 'value-kind'
   | 'relation-op'
   | 'unary-op'
   | 'convert'
@@ -61,6 +63,10 @@ export type CanvasFieldEditor =
  *
  * `key` 与节点上的**属性同名**，界面按它读写节点；嵌套结构（转换参数、变量绑定）只给
  * 外层属性一个字段，细节由对应编辑器（`convert` / `binding-mode`）自己处理。
+ *
+ * 唯一的例外是字面值的 `kind`：它指的是 `node.value.kind`（字面值种类），不是节点种类
+ * （节点种类永远是 `'value'`）。名字沿用存档里那个字段，免得为同一件事再起一个叫法；
+ * 侧栏按 `value` 已选中的种类显示当前值。
  */
 export interface CanvasFieldSpec {
   readonly key: string;

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { canvas } from '@pwn2block/shared';
 import {
+  COL_PITCH,
+  ROW_PITCH,
   appendStatement,
   connect,
   createGroup,
@@ -22,7 +24,8 @@ import type { CanvasEdit } from '../src/canvas/editor';
  * 包络（组合）与流程序列的验收测试。
  *
  * 两条边界在这里被反复断言：
- * - 组合的 `rows` 是权威行列，插入行 / 删行 / 移动成员只写 `rows`，成员坐标与组合坐标不动；
+ * - 组合的 `rows` 是权威行列：插入行 / 删行 / 移动成员写 `rows`，再把成员坐标按
+ *   `ROW_PITCH` / `COL_PITCH` 压紧（组合自身坐标不动）；
  * - 流程用数组表达顺序，一个流程节点只能出现在一条序列里，重复放置在命令层就被拒绝（`flow_error`）。
  */
 
@@ -234,14 +237,20 @@ describe('行列操作', () => {
     );
   }
 
-  it('insertRowAfter 默认在末尾追加空行', () => {
+  it('insertRowAfter 默认在末尾追加空行，并把成员坐标按行列压紧', () => {
     const document = grid();
     const result = insertRowAfter(document, 'g1');
 
     expect(result.issues).toEqual([]);
     expect(nodeIn(result.document, 'g1')).toEqual(groupNode('g1', 'merge', [['a', 'b'], ['c'], []]));
     expectSchemaOk(result.document);
-    expect(result.document.layout).toEqual({ g1: { x: 2, y: 2 } });
+    // 新增的空行没有成员，所以不留坐标；组合自己的坐标不被压紧改动（需求 §6.2）。
+    expect(result.document.layout).toEqual({
+      g1: { x: 2, y: 2 },
+      a: { x: 2, y: 2 },
+      b: { x: 2 + COL_PITCH, y: 2 },
+      c: { x: 2, y: 2 + ROW_PITCH },
+    });
   });
 
   it('insertRowAfter 可以插在指定行之后', () => {

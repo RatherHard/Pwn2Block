@@ -5,6 +5,8 @@ import type { AuthorBlock } from '@pwn2block/shared';
 import { specOf } from '../canvas/catalog';
 import type { CanvasFieldSpec } from '../canvas/catalog';
 import { valueNodeCandidates, type InspectorChange } from './canvas-panel-commands';
+import { labelOf, onInput, onSelect, renderDictEntries, renderGroupRows } from './canvas-panel-inspector-blocks';
+import { renderRegionActions } from './canvas-panel-regions';
 
 /**
  * 右侧检查器（需求 §6.1「简单内容节点内编辑，编码/字节序等复杂配置放侧栏」）。
@@ -13,8 +15,9 @@ import { valueNodeCandidates, type InspectorChange } from './canvas-panel-comman
  * 这里唯一的职责是**把语义变更描述出来**（`InspectorChange`），命令由 `canvas-panel-commands` 决定，
  * 于是这个文件里没有一条编辑命令，也不碰文档。
  *
- * 三个补充块不来自目录字段，而是结构本身：字典条目、组合行、变量绑定的来源节点。
- * 它们各自对应一条现成命令（`setDictEntries` / `insertRowAfter`+`removeRow` / `setBinding`）。
+ * 几个补充块不来自目录字段，而是结构本身：字典条目、组合行（在 `canvas-panel-inspector-blocks.ts`）、
+ * 变量绑定的来源节点、流程区域按钮（在 `canvas-panel-regions.ts`）。它们各自对应一条现成命令
+ * （`setDictEntries` / `insertRowAfter`+`removeRow` / `setBinding`）。
  */
 
 /** 渲染检查器需要的输入。 */
@@ -62,6 +65,7 @@ export function renderInspector(input: InspectorInput): TemplateResult {
           ${issues.map((message) => html`<li>${message}</li>`)}
         </ul>`}
     ${specOf(node.kind).fields.map((field) => renderField(node, field, input))}
+    ${renderRegionActions(node, input.onChange)}
     ${node.kind === 'dict' ? renderDictEntries(node, input) : nothing}
     ${node.kind === 'group' ? renderGroupRows(node, input) : nothing}
   </aside>`;
@@ -97,6 +101,10 @@ function renderField(
     case 'group-mode':
     case 'variable-type':
       return selectField(field.label, current, field.options ?? [], field.key, change);
+    case 'value-kind':
+      return node.kind === 'value'
+        ? valueKindField(field.label, current, field.options ?? [], change)
+        : nothing;
     case 'relation-op':
       return selectField(field.label, current, binaryOptions(), field.key, change);
     case 'unary-op':
@@ -135,6 +143,32 @@ function selectField(
         (option) => html`<option value=${option.value} ?selected=${option.value === current}>${option.label}</option>`,
       )}
     </select>
+  </div>`;
+}
+
+/**
+ * 字面值种类选择器：下拉 + 一句说明，**不弹确认框**。
+ *
+ * 换种类是覆盖式重建（新种类的零值顶掉旧载荷），所以说明文字必须就在选项下面：
+ * TUI 风格里没有模态确认，用户改完立刻在行文本与预览里看到结果，撤销（Ctrl+Z）就是后悔药。
+ * 类名沿用现有字段（`.field` / `.field-kind` / `.hint`），不新增一套样式。
+ */
+function valueKindField(
+  label: string,
+  current: string,
+  options: readonly Option[],
+  onChange: (value: string) => void,
+): TemplateResult {
+  return html`<div class="field">
+    <label>${label}</label>
+    <div class="field-stack">
+      <select class="field-kind" .value=${current} @change=${onSelect(onChange)}>
+        ${options.map(
+          (option) => html`<option value=${option.value} ?selected=${option.value === current}>${option.label}</option>`,
+        )}
+      </select>
+      <p class="hint field-kind-note">切换会重置当前值：换成新类型的零值（字节串为空、整数与浮点数为 0、文本为空、布尔为假），Ctrl+Z 可撤销。</p>
+    </div>
   </div>`;
 }
 
@@ -266,59 +300,15 @@ function paramSelect(
 }
 
 // ---------------------------------------------------------------------------
-// 字典条目与组合行
-// ---------------------------------------------------------------------------
-
-function renderDictEntries(node: canvas.DictNode, input: InspectorInput): TemplateResult {
-  const candidates = valueNodeCandidates(input.document);
-  return html`<div class="block">
-    <h4>字典条目（${node.entries.length} 项）</h4>
-    ${node.entries.length === 0 ? html`<p class="hint">还没有条目：加一条后会指到第一个数据节点，再改键与值。</p>` : nothing}
-    ${node.entries.map(
-      (entry, index) => html`<div class="field">
-        <input
-          class="field-dict-key"
-          type="text"
-          .value=${entry.key.value}
-          @change=${onInput((value: string) => input.onChange({ kind: 'dict-key', index, key: value }))}
-        />
-        <select
-          class="field-dict-value"
-          .value=${entry.value}
-          @change=${onSelect((value: string) => input.onChange({ kind: 'dict-value', index, value }))}
-        >
-          ${candidates.map(
-            (candidate) => html`<option value=${candidate.id} ?selected=${candidate.id === entry.value}>${labelOf(candidate)}</option>`,
-          )}
-        </select>
-        <button class="mini field-dict-remove" @click=${() => input.onChange({ kind: 'dict-remove', index })}>删</button>
-      </div>`,
-    )}
-    <button class="mini field-dict-add" @click=${() => input.onChange({ kind: 'dict-add' })}>加一条</button>
-  </div>`;
-}
-
-function renderGroupRows(node: canvas.GroupNode, input: InspectorInput): TemplateResult {
-  return html`<div class="block">
-    <h4>组合行（${node.rows.length} 行，共 ${canvas.groupMembers(node).length} 项）</h4>
-    ${node.rows.map(
-      (row, index) => html`<div class="field">
-        <span>第 ${index + 1} 行</span>
-        <span class="hint">${row.join('、') === '' ? '空行' : row.join('、')}</span>
-        <button class="mini" @click=${() => input.onChange({ kind: 'row-insert', index })}>下方插行</button>
-        <button class="mini" @click=${() => input.onChange({ kind: 'row-remove', index })}>删行</button>
-      </div>`,
-    )}
-  </div>`;
-}
-
-// ---------------------------------------------------------------------------
 // 取值与候选
 // ---------------------------------------------------------------------------
 
 /** 字段当前值：字段名与节点属性同名，所以一次 switch 就够（不做动态属性读取）。 */
 function fieldValueOf(node: canvas.CanvasNode, key: string): string {
   switch (node.kind) {
+    case 'value':
+      // 字面值唯一的侧栏字段是种类，取值在 `node.value` 里（节点种类恒为 `'value'`）。
+      return key === 'kind' ? node.value.kind : '';
     case 'group':
       return key === 'mode' ? node.mode : '';
     case 'relation':
@@ -367,28 +357,9 @@ function declOptions(node: canvas.CanvasNode, document: canvas.CanvasDocument): 
     .map((candidate) => ({ value: candidate.id, label: labelOf(candidate) }));
 }
 
-/** 下拉里显示什么：变量用名字，循环用「次数循环」，其余用种类名 + id。 */
-function labelOf(node: canvas.CanvasNode): string {
-  if (node.kind === 'var-decl') return `变量 ${node.name}`;
-  return `${canvas.CANVAS_NODE_KIND_LABELS[node.kind]} ${node.id}`;
-}
-
+/** 按 id 取节点：侧栏只渲染单个选中节点，找不到就是「不在文档里」。 */
 function findNode(document: canvas.CanvasDocument, nodeId: string): canvas.CanvasNode | undefined {
   return document.nodes.find((node) => node.id === nodeId);
-}
-
-function onSelect(handler: (value: string) => void): (event: Event) => void {
-  return (event: Event): void => {
-    const target = event.currentTarget;
-    if (target instanceof HTMLSelectElement) handler(target.value);
-  };
-}
-
-function onInput(handler: (value: string) => void): (event: Event) => void {
-  return (event: Event): void => {
-    const target = event.currentTarget;
-    if (target instanceof HTMLInputElement) handler(target.value);
-  };
 }
 
 function checkedOf(event: Event): boolean {

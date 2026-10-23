@@ -53,6 +53,17 @@ export const canvasPanelSideStyles = css`
     min-height: 1.7rem;
   }
 
+  /* 控件下面还能挂一句说明（目前只有字面值种类选择器用）：说明跟控件同一列，不挤标签。 */
+  .field-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .field-stack .hint {
+    margin: 0;
+  }
+
   .block {
     display: flex;
     flex-direction: column;

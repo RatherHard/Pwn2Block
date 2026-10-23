@@ -317,3 +317,4 @@ export function createReference(
 export * from './editor-core';
 export * from './editor-graph';
 export * from './editor-containers';
+export * from './editor-regions';

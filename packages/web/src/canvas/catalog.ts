@@ -16,7 +16,8 @@ import { acceptsOf, declNodeOf } from './catalog-ports';
  * 这里只放**纯数据与纯函数**：没有 DOM、没有坐标、没有求值，所以没有缓存失效问题。
  * 四种调用点各取所需：
  * - 工具箱：`CANVAS_CATALOG` + `CANVAS_CATEGORY_LABELS`，目录顺序就是显示顺序；
- * - 侧栏：`specOf(kind).fields`，`editor` 决定控件，`key` 就是节点属性名；
+ * - 侧栏：`specOf(kind).fields`，`editor` 决定控件，`key` 就是节点属性名（字面值的 `kind`
+ *   指 `value.kind`，见 `CanvasFieldSpec`）；
  * - 画布：`createNode` 造默认节点，`portsOf` 画端口，`portValueOf` 问「这个端口现在接着谁」；
  * - 文案：节点名用 `specOf(kind).label`，具体运算名用 `relationLabelOf` / `convertLabelOf`。
  *

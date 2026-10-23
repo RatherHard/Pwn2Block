@@ -17,8 +17,11 @@ import {
   setMethodBlock,
   setRelationOp,
   setUnaryOp,
+  setValue,
   type CanvasEdit,
 } from '../canvas/editor';
+import { defaultEncodedValue } from '../canvas/catalog';
+import { unwrapEditOf, wrapSelectionEdit, type RegionChange } from './canvas-panel-regions';
 
 /**
  * 侧栏变更 → 编辑命令的映射（`canvas-panel-inspector.ts` 那侧只说「改了哪个字段」）。
@@ -47,7 +50,8 @@ export type InspectorChange =
   | { readonly kind: 'dict-key'; readonly index: number; readonly key: string }
   | { readonly kind: 'dict-value'; readonly index: number; readonly value: string }
   | { readonly kind: 'row-insert'; readonly index: number }
-  | { readonly kind: 'row-remove'; readonly index: number };
+  | { readonly kind: 'row-remove'; readonly index: number }
+  | RegionChange;
 
 /** 侧栏应用变更时要读的题目上下文：出题人积木声明。 */
 export interface CommandContext {
@@ -92,6 +96,12 @@ export function applyInspectorChange(
       return node.kind === 'group' ? insertRowAfter(document, nodeId, change.index) : undefined;
     case 'row-remove':
       return node.kind === 'group' ? removeRow(document, nodeId, change.index) : undefined;
+    case 'wrap-loop':
+      return wrapSelectionEdit(document, [nodeId], 'loop');
+    case 'wrap-branch':
+      return wrapSelectionEdit(document, [nodeId], 'branch');
+    case 'unwrap-region':
+      return node.kind === 'loop' || node.kind === 'if' ? unwrapEditOf(document, nodeId) : undefined;
   }
 }
 
@@ -131,9 +141,32 @@ function applyFieldChange(
       return node.kind === 'var-ref' ? edited(replaceDecl(document, node, value)) : undefined;
     case 'loop':
       return node.kind === 'loop-index' ? edited(replaceLoop(document, node, value)) : undefined;
+    case 'kind':
+      // 字面值的种类字段：换种类就是换整份载荷，见 `switchLiteralKind`。
+      return node.kind === 'value' ? switchLiteralKind(document, node, value) : undefined;
     default:
       return undefined;
   }
+}
+
+/**
+ * 字面值换种类：用新种类的零值**整体重建**，不保留上一类的载荷。
+ *
+ * 不做隐式转换（`'41'` 不会变成字节 `41`，`42` 不会变成文本 `"42"`）：要转换就用转换节点显式表达，
+ * 否则「同一张图换个下拉框就换了含义」会很难查。选项来自 `VALUE_KIND_OPTIONS`（只有标量），
+ * 越界值一律返回 `undefined`，由调用方给出「没有对应命令」的提示，不猜也不硬转。
+ *
+ * 选中的还是当前种类时返回 `edited(document)`：文档没变，不占一步撤销。
+ */
+function switchLiteralKind(
+  document: canvas.CanvasDocument,
+  node: canvas.ValueNode,
+  value: string,
+): CanvasEdit | undefined {
+  const kind = canvas.SCALAR_VALUE_KINDS.find((item) => item === value);
+  if (kind === undefined) return undefined;
+  if (node.value.kind === kind) return edited(document);
+  return setValue(document, node.id, defaultEncodedValue(kind));
 }
 
 /**

@@ -99,8 +99,9 @@ export const CANVAS_CATEGORY_LABELS: Readonly<Record<CanvasNodeCategory, string>
  * 目录顺序即工具箱顺序；`ports` 由 `catalog.ts` 按默认实例装配。
  *
  * `inline` 的判据是「框里还有没有内容」：字面值、运算符、转换摘要、组合成员、变量名要画，
- * 只有端口和标题的不画。侧栏字段只列**真要在侧栏改**的：字面值在框里直接编辑、切片参数是端口，
- * 都不进侧栏（需求 §6.1「简单内容节点内编辑，编码/字节序进侧栏」）。
+ * 只有端口和标题的不画。侧栏字段只列**真要在侧栏改**的：字面值的载荷在框里直接编辑，但
+ * **种类**要进侧栏（框里那行只写当前种类的内容，换种类是整体重建）；切片参数是端口，
+ * 同样不进侧栏（需求 §6.1「简单内容节点内编辑，编码/字节序进侧栏」）。
  */
 export const CANVAS_SPEC_BASES: readonly CanvasNodeSpecBase[] = [
   {
@@ -108,8 +109,9 @@ export const CANVAS_SPEC_BASES: readonly CanvasNodeSpecBase[] = [
     label: canvas.CANVAS_NODE_KIND_LABELS.value,
     category: 'value',
     description: '直接写一个标量：字节串、整数、浮点数、文本或布尔',
-    // 字面值在框里直接编辑；切换种类用 `VALUE_KIND_OPTIONS` + `defaultEncodedValue`。
-    fields: [],
+    // 载荷在框里直接编辑（`inline`），种类在侧栏换：这两个入口最后都落到 `editor.setValue`。
+    // `key: 'kind'` 是字面值种类（`node.value.kind`），不是节点种类，见 `CanvasFieldSpec` 的注释。
+    fields: [{ key: 'kind', label: '类型', editor: 'value-kind', options: VALUE_KIND_OPTIONS }],
     inline: true,
   },
   {

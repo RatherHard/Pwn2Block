@@ -56,7 +56,6 @@ pnpm e2e
 - 画布只产出 `{ type: 'block' }`，不产出 `step` / `run`，所以 `ret2win` 这类「写内存再单步执行到 `ret`」
   的题**暂时无法从界面拿到判胜与 flag**；`closed-loop` 因此断言服务端给出的
   「payload 跑完了，但没有达成目标」，判胜分支等缺口补上后放回。
-- 界面还没有「字面值种类切换」，字节串字面值只能靠导入存档（`setDocument()`）得到。
 - 尚未覆盖的多选拖动、人工视觉、真实读屏和其他浏览器验收见 [05-未完成工作](../../docs/05-未完成工作.md)。
 
 当前套件配置共 17 个用例（`canvas-interaction` 6、`closed-loop` 1、`frontend-details` 4、`desktop-smoke` 1×6 个尺寸）。

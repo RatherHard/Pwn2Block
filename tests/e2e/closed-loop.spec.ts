@@ -25,9 +25,10 @@ import {
  * 4. 刷新后新档把图装回来并重新编译一次。
  *
  * **已知缺口**（阶段三未完成，见 `docs/节点画布改版计划.md` §4）：画布只产出
- * `{ type: 'block' }`，不产出 `step` / `run`，所以本题的判胜 payload 目前**无法**从界面构造出来；
- * 同理界面也还没有「字面值种类切换」，字节串字面值只能靠导入存档得到。这就是第 3 步走
- * `setDocument()` 而不是走点的原因——判胜与 flag 的断言等两个缺口补上以后再放回来。
+ * `{ type: 'block' }`，不产出 `step` / `run`，所以本题的判胜 payload 目前**无法**从界面构造出来。
+ * 这就是第 3 步走 `setDocument()` 而不是走点的原因——判胜与 flag 的断言等这个缺口补上以后再放回来。
+ * （字面值种类切换已在侧栏补上，空字节串可以直接从界面造出来，见
+ * `packages/web/test/canvas-panel-value-kind.test.ts`。）
  */
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要 PWN2BLOCK_E2E=1 和已启动的真实后端');
 

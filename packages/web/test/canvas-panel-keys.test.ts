@@ -246,4 +246,69 @@ describe('画布面板：侧栏', () => {
     await settle(panel);
     expect(nodeOf(panel, 'd1')).toMatchObject({ name: 'counter' });
   });
+
+  it('选中语句后「包进循环」：原位置留循环，语句进循环体', async () => {
+    const panel = await mount(
+      documentOf({
+        nodes: [START, { id: 'm1', kind: 'method', block: 'emit', args: {} }],
+        main: ['start', 'm1'],
+        layout: { start: { x: 600, y: 600 }, m1: { x: 40, y: 40 } },
+      }),
+    );
+    clickNode(panel, 'm1');
+    await settle(panel);
+    requireElement(panel, '.btn-wrap-loop').click();
+    await settle(panel);
+
+    const main = panel.document?.main ?? [];
+    expect(main).toHaveLength(2);
+    expect(main[0]).toBe('start');
+    const wrapped = nodeOf(panel, main[1]);
+    expect(wrapped).toMatchObject({ kind: 'loop', body: ['m1'] });
+    expect(panel.document?.nodes.some((node) => node.id === 'start')).toBe(true);
+  });
+
+  it('选中循环后「解除循环」：循环体接回 main，循环节点消失', async () => {
+    const panel = await mount(
+      documentOf({
+        nodes: [
+          START,
+          { id: 'loop1', kind: 'loop', count: '', body: ['m1'] },
+          { id: 'm1', kind: 'method', block: 'emit', args: {} },
+        ],
+        main: ['start', 'loop1'],
+        layout: { start: { x: 600, y: 600 }, loop1: { x: 40, y: 40 }, m1: { x: 40, y: 160 } },
+      }),
+    );
+    clickNode(panel, 'loop1');
+    await settle(panel);
+    requireElement(panel, '.btn-unwrap-loop').click();
+    await settle(panel);
+
+    expect(panel.document?.main).toEqual(['start', 'm1']);
+    expect(panel.document?.nodes.some((node) => node.id === 'loop1')).toBe(false);
+  });
+
+  it('条件分支上给的是「解除分支」，说明里写明展开顺序', async () => {
+    const panel = await mount(
+      documentOf({
+        nodes: [
+          START,
+          { id: 'if1', kind: 'if', cond: '', then: ['then1'], else: [] },
+          { id: 'then1', kind: 'method', block: 'emit', args: {} },
+        ],
+        main: ['start', 'if1'],
+        layout: { start: { x: 600, y: 600 }, if1: { x: 40, y: 40 }, then1: { x: 40, y: 160 } },
+      }),
+    );
+    clickNode(panel, 'if1');
+    await settle(panel);
+
+    const hint = requireElement(panel, '.btn-unwrap-branch').parentElement?.querySelector('.hint');
+    expect(hint?.textContent).toContain('成立分支在前、不成立分支在后');
+
+    requireElement(panel, '.btn-unwrap-branch').click();
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start', 'then1']);
+  });
 });

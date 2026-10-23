@@ -133,6 +133,15 @@ describe('默认节点：能过 parseCanvasDocument', () => {
     for (const option of VALUE_KIND_OPTIONS) expect(option.label).toBe(canvas.VALUE_KIND_LABELS[option.value]);
   });
 
+  it('字面值在侧栏有种类字段：五项标量、中文标签、editor 是 value-kind', () => {
+    const field = specOf('value').fields.find((item) => item.key === 'kind');
+    if (field === undefined) throw new Error('字面值目录里没有种类字段');
+    expect(field.label).toBe('类型');
+    expect(field.editor).toBe('value-kind');
+    expect(field.options?.map((option) => option.value)).toEqual([...canvas.SCALAR_VALUE_KINDS]);
+    expect(field.options?.map((option) => option.label)).toEqual(['字节串', '整数', '浮点数', '文本', '布尔']);
+  });
+
   it('新组合默认是空的：schema 收，语义校验报 group_empty（编辑期预期状态）', () => {
     const node = createNode('group', NODE_ID);
     if (node.kind !== 'group') throw new Error('createNode 造的不是组合节点');
