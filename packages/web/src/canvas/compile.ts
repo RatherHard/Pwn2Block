@@ -110,6 +110,7 @@ const ISSUE_CODE_MAP: Readonly<Record<canvas.CanvasIssueCode, WorkflowIssue['cod
   eval_failed: 'eval_failed',
   limit_exceeded: 'limit_exceeded',
   ownership_conflict: 'duplicate_placement',
+  unconnected: 'missing_input',
   variable_error: 'eval_failed',
   flow_error: 'eval_failed',
   method_mismatch: 'eval_failed',
