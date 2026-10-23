@@ -1,0 +1,106 @@
+import type { canvas } from '@pwn2block/shared';
+import type { AuthorBlock } from '@pwn2block/shared';
+import { addNode, createGroup, dissolveGroup, newNodeId, type CanvasEdit } from '../canvas/editor';
+import {
+  addReference,
+  addVariable,
+  applyInspectorChange,
+  freeSlotOf,
+  type InspectorChange,
+} from './canvas-panel-commands';
+
+/**
+ * 顶栏与工具箱上那几个「一次性动作」（加节点、成组、解组、加变量、导出）。
+ *
+ * 抽出来的理由：面板外壳要管文档、历史、存档与事件，再塞十几条动作就过长了；而这些动作
+ * 只依赖「当前文档 + 选中集 + 一次编辑」，与 Lit 无关，所以它们收在一个小接口上。
+ * 动作里面**不直接改文档**，全部走 `canvas/editor` 的命令。
+ */
+
+/** 动作需要的宿主能力（面板外壳实现）。 */
+export interface PanelActionHost {
+  currentDocument(): canvas.CanvasDocument | undefined;
+  selection(): readonly string[];
+  applyEdit(edit: CanvasEdit): void;
+  report(message: string | undefined): void;
+  authorBlocks(): readonly AuthorBlock[] | undefined;
+  exportSave(): string;
+}
+
+/** 工具箱点一项：在空位加一个该种类的默认节点。 */
+export function addToolNode(host: PanelActionHost, kind: canvas.CanvasNodeKind): void {
+  const document = host.currentDocument();
+  if (document === undefined) return;
+  host.applyEdit(addNode(document, kind, newNodeId(document, kind), freeSlotOf(document)));
+}
+
+/** 「成组」：把选中的节点按选择顺序拼成一个组合。 */
+export function groupSelection(host: PanelActionHost): void {
+  const document = host.currentDocument();
+  const ids = host.selection();
+  if (document === undefined) return;
+  if (ids.length < 2) {
+    host.report('先选中两个以上节点再成组');
+    return;
+  }
+  host.applyEdit(createGroup(document, [...ids], newNodeId(document, 'group')));
+}
+
+/** 「解除组合」：对选中的第一个组合包络生效。 */
+export function dissolveSelection(host: PanelActionHost): void {
+  const document = host.currentDocument();
+  if (document === undefined) return;
+  const groupId = host
+    .selection()
+    .find((id) => document.nodes.find((node) => node.id === id)?.kind === 'group');
+  if (groupId === undefined) {
+    host.report('先选中一个组合包络');
+    return;
+  }
+  host.applyEdit(dissolveGroup(document, groupId));
+}
+
+/** 「加变量」：新建一个整数变量声明。 */
+export function addVariableNode(host: PanelActionHost): void {
+  const document = host.currentDocument();
+  if (document === undefined) return;
+  host.applyEdit(addVariable(document));
+}
+
+/** 「引用变量」：给选中的声明（没有就用第一个）造一个引用视图。 */
+export function addReferenceNode(host: PanelActionHost): void {
+  const document = host.currentDocument();
+  if (document === undefined) return;
+  const declId = host.selection().find((id) => document.nodes.find((node) => node.id === id)?.kind === 'var-decl');
+  host.applyEdit(addReference(document, declId));
+}
+
+/** 侧栏改了一个字段：交给命令映射，改不动就说明白为什么。 */
+export function applyInspectorField(host: PanelActionHost, change: InspectorChange): void {
+  const document = host.currentDocument();
+  const nodeId = host.selection()[0];
+  if (document === undefined || nodeId === undefined) return;
+  const authorBlocks = host.authorBlocks();
+  const edit = applyInspectorChange(document, nodeId, change, {
+    ...(authorBlocks === undefined ? {} : { authorBlocks }),
+  });
+  if (edit === undefined) {
+    host.report('这个字段在当前节点上没有对应的编辑命令');
+    return;
+  }
+  host.applyEdit(edit);
+}
+
+/** 「导出存档」：优先复制到剪贴板；没有剪贴板就把取文本的办法说清楚。 */
+export function copySave(host: PanelActionHost): void {
+  const text = host.exportSave();
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (clipboard === undefined) {
+    host.report('当前环境没有剪贴板：请用 exportSave() 取存档文本');
+    return;
+  }
+  clipboard.writeText(text).then(
+    () => host.report('存档已复制到剪贴板'),
+    () => host.report('复制失败：请用 exportSave() 取存档文本'),
+  );
+}
