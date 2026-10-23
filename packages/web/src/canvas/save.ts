@@ -57,7 +57,7 @@ export type CanvasLoad =
   | { readonly ok: false; readonly reason: 'empty' | 'corrupt'; readonly message: string; readonly raw?: string };
 
 /** 新版画布的键。与旧的 `pwn2block.canvas.v1.<题目>`（Blockly）只差版本号，靠它区分。 */
-export function canvasStorageKey(challengeId: string): string {
+export function canvasV2StorageKey(challengeId: string): string {
   return `pwn2block.canvas.v${CANVAS_STORE_VERSION}.${challengeId}`;
 }
 
@@ -182,7 +182,7 @@ function bareFailureReason(
  * `corrupt` → **保留原文**（`raw` 原样带回，界面给「导出原文」的出口），绝不静默覆盖。
  */
 export function loadCanvas(store: CanvasStore | undefined, challengeId: string): CanvasLoad {
-  const raw = read(store, canvasStorageKey(challengeId));
+  const raw = read(store, canvasV2StorageKey(challengeId));
   if (raw === undefined) return { ok: false, reason: 'empty', message: '还没有保存过新版画布' };
 
   const parsed = parseJson(raw);
@@ -215,14 +215,14 @@ export function saveCanvas(
   const save = makeCanvasSave(challengeId, document);
   const checked = parseCanvasSave(save, challengeId);
   if (!checked.ok) return false;
-  return write(store, canvasStorageKey(challengeId), JSON.stringify(save));
+  return write(store, canvasV2StorageKey(challengeId), JSON.stringify(save));
 }
 
 /** 只删新版键；旧档留给回滚的版本读取（07 §P9 第 6 条）。 */
 export function clearCanvas(store: CanvasStore | undefined, challengeId: string): boolean {
   if (store === undefined) return false;
   try {
-    return store.removeItem(canvasStorageKey(challengeId));
+    return store.removeItem(canvasV2StorageKey(challengeId));
   } catch {
     return false;
   }

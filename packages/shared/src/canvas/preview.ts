@@ -40,18 +40,21 @@ export function pendingValueNodes(document: CanvasDocument): ReadonlySet<string>
   return pendingNodesOf(document, pendingDeclarations(document));
 }
 
-/** 一个节点的编辑期预览；`pending` 可传入已算好的集合，避免逐个节点重算。 */
+/**
+ * 一个节点的编辑期预览；`pending` 可传入已算好的集合，避免逐个节点重算。
+ *
+ * 声明层的待执行集合总要算一次（求值作用域要用它回答「这个变量能不能读」），
+ * 因此批量渲染时请传 `pending`，否则每个节点会各算一次不动点。
+ */
 export function previewCanvasNode(
   document: CanvasDocument,
   nodeId: string,
-  pending: ReadonlySet<string> = pendingValueNodes(document),
+  pending?: ReadonlySet<string>,
 ): CanvasNodePreview {
-  if (pending.has(nodeId)) return { status: 'pending', message: PENDING_MESSAGE };
-  return toPreview(
-    evaluateCanvasNode(document, nodeId, {
-      scope: previewScope(document, pendingDeclarations(document)),
-    }),
-  );
+  const pendingDecls = pendingDeclarations(document);
+  const pendingNodes = pending ?? pendingNodesOf(document, pendingDecls);
+  if (pendingNodes.has(nodeId)) return { status: 'pending', message: PENDING_MESSAGE };
+  return toPreview(evaluateCanvasNode(document, nodeId, { scope: previewScope(document, pendingDecls) }));
 }
 
 /** 整张文档的预览：每个数据节点一项，供画布批量渲染。 */

@@ -3,7 +3,7 @@ import { canvas } from '@pwn2block/shared';
 import {
   CANVAS_SAVE_FORMAT,
   CANVAS_SAVE_VERSION,
-  canvasStorageKey,
+  canvasV2StorageKey,
   clearCanvas,
   loadCanvas,
   makeCanvasSave,
@@ -155,7 +155,7 @@ describe('loadCanvas：空 / 坏 / 有效', () => {
 
   it('坏 JSON 判 corrupt，原文原样带回', () => {
     const raw = '{ not json';
-    const loaded = loadCanvas(memoryStore({ [canvasStorageKey(CHALLENGE)]: raw }).store, CHALLENGE);
+    const loaded = loadCanvas(memoryStore({ [canvasV2StorageKey(CHALLENGE)]: raw }).store, CHALLENGE);
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
     expect(loaded.reason).toBe('corrupt');
@@ -164,7 +164,7 @@ describe('loadCanvas：空 / 坏 / 有效', () => {
 
   it('内容过不了校验也判 corrupt，并保留原文', () => {
     const raw = JSON.stringify({ format: 'pwn2block.workflow', version: 1 });
-    const loaded = loadCanvas(memoryStore({ [canvasStorageKey(CHALLENGE)]: raw }).store, CHALLENGE);
+    const loaded = loadCanvas(memoryStore({ [canvasV2StorageKey(CHALLENGE)]: raw }).store, CHALLENGE);
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
     expect(loaded.reason).toBe('corrupt');
@@ -187,15 +187,15 @@ describe('loadCanvas：空 / 坏 / 有效', () => {
 
 describe('saveCanvas / clearCanvas', () => {
   it('键名按题目分开，且不与旧 Blockly 档的 v1 键重合', () => {
-    expect(canvasStorageKey(CHALLENGE)).toBe('pwn2block.canvas.v2.ret2win');
-    expect(canvasStorageKey('a')).not.toBe(canvasStorageKey('b'));
+    expect(canvasV2StorageKey(CHALLENGE)).toBe('pwn2block.canvas.v2.ret2win');
+    expect(canvasV2StorageKey('a')).not.toBe(canvasV2StorageKey('b'));
   });
 
   it('写入成功返回 true，落盘的是可被重新解析的存档', () => {
     const memory = memoryStore();
     expect(saveCanvas(memory.store, CHALLENGE, canvas.emptyCanvasDocument())).toBe(true);
 
-    const raw = memory.data.get(canvasStorageKey(CHALLENGE));
+    const raw = memory.data.get(canvasV2StorageKey(CHALLENGE));
     expect(raw).toBeDefined();
     if (raw === undefined) return;
     const parsed = parseCanvasSave(JSON.parse(raw), CHALLENGE);
@@ -210,10 +210,10 @@ describe('saveCanvas / clearCanvas', () => {
   it('clearCanvas 删掉新版键', () => {
     const memory = memoryStore();
     expect(saveCanvas(memory.store, CHALLENGE, canvas.emptyCanvasDocument())).toBe(true);
-    expect(memory.data.has(canvasStorageKey(CHALLENGE))).toBe(true);
+    expect(memory.data.has(canvasV2StorageKey(CHALLENGE))).toBe(true);
 
     expect(clearCanvas(memory.store, CHALLENGE)).toBe(true);
-    expect(memory.data.has(canvasStorageKey(CHALLENGE))).toBe(false);
+    expect(memory.data.has(canvasV2StorageKey(CHALLENGE))).toBe(false);
     expect(loadCanvas(memory.store, CHALLENGE).ok).toBe(false);
   });
 
