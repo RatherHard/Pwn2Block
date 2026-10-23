@@ -35,6 +35,14 @@ export const CANVAS_ISSUE_CODES = [
   'limit_exceeded',
   /** 一个节点被多个组合占有。 */
   'ownership_conflict',
+  /** 变量相关：未声明、重复名称、写只读变量、未初始化读取。 */
+  'variable_error',
+  /** 流程相关：缺少或重复开始节点、流程节点不在任何序列里、区域类型不合法。 */
+  'flow_error',
+  /** 方法节点的参数与题目声明不符（名称、类型、个数）。 */
+  'method_mismatch',
+  /** 依赖流程状态，编辑期只能显示「待执行」（需求 §7）。 */
+  'pending',
 ] as const;
 
 export type CanvasIssueCode = (typeof CANVAS_ISSUE_CODES)[number];
@@ -51,6 +59,11 @@ export interface CanvasIssue {
 
 export function errorIssue(code: CanvasIssueCode, nodeId: string, message: string): CanvasIssue {
   return { code, severity: 'error', message, nodeId };
+}
+
+/** 警告不阻止生成：目前只有「待执行」，它表示编辑期没有足够信息，不是错误（需求 §7）。 */
+export function warningIssue(code: CanvasIssueCode, nodeId: string, message: string): CanvasIssue {
+  return { code, severity: 'warning', message, nodeId };
 }
 
 /** 按「代码 + 节点 + 文案」去重：同一个坏节点被多处引用时只报一次。 */

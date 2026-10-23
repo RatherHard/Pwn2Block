@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CANVAS_MAX_GROUP_ROWS, CANVAS_MAX_NODES, CANVAS_MAX_TEXT_CHARS } from '../limits';
+import {
+  CANVAS_MAX_FLOW_NODES,
+  CANVAS_MAX_GROUP_ROWS,
+  CANVAS_MAX_METHOD_ARGS,
+  CANVAS_MAX_NODES,
+  CANVAS_MAX_TEXT_CHARS,
+  CANVAS_MAX_VAR_NAME_CHARS,
+} from '../limits';
 import { CANVAS_FORMAT, CANVAS_VERSION, emptyCanvasDocument, type CanvasDocument } from './document';
 import { parseCanvasDocument, type ParseCanvasResult } from './schema';
 
@@ -293,5 +300,98 @@ describe('转换规格', () => {
     const failure = failureOf(convertDocument(spec));
     expect(failure.reason).toBe('invalid');
     expect(failure.message).toContain('nodes.1.spec');
+  });
+});
+
+// 阶段二：变量与流程节点（需求 §3、§5）
+
+/** 只含一个节点的文档：出错路径固定从 `nodes.0` 开始，断言不必迁就别的节点。 */
+function nodeDocument(node: Loose): Loose {
+  return documentOf([node]);
+}
+
+/** 八种阶段二节点各一份合法样例；引用字段指向的节点不必存在（形状层不验存在性）。 */
+const STAGE2_NODES: readonly (readonly [string, Loose])[] = [
+  ['var-decl', { id: 'n_decl', kind: 'var-decl', name: 'count', type: 'int', binding: { mode: 'initial', input: 'n_int' } }],
+  ['var-ref', { id: 'n_ref', kind: 'var-ref', decl: 'n_decl' }],
+  ['loop-index', { id: 'n_index', kind: 'loop-index', loop: 'n_loop' }],
+  ['start', { id: 'n_start', kind: 'start' }],
+  ['if', { id: 'n_if', kind: 'if', cond: 'n_flag', then: ['n_assign'], else: [] }],
+  ['loop', { id: 'n_loop', kind: 'loop', count: 'n_int', body: ['n_assign'] }],
+  ['method', { id: 'n_method', kind: 'method', block: 'write_at', args: { addr: 'n_int', payload: 'n_str' } }],
+  ['assign', { id: 'n_assign', kind: 'assign', target: 'n_decl', value: 'n_int' }],
+];
+
+/** 比 `CANVAS_MAX_METHOD_ARGS` 多一个参数：键名本身都合法，只考个数上限。 */
+const TOO_MANY_ARGS = Object.fromEntries(Array.from({ length: CANVAS_MAX_METHOD_ARGS + 1 }, (_item, index) => [`a${index}`, 'n_int']));
+
+/**
+ * 非法节点：第三项是错误路径，覆盖缺字段、未知字段、id 形状、名字超长、`type` 不在枚举、
+ * `binding.mode` 非法、参数键名非法、参数过多、`then` 不是数组。
+ */
+const STAGE2_INVALID_NODES: readonly (readonly [string, Loose, string])[] = [
+  ['var-decl 缺 name', { id: 'n_decl', kind: 'var-decl', type: 'int', binding: { mode: 'none' } }, 'nodes.0.name'],
+  ['var-decl 的 name 超长', { id: 'n_decl', kind: 'var-decl', name: 'v'.repeat(CANVAS_MAX_VAR_NAME_CHARS + 1), type: 'int', binding: { mode: 'none' } }, 'nodes.0.name'],
+  ['var-decl 的 type 不在枚举', { id: 'n_decl', kind: 'var-decl', name: 'v', type: 'tuple', binding: { mode: 'none' } }, 'nodes.0.type'],
+  ['var-decl 的 binding.mode 非法', { id: 'n_decl', kind: 'var-decl', name: 'v', type: 'int', binding: { mode: 'lazy' } }, 'nodes.0.binding.mode'],
+  ['var-decl 的 initial 缺 input', { id: 'n_decl', kind: 'var-decl', name: 'v', type: 'int', binding: { mode: 'initial' } }, 'nodes.0.binding.input'],
+  ['var-decl 的 none 多带 input', { id: 'n_decl', kind: 'var-decl', name: 'v', type: 'int', binding: { mode: 'none', input: 'n_int' } }, 'nodes.0.binding'],
+  ['var-decl 上多出未知字段', { id: 'n_decl', kind: 'var-decl', name: 'v', type: 'int', binding: { mode: 'none' }, scope: 'global' }, 'nodes.0'],
+  ['var-ref 缺 decl', { id: 'n_ref', kind: 'var-ref' }, 'nodes.0.decl'],
+  ['var-ref 的 decl 形状非法', { id: 'n_ref', kind: 'var-ref', decl: 'bad id!' }, 'nodes.0.decl'],
+  ['loop-index 的 loop 形状非法', { id: 'n_index', kind: 'loop-index', loop: 'bad id!' }, 'nodes.0.loop'],
+  ['loop-index 上多出未知字段', { id: 'n_index', kind: 'loop-index', loop: 'n_loop', extra: 1 }, 'nodes.0'],
+  ['start 上多出未知字段', { id: 'n_start', kind: 'start', next: 'n_if' }, 'nodes.0'],
+  ['if 的 cond 形状非法', { id: 'n_if', kind: 'if', cond: 'bad id!', then: [], else: [] }, 'nodes.0.cond'],
+  ['if 的 then 不是数组', { id: 'n_if', kind: 'if', cond: 'n_flag', then: 'n_assign', else: [] }, 'nodes.0.then'],
+  ['if 缺 else', { id: 'n_if', kind: 'if', cond: 'n_flag', then: [] }, 'nodes.0.else'],
+  ['if 的 then 超过上限', { id: 'n_if', kind: 'if', cond: 'n_flag', then: Array.from({ length: CANVAS_MAX_FLOW_NODES + 1 }, () => 'n_x'), else: [] }, 'nodes.0.then'],
+  ['loop 的 count 形状非法', { id: 'n_loop', kind: 'loop', count: 'bad id!', body: [] }, 'nodes.0.count'],
+  ['loop 的 body 不是数组', { id: 'n_loop', kind: 'loop', count: 'n_int', body: 'n_assign' }, 'nodes.0.body'],
+  ['method 的 block 标识非法', { id: 'n_method', kind: 'method', block: 'WriteAt', args: {} }, 'nodes.0.block'],
+  ['method 的 args 键名非法', { id: 'n_method', kind: 'method', block: 'write_at', args: { 'Bad Key': 'n_int' } }, 'nodes.0.args.Bad Key'],
+  ['method 的 args 超过上限', { id: 'n_method', kind: 'method', block: 'write_at', args: TOO_MANY_ARGS }, 'nodes.0.args'],
+  ['method 的 args 值形状非法', { id: 'n_method', kind: 'method', block: 'write_at', args: { addr: 'bad id!' } }, 'nodes.0.args.addr'],
+  ['assign 缺 target', { id: 'n_assign', kind: 'assign', value: 'n_int' }, 'nodes.0.target'],
+  ['assign 的 value 形状非法', { id: 'n_assign', kind: 'assign', target: 'n_decl', value: 'bad id!' }, 'nodes.0.value'],
+];
+
+describe('阶段二节点：合法', () => {
+  it.each(STAGE2_NODES)('%s 的字段合法', (_label, node) => {
+    expect(parsedOrThrow(nodeDocument(node)).nodes).toHaveLength(1);
+  });
+
+  it('var-decl 的三种 binding 都接受', () => {
+    const bindings: Loose[] = [{ mode: 'none' }, { mode: 'initial', input: 'n_int' }, { mode: 'derived', input: 'n_int' }];
+    for (const binding of bindings) {
+      const document = parsedOrThrow(nodeDocument({ id: 'n_decl', kind: 'var-decl', name: 'v', type: 'byte', binding }));
+      expect(document.nodes[0]).toMatchObject({ binding });
+    }
+  });
+
+  it('同时含八种阶段二节点且 main 非空的完整文档能通过解析', () => {
+    const nodes = [...STAGE2_NODES.map(([, node]) => node), { id: 'n_int', kind: 'value', value: { kind: 'int', value: '1' } }];
+    const main = ['n_start', 'n_decl', 'n_if', 'n_loop', 'n_method', 'n_assign'];
+    const document = parsedOrThrow(documentOf(nodes, { main }));
+    expect(document.nodes).toHaveLength(9);
+    expect(new Set(document.nodes.map((node) => node.kind)).size).toBe(9);
+    expect(document.main).toEqual(main);
+  });
+
+  it('main 里放数据节点 id 也能通过形状解析（语义由 flow.ts 拦）', () => {
+    const raw = documentOf([{ id: 'n_int', kind: 'value', value: { kind: 'int', value: '1' } }], { main: ['n_int'] });
+    // 形状层只认 id 的形状；「main 里该不该出现数据节点」是 flow.ts 的语义检查。
+    expect(parseCanvasDocument(raw).ok).toBe(true);
+  });
+});
+
+describe('阶段二节点：形状错误', () => {
+  it.each(STAGE2_INVALID_NODES)('%s → invalid，路径指向对应字段', (_label, node, path) => {
+    expectInvalidAt(nodeDocument(node), path);
+  });
+
+  it('main 超过流程节点上限 → invalid', () => {
+    const main = Array.from({ length: CANVAS_MAX_FLOW_NODES + 1 }, () => 'n_x');
+    expectInvalidAt(documentOf([], { main }), 'main');
   });
 });

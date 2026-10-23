@@ -2,10 +2,13 @@ import { z } from 'zod';
 import {
   CANVAS_MAX_BYTES,
   CANVAS_MAX_COLLECTION_ITEMS,
+  CANVAS_MAX_FLOW_NODES,
   CANVAS_MAX_GROUP_ROWS,
+  CANVAS_MAX_METHOD_ARGS,
   CANVAS_MAX_NODES,
   CANVAS_MAX_ROW_MEMBERS,
   CANVAS_MAX_TEXT_CHARS,
+  CANVAS_MAX_VAR_NAME_CHARS,
 } from '../limits';
 import { WORKFLOW_FORMAT } from '../workflow/types';
 import {
@@ -24,6 +27,7 @@ import {
   TEXT_ENCODINGS,
   UNARY_OPERATORS,
 } from './operators';
+import { VALUE_KINDS } from './value';
 
 /**
  * 新版画布存档的 Schema（需求 §8）。
@@ -151,6 +155,46 @@ export const ConversionSpecSchema = z.discriminatedUnion('kind', [
 ]);
 
 // ---------------------------------------------------------------------------
+// 变量与流程的共享形状（阶段二）
+// ---------------------------------------------------------------------------
+
+/** 方法标识：与题目包 `authorBlocks[].id` 同一口径（`challenge.ts`），否则命中不了题目声明的方法。 */
+const METHOD_BLOCK_RE = /^[a-z][a-z0-9_]{0,31}$/;
+/** 方法参数名：与题目包参数名同一口径，最长 16 位。 */
+const METHOD_ARG_NAME_RE = /^[a-z][a-z0-9_]{0,15}$/;
+
+/**
+ * 变量的初始化关系（需求 §3.1–3.2）。
+ *
+ * `mode` 决定要不要 `input`，所以用判别联合而不是「都写可选再细化」：
+ * `none` 必须是空对象，多带一个 `input` 就是坏存档，不该被当作「忽略多余字段」。
+ */
+const VariableBindingSchema = z.discriminatedUnion('mode', [
+  z.strictObject({ mode: z.literal('none') }),
+  z.strictObject({ mode: z.literal('initial'), input: CanvasNodeIdSchema }),
+  z.strictObject({ mode: z.literal('derived'), input: CanvasNodeIdSchema }),
+]);
+
+/** 执行区域（分支的 `then`/`else`、循环的 `body`）：语句顺序即执行顺序，条数不得超过流程节点上限。 */
+const RegionSequenceSchema = z
+  .array(CanvasNodeIdSchema)
+  .max(CANVAS_MAX_FLOW_NODES, `执行区域最多 ${CANVAS_MAX_FLOW_NODES} 项`);
+
+/**
+ * 方法参数表：键是题目声明的参数名、值是数据节点 id。
+ *
+ * 键的形状在这里查（否则名字根本对不上题目声明）；「参数名是否真的属于该方法」是语义，
+ * 由 `validate.ts` 查。个数上限与题目声明的参数上限同源。
+ * 注意 zod 对 record 键的报错是通用英文文案（`Invalid key in record`），正则上的中文只作意图说明。
+ */
+const MethodArgsSchema = z
+  .record(
+    z.string().regex(METHOD_ARG_NAME_RE, '参数名只能以小写字母开头，含小写字母、数字和下划线，长度 1–16'),
+    CanvasNodeIdSchema,
+  )
+  .refine((args) => Object.keys(args).length <= CANVAS_MAX_METHOD_ARGS, `方法参数最多 ${CANVAS_MAX_METHOD_ARGS} 个`);
+
+// ---------------------------------------------------------------------------
 // 节点
 // ---------------------------------------------------------------------------
 
@@ -166,7 +210,7 @@ const DictEntrySchema = z.strictObject({
 });
 
 /**
- * 十种节点，每种都是 strictObject。
+ * 十八种节点，每种都是 strictObject：阶段一十种数据节点 + 阶段二八种变量与流程节点。
  *
  * `id` 写在每个分支里而不是外层：`z.discriminatedUnion` 的分支必须是完整对象，
  * 而 `id` 在所有分支上形状相同，集中写一个 schema 就够。
@@ -229,6 +273,46 @@ export const CanvasNodeSchema = z.discriminatedUnion('kind', [
     spec: ConversionSpecSchema,
     input: CanvasNodeIdSchema,
   }),
+  // —— 阶段二：变量（需求 §3）。声明就是节点，没有单独的 `vars` 字段。——
+  z.strictObject({
+    id: CanvasNodeIdSchema,
+    kind: z.literal('var-decl'),
+    name: z
+      .string()
+      .min(1, '变量名不能为空')
+      .max(CANVAS_MAX_VAR_NAME_CHARS, `变量名不能超过 ${CANVAS_MAX_VAR_NAME_CHARS} 个字符`),
+    type: z.enum(VALUE_KINDS),
+    binding: VariableBindingSchema,
+  }),
+  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('var-ref'), decl: CanvasNodeIdSchema }),
+  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('loop-index'), loop: CanvasNodeIdSchema }),
+  // —— 阶段二：流程（需求 §5）。区域用数组表达顺序，结构上就写不出回边。——
+  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('start') }),
+  z.strictObject({
+    id: CanvasNodeIdSchema,
+    kind: z.literal('if'),
+    cond: CanvasNodeIdSchema,
+    then: RegionSequenceSchema,
+    else: RegionSequenceSchema,
+  }),
+  z.strictObject({
+    id: CanvasNodeIdSchema,
+    kind: z.literal('loop'),
+    count: CanvasNodeIdSchema,
+    body: RegionSequenceSchema,
+  }),
+  z.strictObject({
+    id: CanvasNodeIdSchema,
+    kind: z.literal('method'),
+    block: z.string().regex(METHOD_BLOCK_RE, '方法标识只能以小写字母开头，含小写字母、数字和下划线，长度 1–32'),
+    args: MethodArgsSchema,
+  }),
+  z.strictObject({
+    id: CanvasNodeIdSchema,
+    kind: z.literal('assign'),
+    target: CanvasNodeIdSchema,
+    value: CanvasNodeIdSchema,
+  }),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -245,7 +329,7 @@ export const CanvasDocumentSchema = z.strictObject({
    */
   layout: z.record(z.string(), CanvasNodeLayoutSchema).default({}),
   /** 流程执行序列（阶段二写入）；缺省为空，不因为「没有 main」判坏。 */
-  main: z.array(CanvasNodeIdSchema).max(CANVAS_MAX_NODES).default([]),
+  main: z.array(CanvasNodeIdSchema).max(CANVAS_MAX_FLOW_NODES, `流程序列最多 ${CANVAS_MAX_FLOW_NODES} 项`).default([]),
 });
 
 // ---------------------------------------------------------------------------

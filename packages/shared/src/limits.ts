@@ -184,3 +184,34 @@ export const CANVAS_MAX_EVAL_STEPS = 4096;
 
 /** 一次求值里表达式嵌套深度上限：防脏存档把递归拖死。 */
 export const CANVAS_MAX_EXPR_DEPTH = 64;
+
+// ---------------------------------------------------------------------------
+// 新版画布：变量与流程（阶段二）
+// ---------------------------------------------------------------------------
+
+/** 一张画布里的全局变量声明数上限。变量是执行状态，不做无界存档。 */
+export const CANVAS_MAX_VARIABLES = 64;
+
+/** 变量名字符数上限（保存与显示都要有界）。 */
+export const CANVAS_MAX_VAR_NAME_CHARS = 32;
+
+/** 流程节点（开始/分支/循环/方法/赋值）总数上限。 */
+export const CANVAS_MAX_FLOW_NODES = 256;
+
+/** 分支与循环的嵌套深度上限。 */
+export const CANVAS_MAX_FLOW_DEPTH = 8;
+
+/** 单个循环最多执行的轮数。超过就报错定位到循环，不悄悄截断（需求 §5.3）。 */
+export const CANVAS_MAX_LOOP_ITERATIONS = 256;
+
+/** 一次生成里所有循环累计的轮数上限：嵌套循环共享同一份预算。 */
+export const CANVAS_MAX_TOTAL_ITERATIONS = 4096;
+
+/** 一次生成最多产出的动作数（含循环展开）。超过就整体失败，不发布部分动作（需求 §7）。 */
+export const CANVAS_MAX_ACTIONS = 2048;
+
+/** 一条动作序列里保留的步骤快照数上限：超出的部分不再记录变量快照，但动作照常生成。 */
+export const CANVAS_MAX_STEP_SNAPSHOTS = 2048;
+
+/** 方法节点的参数个数上限：与题目声明的上限一致。 */
+export const CANVAS_MAX_METHOD_ARGS = 8;

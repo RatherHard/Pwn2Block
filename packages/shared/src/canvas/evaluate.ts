@@ -1,8 +1,8 @@
 import { CANVAS_MAX_BYTES, CANVAS_MAX_EVAL_STEPS, CANVAS_MAX_EXPR_DEPTH, CANVAS_MAX_TEXT_CHARS } from '../limits';
 import { indexOf, lookupOf, repeatOf } from './collection';
 import { applyConversion } from './convert';
-import { groupMembers, inputIdsOf, nodeMapOf, type CanvasDocument, type CanvasNode } from './document';
-import { dedupeIssues, errorIssue, type CanvasIssue, type CanvasIssueCode } from './issues';
+import { CANVAS_NODE_KIND_LABELS, groupMembers, inputIdsOf, isValueNode, nodeMapOf, type CanvasDocument, type CanvasNode } from './document';
+import { dedupeIssues, errorIssue, warningIssue, type CanvasIssue, type CanvasIssueCode } from './issues';
 import { applyBinary, applyUnary, decidedByLeft } from './ops';
 import { binaryOperatorSpec } from './operators';
 import { fail, ok, type CanvasResult } from './result';
@@ -38,6 +38,22 @@ import { decodeKey, decodeScalarValue } from './value-codec';
 /** 一次求值的可选覆盖项（测试用，生产走 `limits.ts` 的默认预算）。 */
 export interface CanvasEvalOptions {
   readonly maxSteps?: number;
+  /** 执行状态：变量值与循环索引。不传时读到变量就变成「待执行」。 */
+  readonly scope?: CanvasEvalScope;
+}
+
+/**
+ * 执行状态的外部供给（阶段二）：变量值与循环索引。
+ *
+ * 编辑期（预览）只给初始值、不给流程态，读不到就变成 `pending` 警告而不是错误；
+ * 执行期由流程解释器提供完整状态，读不到就是真错误（未初始化、越出作用域）。
+ */
+export interface CanvasEvalScope {
+  readonly mode: 'preview' | 'execute';
+  /** 读一个变量声明当前的值。 */
+  readonly readVariable: (declId: string) => CanvasResult<Value>;
+  /** 读某个循环当前的只读索引；不在该循环体内时返回失败。 */
+  readonly readLoopIndex: (loopId: string) => CanvasResult<Value>;
 }
 
 export interface EvaluateOutcome {
@@ -66,6 +82,7 @@ interface EvalState {
   steps: number;
   depth: number;
   readonly maxSteps: number;
+  readonly scope: CanvasEvalScope | undefined;
 }
 
 function nodeOk(value: Value): NodeResult {
@@ -97,6 +114,7 @@ function createState(document: CanvasDocument, options: CanvasEvalOptions | unde
     steps: 0,
     depth: 0,
     maxSteps: options?.maxSteps ?? CANVAS_MAX_EVAL_STEPS,
+    scope: options?.scope,
   };
 }
 
@@ -140,7 +158,12 @@ function evalById(state: EvalState, id: string): NodeResult {
     state.values.set(id, result.value);
     return result;
   }
-  state.issues.push(errorIssue(result.code, result.originId, result.message));
+  // 「待执行」是编辑期的状态提示，不是错误：它不影响其他根继续求值，也不阻止生成。
+  const issue =
+    result.code === 'pending'
+      ? warningIssue('pending', result.originId, result.message)
+      : errorIssue(result.code, result.originId, result.message);
+  state.issues.push(issue);
   return result;
 }
 
@@ -166,7 +189,44 @@ function computeNode(state: EvalState, node: CanvasNode): NodeResult {
       return computeRepeat(state, node);
     case 'convert':
       return computeConvert(state, node);
+    case 'var-ref':
+      return computeVarRef(state, node);
+    case 'loop-index':
+      return computeLoopIndex(state, node);
+    case 'var-decl':
+    case 'start':
+    case 'if':
+    case 'loop':
+    case 'method':
+    case 'assign':
+      return nodeFail(node.id, 'type_mismatch', `「${CANVAS_NODE_KIND_LABELS[node.kind]}」没有数据结果，不能接到数据输入`);
   }
+}
+
+/** 变量读取：值来自执行状态；编辑期没有流程态时变成「待执行」。 */
+function computeVarRef(state: EvalState, node: Extract<CanvasNode, { kind: 'var-ref' }>): NodeResult {
+  const scope = state.scope;
+  if (scope === undefined) {
+    return nodeFail(node.id, 'pending', '依赖执行状态，待执行');
+  }
+  const read = scope.readVariable(node.decl);
+  if (!read.ok) {
+    return nodeFail(node.id, scope.mode === 'preview' ? 'pending' : 'variable_error', read.message);
+  }
+  return limitChecked(node.id, read.value);
+}
+
+/** 循环索引：只在所属循环体内有值，越界就是错误（需求 §5.3）。 */
+function computeLoopIndex(state: EvalState, node: Extract<CanvasNode, { kind: 'loop-index' }>): NodeResult {
+  const scope = state.scope;
+  if (scope === undefined) {
+    return nodeFail(node.id, 'pending', '循环索引只能在循环体内使用，待执行');
+  }
+  const read = scope.readLoopIndex(node.loop);
+  if (!read.ok) {
+    return nodeFail(node.id, scope.mode === 'preview' ? 'pending' : 'variable_error', read.message);
+  }
+  return limitChecked(node.id, read.value);
 }
 
 function computeValue(node: Extract<CanvasNode, { kind: 'value' }>): NodeResult {
@@ -362,8 +422,8 @@ function evalOptional(state: EvalState, id: string | undefined): OptionalValue {
 }
 
 /**
- * 求整份文档。根节点是「没有被任何节点引用」的数据节点，以及 `main` 里的流程节点；
- * 每个根独立求值，一处失败不影响其它根。
+ * 求整份文档。根节点是「没有被任何节点引用」的**数据**节点；
+ * 每个根独立求值，一处失败不影响其它根。变量与流程节点没有数据结果，不当根。
  */
 export function evaluateCanvasDocument(
   document: CanvasDocument,
@@ -377,10 +437,8 @@ export function evaluateCanvasDocument(
   }
 
   for (const node of document.nodes) {
+    if (!isValueNode(node)) continue;
     if (!referenced.has(node.id)) evalById(state, node.id);
-  }
-  for (const id of document.main) {
-    if (state.nodes.has(id)) evalById(state, id);
   }
 
   const issues = dedupeIssues(state.issues);

@@ -3,7 +3,7 @@ import type { EncodedDictKey, EncodedScalarValue } from './value-codec';
 import type { ValueKind } from './value';
 
 /**
- * 新版画布的文档模型（需求 §2.2、§4.1、§6.1、§8）。
+ * 新版画布的文档模型（需求 §2.2、§3、§4.1、§5.2、§6.1、§8）。
  *
  * 这一层只描述**可序列化的结构**，不碰 DOM、不碰求值：
  * - 每个数据节点产出一个值，输入写成**别的节点的 id**。表达式结构完全由引用决定，
@@ -12,7 +12,11 @@ import type { ValueKind } from './value';
  *   整组移动不改变值，只有吸附/脱离/重排/改模式才改结构（需求 §2.2）。
  * - **转换包络**（`convert`）通过 `input` 引用内部结构；包住「局部」就是包住一个子组合，
  *   因此嵌套天然成立，而「一个节点只能属于一个容器」由校验器检查（需求 §4.1）。
- * - `main` 是流程执行序列，阶段二才写入；阶段一恒为空，但字段先占位，免得存档再进一次位。
+ * - **流程**（阶段二）用三条序列表达顺序：`main` 是顶层，分支的 `then`/`else` 与循环的 `body`
+ *   是区域。一个流程节点只能出现在一条序列里，因此「回边」和「跨区域接线」在结构上无法表达，
+ *   不需要靠校验器去追环（需求 §5.2）。
+ * - **变量**（阶段二）有一个唯一声明 `var-decl`，读取用引用视图 `var-ref`，
+ *   流程赋值用 `assign`。声明上的 `binding` 区分「初始值」与「派生绑定」（需求 §3）。
  */
 
 /** 存档格式标识：与旧的 `pwn2block.workflow` 不同，读到旧格式直接判「不兼容」。 */
@@ -21,7 +25,8 @@ export const CANVAS_FORMAT = 'pwn2block.canvas';
 /** 文档版本。不兼容的改动必须进位，读不到就明说，不猜。 */
 export const CANVAS_VERSION = 2;
 
-export const CANVAS_NODE_KINDS = [
+/** 产出值的数据节点（阶段一）。 */
+export const CANVAS_DATA_NODE_KINDS = [
   'value',
   'group',
   'dict',
@@ -34,6 +39,21 @@ export const CANVAS_NODE_KINDS = [
   'convert',
 ] as const;
 
+/** 也有数据结果、但依赖执行状态的节点（阶段二）：变量读取与循环索引。 */
+export const CANVAS_VARIABLE_NODE_KINDS = ['var-decl', 'var-ref', 'loop-index'] as const;
+
+/** 没有数据结果的流程节点（阶段二）。 */
+export const CANVAS_FLOW_NODE_KINDS = ['start', 'if', 'loop', 'method', 'assign'] as const;
+
+export const CANVAS_NODE_KINDS = [
+  ...CANVAS_DATA_NODE_KINDS,
+  ...CANVAS_VARIABLE_NODE_KINDS,
+  ...CANVAS_FLOW_NODE_KINDS,
+] as const;
+
+export type CanvasDataNodeKind = (typeof CANVAS_DATA_NODE_KINDS)[number];
+export type CanvasVariableNodeKind = (typeof CANVAS_VARIABLE_NODE_KINDS)[number];
+export type CanvasFlowNodeKind = (typeof CANVAS_FLOW_NODE_KINDS)[number];
 export type CanvasNodeKind = (typeof CANVAS_NODE_KINDS)[number];
 
 /** 节点 id：稳定、可读、能进 CSS 选择器；与旧画布同一口径。 */
@@ -50,6 +70,14 @@ export const CANVAS_NODE_KIND_LABELS: Readonly<Record<CanvasNodeKind, string>> =
   slice: '切片',
   repeat: '重复',
   convert: '转换',
+  'var-decl': '变量声明',
+  'var-ref': '变量引用',
+  'loop-index': '循环索引',
+  start: '开始',
+  if: '条件分支',
+  loop: '次数循环',
+  method: '方法',
+  assign: '设置变量',
 };
 
 /** 组合的两种模式（需求 §2.2）。成员必须同类型的是「合并为串」，其余一律「组成列表」。 */
@@ -140,6 +168,89 @@ export interface ConvertNode extends CanvasNodeBase {
   readonly input: string;
 }
 
+// ---------------------------------------------------------------------------
+// 变量（需求 §3）
+// ---------------------------------------------------------------------------
+
+/**
+ * 变量的初始化关系（需求 §3.1–3.2）。
+ *
+ * - `none`：未初始化。允许存在，真正读取时才报错（§3.1）。
+ * - `initial`：初始值。本次执行开头算一次，之后由流程赋值更新。
+ * - `derived`：派生绑定。只读，每次读取都按表达式重新求值，跟随源变量（§3.2）。
+ */
+export type VariableBinding =
+  | { readonly mode: 'none' }
+  | { readonly mode: 'initial'; readonly input: string }
+  | { readonly mode: 'derived'; readonly input: string };
+
+/** 全局变量声明：一个变量只有一份声明，名字与类型固定（需求 §3.1）。 */
+export interface VarDeclNode extends CanvasNodeBase {
+  readonly kind: 'var-decl';
+  readonly name: string;
+  readonly type: ValueKind;
+  readonly binding: VariableBinding;
+}
+
+/** 引用视图：指向同一声明，读出来是当前值；重命名由声明同步（需求 §3.1）。 */
+export interface VarRefNode extends CanvasNodeBase {
+  readonly kind: 'var-ref';
+  readonly decl: string;
+}
+
+/** 循环索引：从 0 开始、只读，只在所属循环体及其嵌套区域内可用（需求 §5.3）。 */
+export interface LoopIndexNode extends CanvasNodeBase {
+  readonly kind: 'loop-index';
+  readonly loop: string;
+}
+
+// ---------------------------------------------------------------------------
+// 流程（需求 §5）
+// ---------------------------------------------------------------------------
+
+/** 开始节点：整个工作流只有一个，且必须是 `main` 的第一项（需求 §5.2）。 */
+export interface StartNode extends CanvasNodeBase {
+  readonly kind: 'start';
+}
+
+/**
+ * 条件分支：`then` / `else` 两条区域序列，各自顺序执行，完成后从容器出口继续（需求 §5.2）。
+ *
+ * 区域用**数组**而不是连线：顺序显式、不可回边、不可跨区内接线。首版不提供「分支结果」。
+ */
+export interface IfNode extends CanvasNodeBase {
+  readonly kind: 'if';
+  readonly cond: string;
+  readonly then: readonly string[];
+  readonly else: readonly string[];
+}
+
+/** 次数循环：进入时读一次次数（非负整数，0 次合法），`body` 顺序执行（需求 §5.3）。 */
+export interface LoopNode extends CanvasNodeBase {
+  readonly kind: 'loop';
+  readonly count: string;
+  readonly body: readonly string[];
+}
+
+/**
+ * 出题方法：名称与参数来自题目公开声明，参数接数据表达式（需求 §5.4）。
+ *
+ * `args` 是「参数名 → 数据节点 id」。求值到这一步时把当时的参数值固定进动作，
+ * 之后的变量变化不追溯修改已生成动作。
+ */
+export interface MethodNode extends CanvasNodeBase {
+  readonly kind: 'method';
+  readonly block: string;
+  readonly args: Readonly<Record<string, string>>;
+}
+
+/** 流程赋值（设置变量）：执行到这一步取值一次，只写普通变量（需求 §3.2）。 */
+export interface AssignNode extends CanvasNodeBase {
+  readonly kind: 'assign';
+  readonly target: string;
+  readonly value: string;
+}
+
 export type CanvasNode =
   | ValueNode
   | GroupNode
@@ -150,7 +261,43 @@ export type CanvasNode =
   | LookupNode
   | SliceNode
   | RepeatNode
-  | ConvertNode;
+  | ConvertNode
+  | VarDeclNode
+  | VarRefNode
+  | LoopIndexNode
+  | StartNode
+  | IfNode
+  | LoopNode
+  | MethodNode
+  | AssignNode;
+
+/** 有数据结果的节点：数据节点 + 变量读取 + 循环索引。流程节点与声明不在其中（需求 §5.1）。 */
+export function isValueNode(node: CanvasNode): boolean {
+  if (node.kind === 'var-ref' || node.kind === 'loop-index') return true;
+  return (CANVAS_DATA_NODE_KINDS as readonly string[]).includes(node.kind);
+}
+
+/** 流程节点：没有数据结果，只能出现在 `main` 或某个区域的序列里。 */
+export function isFlowNode(node: CanvasNode): node is StartNode | IfNode | LoopNode | MethodNode | AssignNode {
+  return (CANVAS_FLOW_NODE_KINDS as readonly string[]).includes(node.kind);
+}
+
+/** 声明上的初始化表达式（没有绑定就是 `undefined`）。 */
+export function variableBindingInput(binding: VariableBinding): string | undefined {
+  return binding.mode === 'none' ? undefined : binding.input;
+}
+
+/** 流程节点的子序列（分支两条、循环一条）；叶子节点返回空数组。 */
+export function flowChildrenOf(node: CanvasNode): readonly (readonly string[])[] {
+  switch (node.kind) {
+    case 'if':
+      return [node.then, node.else];
+    case 'loop':
+      return [node.body];
+    default:
+      return [];
+  }
+}
 
 /** 节点位置：只影响显示，不进语义版本（需求 §2.2「普通移动整个组合不改变值」）。 */
 export interface CanvasNodeLayout {
@@ -182,10 +329,11 @@ export function emptyCanvasDocument(): CanvasDocument {
 // 结构查询
 // ---------------------------------------------------------------------------
 
-/** 节点引用的上游节点 id，按输入顺序；重复引用（同一上游接两个输入）保留重复。 */
+/** 节点引用的上游**数据**节点 id，按输入顺序；重复引用（同一上游接两个输入）保留重复。 */
 export function inputIdsOf(node: CanvasNode): readonly string[] {
   switch (node.kind) {
     case 'value':
+    case 'start':
       return [];
     case 'group':
       return groupMembers(node);
@@ -205,6 +353,19 @@ export function inputIdsOf(node: CanvasNode): readonly string[] {
       return [node.target, node.count];
     case 'convert':
       return [node.input];
+    case 'var-decl':
+      return node.binding.mode === 'none' ? [] : [node.binding.input];
+    case 'var-ref':
+    case 'loop-index':
+      return [];
+    case 'assign':
+      return [node.value];
+    case 'if':
+      return [node.cond];
+    case 'loop':
+      return [node.count];
+    case 'method':
+      return Object.values(node.args);
   }
 }
 

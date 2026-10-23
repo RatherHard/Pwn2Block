@@ -8,20 +8,34 @@ import {
   type CanvasDocument,
   type CanvasNode,
 } from './document';
+import { analyzeFlow } from './flow';
 import { dedupeIssues, errorIssue, type CanvasIssue } from './issues';
-import { binaryOperatorSpec, conversionInputKind, conversionOutputKind, unaryOperatorSpec } from './operators';
+import type { CanvasMethodDecl } from './methods';
+import { binaryOperatorSpec, conversionInputKind, unaryOperatorSpec } from './operators';
 import { VALUE_KIND_LABELS, keyIdentity, keyLabel, type ValueKind } from './value';
 import { decodeKey, decodeScalarValue } from './value-codec';
+import {
+  checkAssignTargets,
+  checkVariableDeclarations,
+  initializationOrder,
+  resolveVariable,
+  variableTableOf,
+} from './variables';
+import {
+  createTypeChecker,
+  staticTypeIn,
+  type StaticType,
+  type TypeChecker,
+} from './types';
 
 /**
  * 结构与类型校验（需求 §7「结构错误与类型错误阻止生成」）。
  *
  * 校验只做**不依赖具体值**的判断：未知节点、重复 id、归属冲突、数据环、类型不匹配、
- * 合并模式冲突、字典重复键、转换适用性。除零、越界这类要看具体值的错误留给求值阶段，
- * 这样编辑一张还没连完的图不会满屏红色。
+ * 合并模式冲突、字典重复键、转换适用性、变量声明与依赖、流程序列与作用域、方法签名。
+ * 除零、越界这类要看具体值的错误留给求值阶段，这样编辑一张还没连完的图不会满屏红色。
  *
- * 类型推导只到**值种类**这一层：列表元素类型、字典取出的值都算「未知（any）」，
- * 具体元素类型在求值时检查。这样异构列表与嵌套集合不需要类型推导入门门槛。
+ * 类型推导只到**值种类**这一层，实现放在 `./types`（流程分析也要问类型，放这里会成环）。
  */
 
 export interface CanvasValidation {
@@ -29,18 +43,32 @@ export interface CanvasValidation {
   readonly issues: readonly CanvasIssue[];
 }
 
-/** 静态类型：`'any'` 表示元素级未知。 */
-export type StaticType = ValueKind | 'any';
+export interface CanvasValidationOptions {
+  /** 题目声明的方法目录；给了才校验方法节点的名字与参数。 */
+  readonly methods?: readonly CanvasMethodDecl[];
+}
 
-export function validateCanvasDocument(document: CanvasDocument): CanvasValidation {
+export function validateCanvasDocument(
+  document: CanvasDocument,
+  options?: CanvasValidationOptions,
+): CanvasValidation {
   const issues: CanvasIssue[] = [];
   const nodes = nodeMapOf(document);
+  const table = variableTableOf(document);
 
   checkDocumentShape(document, issues);
   checkReferences(document, nodes, issues);
   checkOwnership(document, nodes, issues);
   checkCycles(document, nodes, issues);
-  checkNodes(nodes, issues);
+  checkNodes(nodes, table, issues);
+
+  // 变量层：声明、引用视图、依赖顺序、赋值目标。这类问题与具体值无关，属于「结构」。
+  issues.push(...checkVariableDeclarations(table));
+  issues.push(...checkAssignTargets(document, table));
+  issues.push(...initializationOrder(document, table).issues);
+
+  // 流程层：序列、开始节点、嵌套、循环索引作用域、方法签名。
+  issues.push(...analyzeFlow(document, { methods: options?.methods }).issues);
 
   const deduped = dedupeIssues(issues);
   return { ok: deduped.every((issue) => issue.severity !== 'error'), issues: deduped };
@@ -148,83 +176,9 @@ function checkCycles(
   for (const node of document.nodes) visit(node.id);
 }
 
-// ---------------------------------------------------------------------------
-// 类型推导
-// ---------------------------------------------------------------------------
-
-interface TypeState {
-  readonly nodes: ReadonlyMap<string, CanvasNode>;
-  readonly memo: Map<string, StaticType>;
-  readonly visiting: Set<string>;
-}
-
-function createTypeState(nodes: ReadonlyMap<string, CanvasNode>): TypeState {
-  return { nodes, memo: new Map(), visiting: new Set() };
-}
-
-/** 一个节点的静态类型；`undefined` 表示因为更早的错误推不出来。 */
-export function staticTypeOf(document: CanvasDocument, nodeId: string): StaticType | undefined {
-  return inferType(createTypeState(nodeMapOf(document)), nodeId);
-}
-
-function inferType(state: TypeState, nodeId: string): StaticType | undefined {
-  const cached = state.memo.get(nodeId);
-  if (cached !== undefined) return cached;
-  const node = state.nodes.get(nodeId);
-  if (node === undefined || state.visiting.has(nodeId)) return undefined;
-
-  state.visiting.add(nodeId);
-  const type = inferNodeType(state, node);
-  state.visiting.delete(nodeId);
-  if (type !== undefined) state.memo.set(nodeId, type);
-  return type;
-}
-
-function inferNodeType(state: TypeState, node: CanvasNode): StaticType | undefined {
-  switch (node.kind) {
-    case 'value':
-      return node.value.kind;
-    case 'group':
-      return inferGroupType(state, node);
-    case 'dict':
-      return 'dict';
-    case 'relation':
-      return binaryOperatorSpec(node.op).result;
-    case 'unary':
-      return unaryOperatorSpec(node.op).result;
-    case 'index': {
-      const target = inferType(state, node.target);
-      if (target === 'byte') return 'int';
-      if (target === 'string') return 'string';
-      if (target === 'list') return 'any';
-      return target === 'any' ? 'any' : undefined;
-    }
-    case 'lookup':
-      return 'any';
-    case 'slice':
-    case 'repeat':
-      return inferType(state, node.target);
-    case 'convert':
-      return conversionOutputKind(node.spec);
-  }
-}
-
-function inferGroupType(
-  state: TypeState,
-  node: Extract<CanvasNode, { kind: 'group' }>,
-): StaticType | undefined {
-  const members = groupMembers(node);
-  if (members.length === 0) return undefined;
-  if (node.mode === 'list') return 'list';
-
-  const types = members.map((member) => inferType(state, member));
-  if (types.some((type) => type === undefined)) return undefined;
-  const known = types as StaticType[];
-  if (known.some((type) => type === 'any')) return 'any';
-  const first = known[0] as StaticType;
-  if (known.every((type) => type === first) && (first === 'byte' || first === 'string')) return first;
-  return undefined;
-}
+// 类型推导在 `./types`：流程分析也要问静态类型，放在这里会和流程校验互相 import 成环。
+export { staticTypeOf } from './types';
+export type { StaticType } from './types';
 
 // ---------------------------------------------------------------------------
 // 类型校验
@@ -232,15 +186,21 @@ function inferGroupType(
 
 function checkNodes(
   nodes: ReadonlyMap<string, CanvasNode>,
+  table: ReturnType<typeof variableTableOf>,
   issues: CanvasIssue[],
 ): void {
-  const state = createTypeState(nodes);
+  const state = createTypeChecker(nodes);
   for (const node of nodes.values()) {
-    checkNode(state, node, issues);
+    checkNode(state, table, node, issues);
   }
 }
 
-function checkNode(state: TypeState, node: CanvasNode, issues: CanvasIssue[]): void {
+function checkNode(
+  state: TypeChecker,
+  table: ReturnType<typeof variableTableOf>,
+  node: CanvasNode,
+  issues: CanvasIssue[],
+): void {
   switch (node.kind) {
     case 'value':
       checkLiteral(node, issues);
@@ -272,6 +232,26 @@ function checkNode(state: TypeState, node: CanvasNode, issues: CanvasIssue[]): v
     case 'convert':
       checkConvert(state, node, issues);
       return;
+    case 'var-decl':
+      checkVarDecl(state, node, issues);
+      return;
+    case 'assign':
+      checkAssign(state, table, node, issues);
+      return;
+    case 'method':
+      // 方法签名由流程分析按题目声明校验（`analyzeFlow`）。
+      return;
+    case 'loop':
+      expectType(state, node, issues, node.count, 'int', '循环次数');
+      return;
+    case 'if':
+      expectType(state, node, issues, node.cond, 'bool', '条件');
+      return;
+    case 'var-ref':
+    case 'loop-index':
+    case 'start':
+      // 引用指向、作用域与序列归属分别由变量层与流程层负责。
+      return;
   }
 }
 
@@ -282,7 +262,7 @@ function checkLiteral(node: Extract<CanvasNode, { kind: 'value' }>, issues: Canv
 }
 
 function checkGroup(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'group' }>,
   issues: CanvasIssue[],
 ): void {
@@ -293,7 +273,7 @@ function checkGroup(
   }
   if (node.mode !== 'merge') return;
 
-  const types = members.map((member) => inferType(state, member));
+  const types = members.map((member) => staticTypeIn(state, member));
   const known = types.filter((type): type is StaticType => type !== undefined);
   if (known.length !== types.length) return;
 
@@ -337,7 +317,7 @@ function checkDictEntries(node: Extract<CanvasNode, { kind: 'dict' }>, issues: C
 }
 
 function checkRelation(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'relation' }>,
   issues: CanvasIssue[],
 ): void {
@@ -347,12 +327,12 @@ function checkRelation(
 }
 
 function checkUnary(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'unary' }>,
   issues: CanvasIssue[],
 ): void {
   const spec = unaryOperatorSpec(node.op);
-  const actual = inferType(state, node.operand);
+  const actual = staticTypeIn(state, node.operand);
   if (actual === undefined || actual === 'any' || spec.accepts.includes(actual)) return;
   issues.push(
     errorIssue(
@@ -364,11 +344,11 @@ function checkUnary(
 }
 
 function checkIndex(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'index' }>,
   issues: CanvasIssue[],
 ): void {
-  const target = inferType(state, node.target);
+  const target = staticTypeIn(state, node.target);
   if (target !== undefined && target !== 'any' && target !== 'list' && target !== 'byte' && target !== 'string') {
     issues.push(
       errorIssue('type_mismatch', node.id, `按索引取元素只接受列表、字节串和文本，收到${typeLabel(target)}`),
@@ -378,26 +358,26 @@ function checkIndex(
 }
 
 function checkLookup(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'lookup' }>,
   issues: CanvasIssue[],
 ): void {
-  const target = inferType(state, node.target);
+  const target = staticTypeIn(state, node.target);
   if (target !== undefined && target !== 'any' && target !== 'dict') {
     issues.push(errorIssue('type_mismatch', node.id, `按键取值只接受字典，收到${typeLabel(target)}`));
   }
-  const key = inferType(state, node.key);
+  const key = staticTypeIn(state, node.key);
   if (key !== undefined && key !== 'any' && key !== 'int' && key !== 'string') {
     issues.push(errorIssue('type_mismatch', node.id, `字典键只能是整数或文本，收到${typeLabel(key)}`));
   }
 }
 
 function checkSlice(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'slice' }>,
   issues: CanvasIssue[],
 ): void {
-  const target = inferType(state, node.target);
+  const target = staticTypeIn(state, node.target);
   if (target !== undefined && target !== 'any' && target !== 'list' && target !== 'byte' && target !== 'string') {
     issues.push(errorIssue('type_mismatch', node.id, `切片只接受列表、字节串和文本，收到${typeLabel(target)}`));
   }
@@ -411,11 +391,11 @@ function checkSlice(
 }
 
 function checkRepeat(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'repeat' }>,
   issues: CanvasIssue[],
 ): void {
-  const target = inferType(state, node.target);
+  const target = staticTypeIn(state, node.target);
   if (target !== undefined && target !== 'any' && target !== 'list' && target !== 'byte' && target !== 'string') {
     issues.push(errorIssue('type_mismatch', node.id, `重复只接受列表、字节串和文本，收到${typeLabel(target)}`));
   }
@@ -423,11 +403,11 @@ function checkRepeat(
 }
 
 function checkConvert(
-  state: TypeState,
+  state: TypeChecker,
   node: Extract<CanvasNode, { kind: 'convert' }>,
   issues: CanvasIssue[],
 ): void {
-  const actual = inferType(state, node.input);
+  const actual = staticTypeIn(state, node.input);
   if (actual === 'dict') {
     issues.push(errorIssue('conversion_unsupported', node.id, '字典不参与类型转换：先把要用的值取出来再转换'));
     return;
@@ -444,16 +424,38 @@ function checkConvert(
   );
 }
 
+/** 变量的初值/派生绑定：表达式静态类型必须等于声明类型（需求 §3.1「固定类型」）。 */
+function checkVarDecl(
+  state: TypeChecker,
+  node: Extract<CanvasNode, { kind: 'var-decl' }>,
+  issues: CanvasIssue[],
+): void {
+  if (node.binding.mode === 'none') return;
+  expectType(state, node, issues, node.binding.input, node.type, `变量「${node.name}」的值`);
+}
+
+/** 流程赋值：目标变量的类型固定，右值必须对得上；派生变量只读由变量层报。 */
+function checkAssign(
+  state: TypeChecker,
+  table: ReturnType<typeof variableTableOf>,
+  node: Extract<CanvasNode, { kind: 'assign' }>,
+  issues: CanvasIssue[],
+): void {
+  const decl = resolveVariable(table, node.target);
+  if (decl === undefined) return;
+  expectType(state, node, issues, node.value, decl.type, `赋值给「${decl.name}」`);
+}
+
 /** 检查某个输入引用的静态类型；`undefined`/`any` 一律放过（留给求值阶段）。 */
 function expectType(
-  state: TypeState,
+  state: TypeChecker,
   node: CanvasNode,
   issues: CanvasIssue[],
   inputId: string,
   expected: ValueKind,
   label: string,
 ): void {
-  const actual = inferType(state, inputId);
+  const actual = staticTypeIn(state, inputId);
   if (actual === undefined || actual === 'any' || actual === expected) return;
   issues.push(
     errorIssue('type_mismatch', node.id, `${label}需要${typeLabel(expected)}，收到${typeLabel(actual)}`),
