@@ -7,6 +7,7 @@ import {
   type VariableBinding,
 } from '../src/canvas/document';
 import { generateCanvasActions } from '../src/canvas/actions';
+import { SubmitRequestSchema } from '../src/api';
 import { canvasMethodsOf, type CanvasMethodDecl } from '../src/canvas/methods';
 import { pendingValueNodes, previewCanvasDocument } from '../src/canvas/preview';
 import { validateCanvasDocument } from '../src/canvas/validate';
@@ -350,6 +351,22 @@ describe('循环：次数、索引与嵌套（AT-08、AT-09）', () => {
     expect(result.issues.some((issue) => issue.message.includes('超过单次上限'))).toBe(true);
   });
 
+  it('步骤快照超过上限整体失败，不静默丢一半', () => {
+    const assigns = Array.from({ length: 9 }, (_unused, index) => `set-${index}`);
+    const nodes = [
+      start(),
+      decl('a', 'a', 'int', { mode: 'initial', input: 'one' }),
+      intLit('one', 1),
+      intLit('many', 256),
+      loop('loop1', 'many', assigns),
+      ...assigns.map((id) => assign(id, 'a', 'one')),
+    ];
+    const result = generateCanvasActions(docOf(nodes, ['start', 'loop1']), { methods: [EMIT] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((issue) => issue.message.includes('步骤数超过上限'))).toBe(true);
+  });
+
   it('嵌套循环里可以显式读外层索引', () => {
     const document = docOf(
       [
@@ -547,5 +564,50 @@ describe('方法目录（需求 §5.4）', () => {
     expect(methods).toEqual([
       { id: 'gets', label: 'gets(buf)', params: [{ name: 'data', type: 'bytes' }], actionCount: 1 },
     ]);
+  });
+
+  it('生成的动作用服务端同一个展开器能展开（提交前口径一致）', () => {
+    const document = docOf(
+      [
+        start(),
+        textLit('text', 'A'),
+        { kind: 'convert', id: 'bytes', spec: { kind: 'text-to-bytes', encoding: 'utf-8' }, input: 'text' },
+        { kind: 'method', id: 'send', block: 'gets', args: { data: 'bytes' } },
+      ],
+      ['start', 'send'],
+    );
+    const result = generateCanvasActions(document, {
+      challenge: {
+        authorBlocks: [
+          {
+            id: 'gets',
+            label: 'gets(buf)',
+            params: [{ name: 'data', type: 'bytes' }],
+            expand: [{ type: 'write_bytes', addr: '0x7fffff00', hex: '$data' }],
+          },
+        ],
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.sequence.actions).toEqual([
+      { type: 'block', id: 'gets', args: { data: '41' } },
+    ]);
+  });
+
+  it('生成的动作能通过提交请求的 Schema 校验', () => {
+    const document = docOf(
+      [
+        start(),
+        intLit('one', 1),
+        call('emit', { v: 'one' }),
+      ],
+      ['start', 'emit'],
+    );
+    const result = generateCanvasActions(document, { methods: [EMIT] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = SubmitRequestSchema.safeParse({ actions: result.sequence.actions });
+    expect(parsed.success).toBe(true);
   });
 });

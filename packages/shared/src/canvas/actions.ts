@@ -252,6 +252,7 @@ function runAssign(state: ExecutionState, node: AssignNode): void {
 
   state.values.set(decl.id, evaluated.value);
   state.epoch += 1;
+  if (!reserveStep(state, node.id)) return;
   recordStep(state, node.id, 'assign', null, [{ name: decl.name, value: evaluated.value }]);
 }
 
@@ -344,9 +345,21 @@ function runMethod(state: ExecutionState, node: MethodNode): void {
     failAt(state, node.id, `动作数超过上限 ${state.maxActions}，把流程拆小一些`);
     return;
   }
+  if (!reserveStep(state, node.id)) return;
 
   state.actions.push(action);
   recordStep(state, node.id, 'action', state.actions.length - 1, inputs);
+}
+
+/**
+ * 步骤快照也有预算：超了整体失败，不静默丢一半快照。
+ *
+ * 动作数与步骤数是两条独立预算（赋值不产生动作但产生步骤），所以两边各查一次。
+ */
+function reserveStep(state: ExecutionState, nodeId: string): boolean {
+  if (state.steps.length < CANVAS_MAX_STEP_SNAPSHOTS) return true;
+  failAt(state, nodeId, `步骤数超过上限 ${CANVAS_MAX_STEP_SNAPSHOTS}，把流程拆小一些`);
+  return false;
 }
 
 /** 本地先跑一次服务端的展开器：参数形式对、但模板展开必被拒的图在生成期就报出来。 */
