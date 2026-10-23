@@ -1,25 +1,20 @@
-import type { PublicChallenge } from '@pwn2block/shared';
-import { compileProgram } from './compile';
 import { ACTION_ORIGIN_VERSION } from './types';
-import type {
-  ActionOrigin,
-  CompiledAction,
-  CompileError,
-  CompilerLimits,
-  NormalizedWorkspace,
-} from './types';
+import type { ActionOrigin, CompiledAction, CompileError } from './types';
 
 /**
  * 编译产物与「编辑后过期」状态（05 §3、09 §3.2）。控制器、工具栏门禁与输出区都直接消费它。
  *
- * 为什么单独一个模块：三条规则——「记住编译产物」「改了积木就标已过期」
+ * 为什么单独一个模块：三条规则——「记住编译产物」「改了画布就标已过期」
  * 「过期产物不许运行或提交」——是同一个状态机的三面。放在这里，界面只读 `state`，
  * 不必自己维护 revision / stale / errors 的耦合关系，也不会出现「清了错误但忘了标过期」。
  *
- * 纯逻辑：不碰 DOM、不看时间，可以脱离 Blockly 在 node 里直接单测。
+ * 产物不再由这里编译：新画布编出 `WorkflowArtifact` 后经 `adopt()` 交进来
+ * （旧画布的 `compile(program, challenge)` 随 `compiler/compile.ts` 一起删掉了）。
+ *
+ * 纯逻辑：不碰 DOM、不看时间，可以脱离画布在 node 里直接单测。
  */
 
-/** 一次成功编译的产物：动作 + 动作到积木的来源表（09 §3.4）。 */
+/** 一次成功编译的产物：动作 + 动作到节点的来源表（09 §3.4）。 */
 export interface PayloadArtifact {
   readonly actions: readonly CompiledAction[];
   /** 与 `actions` 等长同序；`origins[i].index === i`。**不进网络 payload**。 */
@@ -43,13 +38,8 @@ export interface PayloadCompileState {
 export interface ArtifactTracker {
   readonly state: PayloadCompileState;
   /**
-   * 编译并记录结果。成功时替换产物、`revision + 1`、`stale = false`；
-   * 失败时**清空产物**、保留错误列表、`stale = false`（错误本身就是最新结果）。
-   */
-  compile(program: NormalizedWorkspace, challenge: PublicChallenge): PayloadArtifact | undefined;
-  /**
-   * 采用别处编译好的产物（画布路径）。动作与来源必须已对齐；成功时与 `compile` 一样
-   * 替换产物、`revision + 1`、`stale = false`。来源的 `blockId` 在画布路径里是节点 id。
+   * 采用别处编译好的产物（画布路径）。动作与来源必须已对齐；成功时替换产物、
+   * `revision + 1`、`stale = false`。来源的 `blockId` 在画布路径里是节点 id。
    */
   adopt(actions: readonly CompiledAction[], origins: readonly ActionOrigin[]): PayloadArtifact;
   /** 记录一次失败的编译：清空产物、保留错误，运行/提交门禁据此拦住。 */
@@ -63,7 +53,7 @@ export interface ArtifactTracker {
   clear(): void;
 }
 
-/** 检查「来源表与动作对齐」这条不变式：错位说明编译器有 bug，宁可显式报错也不静默定位错积木。 */
+/** 检查「来源表与动作对齐」这条不变式：错位说明编译器有 bug，宁可显式报错也不静默定位错节点。 */
 function assertOriginsAligned(
   actions: readonly CompiledAction[],
   origins: readonly ActionOrigin[],
@@ -78,34 +68,12 @@ function assertOriginsAligned(
   }
 }
 
-export function createArtifactTracker(limits?: Partial<CompilerLimits>): ArtifactTracker {
+export function createArtifactTracker(): ArtifactTracker {
   let state: PayloadCompileState = { artifact: undefined, errors: [], stale: false, revision: 0 };
 
   return {
     get state(): PayloadCompileState {
       return state;
-    },
-
-    compile(program: NormalizedWorkspace, challenge: PublicChallenge): PayloadArtifact | undefined {
-      const result = compileProgram(
-        { program, challenge },
-        limits === undefined ? undefined : { limits },
-      );
-      if (!result.ok) {
-        state = { artifact: undefined, errors: result.errors, stale: false, revision: state.revision };
-        return undefined;
-      }
-
-      assertOriginsAligned(result.actions, result.origins);
-      const revision = state.revision + 1;
-      const artifact: PayloadArtifact = {
-        actions: result.actions,
-        origins: result.origins,
-        originsVersion: result.originsVersion,
-        revision,
-      };
-      state = { artifact, errors: [], stale: false, revision };
-      return artifact;
     },
 
     fail(errors: readonly CompileError[]): void {

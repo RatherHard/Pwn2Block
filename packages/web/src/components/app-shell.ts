@@ -32,13 +32,11 @@ import { parseRoute, routeOfState, routePath, sameRoute, type Route } from '../v
 import {
   preSessionStatusBar,
   statusBar,
-  statusMarker,
   terminalReasonOf,
   type PageMode,
   type StatusBarInput,
 } from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
-import { outputEntries } from '../viewmodel/output';
 import { payloadControls, runMenuModel, type RunMenuInput } from '../viewmodel/toolbar';
 import {
   availableViews as availableViewsOf,
@@ -46,6 +44,7 @@ import {
   type ViewKind,
 } from '../viewmodel/views';
 import { sharedStyles, terminalTheme } from '../theme';
+import { renderNotice, renderOutput, renderVerdict, type NoticeHandlers, type VerdictHandlers } from './app-shell-render';
 import './briefing-panel';
 import './canvas-panel';
 import './output-view';
@@ -411,8 +410,23 @@ export class Pwn2BlockApp extends LitElement {
               .failures=${state.page?.projection.failures ?? 0}
             ></pwn2block-briefing-panel>
           </div>`}
-      ${this.renderNotice(state)} ${mode === 'verdict' ? this.renderVerdict(state) : ''} ${this.renderBody(state)}
+      ${renderNotice(state, this.noticeHandlers())}
+      ${mode === 'verdict' ? renderVerdict(state, this.verdictHandlers()) : ''} ${this.renderBody(state)}
     `;
+  }
+
+  /** 提示条的两个出口（拆到 `app-shell-render.ts` 之后，外壳只负责把回调接到控制器）。 */
+  private noticeHandlers(): NoticeHandlers {
+    return { restart: () => this.controller?.restart(), retry: () => this.controller?.retry() };
+  }
+
+  /** 判题结果面板的三类事件：回调试、选录像帧、点某一步定位节点。 */
+  private verdictHandlers(): VerdictHandlers {
+    return {
+      backToDebug: () => this.onBackToDebug(),
+      position: (position: number) => this.onPosition(position),
+      blockSelect: (blockId: string) => this.onBlockSelect(blockId),
+    };
   }
 
   private renderBody(state: ControllerState) {
@@ -474,13 +488,13 @@ export class Pwn2BlockApp extends LitElement {
           ${this.renderLegacyBar()} ${this.renderAbortBar(state)} ${this.renderCanvasPanel(challenge)}
         </section>
       </main>
-      ${this.renderOutput(state)}
+      ${renderOutput(state, (blockId: string) => this.onBlockSelect(blockId))}
       <p class="status" role="status" aria-live="polite">${statusText}</p>
     `;
   }
 
   /**
-   * payload 窗口的正文：新版画布面板。外壳只接它的事件（契约见 `canvas-panel.ts`）：
+   * payload 窗口的正文：画布面板。外壳只接它的事件（契约见 `canvas-panel.ts`）：
    * 改动 → 产物过期；编译成功 → 采用产物；编译失败 → 输出区错误；运行 → 走运行路径。
    */
   private renderCanvasPanel(challenge: PublicChallenge) {
@@ -497,7 +511,7 @@ export class Pwn2BlockApp extends LitElement {
 
   /**
    * 终止按钮：控制器把「能否中断 / 为什么不能」算在 `payloadControls` 里，外壳只渲染与派发。
-   * 旧画布把它放在画布顶栏，新面板只有「运行」，所以中断入口放在这里，避免能力悄悄消失。
+   * 画布面板只有「运行」，所以中断入口放在外壳这里，避免能力悄悄消失。
    */
   private renderAbortBar(state: ControllerState) {
     const abort = payloadControls({ ...this.menuInputOf(state), running: state.running }).abort;
@@ -527,34 +541,6 @@ export class Pwn2BlockApp extends LitElement {
       .challengeId=${this.state?.challenge?.id}
       .alert=${this.legacyAlert}
     ></pwn2block-legacy-archive-bar>`;
-  }
-
-  /**
-   * 输出区（05 §6）：挂在页面壳里，位于工作区下方、横跨整行（§5.1）。数据来自
-   * `outputEntries`（纯函数）。判题结果模式下顶部加一行说明：下面列的是调试实例的历史结果。
-   */
-  private renderOutput(state: ControllerState) {
-    const { artifact, errors, stale } = state.artifact;
-    const mode = state.page?.mode ?? 'debug';
-    return html`
-      <section class="output box" aria-label="输出区">
-        <h2 class="box-title">输出</h2>
-        ${mode === 'verdict'
-          ? html`<p class="mode-hint">下面是调试实例的历史结果；这一轮判题的结论见上方横幅。</p>`
-          : ''}
-        <pwn2block-output-view
-          .entries=${outputEntries({
-            artifact,
-            errors,
-            stale,
-            results: state.results,
-            cursor: state.cursor,
-            ...(state.page === undefined ? {} : { projection: state.page.projection }),
-          })}
-          @p2b-block-select=${this.onBlockSelect}
-        ></pwn2block-output-view>
-      </section>
-    `;
   }
 
   /**
@@ -618,38 +604,6 @@ export class Pwn2BlockApp extends LitElement {
       <h2>暂时开不了新会话</h2>
       <p class="lead">${state.notice?.text ?? '请点「重试」或「重新开始」。'}</p>
     </section>`;
-  }
-
-  private renderNotice(state: ControllerState) {
-    const notice = state.notice;
-    if (notice === undefined) return '';
-    return html`
-      <p
-        class="notice ${notice.tone}"
-        role=${notice.tone === 'error' ? 'alert' : 'status'}
-        aria-live=${notice.tone === 'error' ? 'assertive' : 'polite'}
-      >
-        <span aria-hidden="true">${statusMarker(notice.tone)}</span>
-        <span>${notice.text}</span>
-        ${notice.action === 'restart'
-          ? html`<button type="button" @click=${() => this.controller?.restart()}>重新开始</button>`
-          : ''}
-        ${notice.action === 'retry'
-          ? html`<button type="button" @click=${() => this.controller?.retry()}>重试</button>`
-          : ''}
-      </p>
-    `;
-  }
-
-  private renderVerdict(state: ControllerState) {
-    return html`
-      <pwn2block-verdict-panel
-        .state=${state}
-        @p2b-back-to-debug=${this.onBackToDebug}
-        @p2b-position=${this.onPosition}
-        @p2b-block-select=${this.onBlockSelect}
-      ></pwn2block-verdict-panel>
-    `;
   }
 
   /** 视图数据源（05 §1）：与控制器计算可用标签共用 `displayedView`，见 viewmodel/replay.ts。 */
@@ -739,7 +693,7 @@ export class Pwn2BlockApp extends LitElement {
     this.controller?.run(event.detail);
   };
 
-  /** 画布编译成功：产物与来源交给控制器（与旧 `p2b-graph-compiled` 同一入口）。 */
+  /** 画布编译成功：产物与来源交给控制器（`p2b-canvas-compiled`）。 */
   private onCanvasCompiled = (event: CanvasArtifactDetail): void => {
     this.publishArtifact(event.detail.artifact);
   };
@@ -764,16 +718,17 @@ export class Pwn2BlockApp extends LitElement {
     this.controller?.publish(artifact.actions, originsOf(artifact));
   }
 
-  private onBlockSelect = (event: CustomEvent<{ readonly blockId: string }>): void => {
-    this.canvasPanel()?.locate(event.detail.blockId);
+  /** 输出区 / 判题面板里点了某一步：滚到那个节点并高亮。 */
+  private onBlockSelect = (blockId: string): void => {
+    this.canvasPanel()?.locate(blockId);
   };
 
   private onBackToDebug = (): void => {
     this.controller?.backToDebug();
   };
 
-  private onPosition = (event: CustomEvent<{ readonly position: number }>): void => {
-    this.controller?.selectPosition(event.detail.position);
+  private onPosition = (position: number): void => {
+    this.controller?.selectPosition(position);
   };
 
   private onModeChange = (event: CustomEvent<{ mode: PageMode }>): void => {

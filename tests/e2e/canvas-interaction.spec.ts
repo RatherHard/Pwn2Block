@@ -1,569 +1,194 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import {
+  addToolNode,
+  dragBy,
+  dragBetween,
+  inspectorOf,
+  nodeIdOf,
+  openChallenge,
+  panelOf,
+  portOf,
+  readDocument,
+  selectNode,
+  stageOf,
+  toolboxOf,
+  type CanvasDocumentJson,
+} from './helpers';
 
 /**
- * 节点画布交互回归（10 §3–§5 的浏览器侧证据）：
+ * 新版画布的交互回归（《节点画布大型修改》§6.1–§6.3；《改版计划》阶段三）。
  *
- * - 节点库：两级目录、搜索、预览、拖入画布落点；
- * - 拖动节点：位置跟着指针走、不跳变、拖拽期间不选中文字；
- * - 双模式接线：点击—点击与拖拽都能连上，折线是正交路径且带箭头；
- * - 选中连线后 Delete 删除、Ctrl+Z 撤销；双击断线也能撤销；
- * - 空画布刷新后仍是空的，缺「开始」只提示、不自动补节点。
+ * 覆盖的是「编辑一张图」的六条基本动作：
+ * 1. 工具箱按目录分组，点一项就在空位加一个节点；
+ * 2. 点选节点 → 检查器显示它的 id，侧栏改名同步到画布行，撤销恢复原值；
+ * 3. 双击「值」行就地编辑：Enter 提交、Esc 取消；
+ * 4. 拖动节点只改坐标、不改结构，Ctrl+Z 撤回；
+ * 5. 从输入端口拉线接到别的节点上，Delete 删节点也能撤销；
+ * 6. 空白处拖出选框，命中范围内的节点一起选中。
  *
- * 断言尽量读面板自己的文档（`currentDocument()`），只对「看起来怎样」用 DOM/SVG 断言。
+ * 旧画布独有的交互（Blockly 节点库两级目录与搜索、拖入落点、缩放与适应窗口、
+ * 点击—点击双模式接线、连线命中与端点改接）已随旧画布删除，这里不再保留用例。
+ * 断言读数一律走面板公开的 `document`（见 `helpers.ts`），只有「看起来怎样」才查 DOM。
  */
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要 PWN2BLOCK_E2E=1 和已启动的真实后端');
 
-type Doc = {
-  nodes: { id: string; kind: string; params: Record<string, unknown> }[];
-  connections: { from: { node: string; port: string }; to: { node: string; port: string } }[];
-  layout: Record<string, { x: number; y: number }>;
-};
-
-async function openChallenge(page: Page): Promise<void> {
-  await page.goto('/');
-  const picker = page.getByRole('region', { name: '选择题目' });
-  if (await picker.isVisible()) await picker.getByRole('button').first().click();
-  await expect(page.locator('pwn2block-graph-panel')).toBeVisible();
+/** 面板顶栏的修订号：每次文档变化 +1，用来确认编辑真的落进了文档。 */
+function revisionOf(page: Page) {
+  return panelOf(page).locator('.status-revision');
 }
 
-async function readDoc(page: Page): Promise<Doc> {
-  return page.locator('pwn2block-graph-panel').evaluate((element) =>
-    (element as unknown as { currentDocument(): Doc }).currentDocument(),
-  );
+/** 读出「修订 N」里的 N；读不出来就报错，不拿默认值糊弄断言。 */
+async function revisionValue(page: Page): Promise<number> {
+  const text = await revisionOf(page).innerText();
+  const value = Number(text.replace(/\D+/g, ''));
+  if (!Number.isFinite(value)) throw new Error(`读不出修订号：${text}`);
+  return value;
 }
 
-async function nodeIdOf(page: Page, kind: string): Promise<string> {
-  const document = await readDoc(page);
-  const node = document.nodes.find((candidate) => candidate.kind === kind);
-  if (node === undefined) throw new Error(`画布上没有 ${kind} 节点`);
-  return node.id;
+function nameOf(document: CanvasDocumentJson, id: string): string | undefined {
+  return document.nodes.find((node) => node.id === id)?.name;
 }
 
-async function addNode(page: Page, label: string): Promise<void> {
-  const library = page.locator('pwn2block-graph-panel').getByRole('complementary', { name: '节点库' });
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill(label);
-  await library.getByRole('button', { name: label, exact: true }).click();
+function valueOf(document: CanvasDocumentJson, id: string): unknown {
+  return document.nodes.find((node) => node.id === id)?.value?.['value'];
 }
 
-/** 选中节点并把它挪进视野，返回画布上的节点元素。 */
-async function focusNode(page: Page, id: string): Promise<Locator> {
-  await page
-    .locator('pwn2block-graph-panel')
-    .evaluate((element, nodeId) => (element as unknown as { locate(request: { nodeId: string }): void }).locate({ nodeId }), id);
-  const node = page.locator(`pwn2block-graph-canvas .node[data-node="${id}"]`);
-  await expect(node).toBeVisible();
-  return node;
+function argsOf(document: CanvasDocumentJson, id: string): Readonly<Record<string, string>> | undefined {
+  return document.nodes.find((node) => node.id === id)?.args;
 }
 
-async function setAuthorBlock(page: Page, id: string, block: string): Promise<void> {
-  const inspector = page.locator('pwn2block-graph-panel aside.inspector');
-  const input = inspector.locator(`input#${id}-id`);
-  await input.fill(block);
-  await input.press('Tab');
-  await expect(inspector.locator(`input#${id}-data`)).toBeVisible();
-}
-
-/**
- * 取稳定后的包围盒：面板定位会触发一次视图更新，立刻读到的坐标可能还是旧的。
- * 连续两次读数一致才认为视图已经停稳。
- */
-async function stableBox(page: Page, locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
-  let previous = await locator.boundingBox();
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    await page.waitForTimeout(40);
-    const next = await locator.boundingBox();
-    if (previous !== null && next !== null && previous.x === next.x && previous.y === next.y) return next;
-    previous = next;
-  }
-  if (previous === null) throw new Error('元素没有包围盒');
-  return previous;
-}
-
-/**
- * 端口中心的屏幕坐标：先量包围盒，再用 `elementFromPoint`（穿透 shadow 根）确认那里
- * 真的是目标端口。面板刚重绘时坐标会短暂过期，所以要重试到指针确实落在端口上。
- *
- * E2E 的运行环境没有 DOM 类型（根 tsconfig 只开 ES2022），这里用结构化类型描述要用到的成员。
- */
-interface PointableElement {
-  closest(selector: string): PointableElement | null;
-  getAttribute(name: string): string | null;
-  readonly shadowRoot: { elementFromPoint(x: number, y: number): PointableElement | null } | null;
-}
-
-interface DocumentLike {
-  elementFromPoint(x: number, y: number): PointableElement | null;
-}
-
-async function portCenter(
-  page: Page,
-  canvas: Locator,
-  nodeId: string,
-  port: string,
-  kind: 'in' | 'out',
-): Promise<{ x: number; y: number }> {
-  const selector = `.port-hit.${kind}[data-node="${nodeId}"][data-port="${port}"]`;
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    const box = await canvas.locator(selector).boundingBox();
-    if (box !== null) {
-      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-      const hit = await canvas.evaluate((element, at) => {
-        const scope = element as unknown as { ownerDocument: DocumentLike };
-        let current: PointableElement | null = scope.ownerDocument.elementFromPoint(at.x, at.y);
-        while (current !== null) {
-          const found = current.closest('[data-port]');
-          if (found !== null) {
-            return { node: found.getAttribute('data-node') ?? '', port: found.getAttribute('data-port') ?? '' };
-          }
-          current = current.shadowRoot?.elementFromPoint(at.x, at.y) ?? null;
-        }
-        return undefined;
-      }, point);
-      if (hit?.node === nodeId && hit.port === port) return point;
-    }
-    await page.waitForTimeout(60);
-  }
-  throw new Error(`端口 ${nodeId}.${port} 不在指针可达的位置`);
-}
-
-interface PathLike {
-  getTotalLength(): number;
-  getPointAtLength(length: number): { x: number; y: number };
-  getScreenCTM(): { a: number; b: number; c: number; d: number; e: number; f: number } | null;
-}
-
-/**
- * 点在线段中间：连线是细 SVG 路径，用几何中点比按元素中心点更稳。
- * 直接点坐标可以避免 force 点击把事件派发到别的元素上。
- */
-async function clickEdge(page: Page, index: number, options?: { double?: boolean }): Promise<void> {
-  const point = await page.locator('pwn2block-graph-canvas').evaluate((canvas, wanted) => {
-    const host = canvas as unknown as { shadowRoot: { querySelectorAll(selector: string): unknown[] } | null };
-    const path = host.shadowRoot?.querySelectorAll('path.edge-hit')[wanted] as PathLike | undefined;
-    if (path === undefined) return undefined;
-    const local = path.getPointAtLength(path.getTotalLength() / 2);
-    const matrix = path.getScreenCTM();
-    if (matrix === null) return undefined;
-    return { x: local.x * matrix.a + local.y * matrix.c + matrix.e, y: local.x * matrix.b + local.y * matrix.d + matrix.f };
-  }, index);
-  if (point === undefined) throw new Error(`没有第 ${index + 1} 条连线`);
-  if (options?.double === true) await page.mouse.dblclick(point.x, point.y);
-  else await page.mouse.click(point.x, point.y);
-}
-
-test('侧栏修改属性同步到只读节点，撤销恢复原值（10 §2.2）', async ({ page }) => {
+test('工具箱按分类分组，点一项就在空位加一个节点（§6.2）', async ({ page }) => {
   await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const canvas = panel.getByRole('application', { name: '节点画布' });
-  const inspector = panel.locator('aside.inspector');
+  const toolbox = toolboxOf(page);
 
-  await addNode(page, '填充字节');
-  const original = Number((await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count);
-  await focusNode(page, 'fill');
+  // 七个分类、十八种节点：分类顺序就是目录顺序，同一分类不切开。
+  await expect(toolbox.locator('.toolbox-group')).toHaveCount(7);
+  await expect(toolbox.locator('.tool[data-kind]')).toHaveCount(18);
+  await expect(toolbox.locator('.toolbox-group[data-category="value"] .tool')).toHaveCount(1);
 
-  const node = canvas.locator('.node[data-node="fill"]');
-  await expect(node.locator('input, select, textarea, [contenteditable="true"], button')).toHaveCount(0);
-  const countValue = node.locator('[data-param-value="count"]');
-  await expect(countValue).toHaveText(String(original));
-  await inspector.locator('input#fill-count').fill('3');
-  await inspector.locator('input#fill-count').press('Tab');
-  await expect(countValue).toHaveText('3');
-  await expect.poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count).toBe(3);
-  await expect(inspector.locator('input#fill-count')).toHaveValue('3');
+  // 首屏只有「开始」节点：新画布不再要求用户先自己放一个。
+  expect((await readDocument(page)).nodes.map((node) => node.kind)).toEqual(['start']);
+  const initial = await revisionValue(page);
 
-  // 继续在侧栏修改，画布只读值同步更新。
-  await inspector.locator('input#fill-count').fill('5');
-  await inspector.locator('input#fill-count').press('Tab');
-  await expect
-    .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count)
-    .toBe(5);
-  await expect(countValue).toHaveText('5');
-
-  // 两次修改各一条撤销记录：撤两次回到原值，而不是把同步也算进去。
-  await canvas.press('Control+z');
-  await expect.poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count).toBe(3);
-  await canvas.press('Control+z');
-  await expect
-    .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.fill')?.params.count)
-    .toBe(original);
-  await expect(countValue).toHaveText(String(original));
+  await addToolNode(page, 'var-decl');
+  const document = await readDocument(page);
+  expect(document.nodes.map((node) => node.kind)).toEqual(['start', 'var-decl']);
+  await expect(panelOf(page).locator('.node-box[data-node]')).toHaveCount(2);
+  // 加一个节点是**一次**文档变化：修订号只 +1（载入时那一次另有一次）。
+  await expect(revisionOf(page)).toHaveText(`修订 ${String(initial + 1)}`);
 });
 
-test('节点库：两级目录、搜索过滤、常驻预览、拖入画布落点（10 §4）', async ({ page }) => {
+test('点选节点后检查器显示 id，侧栏改名同步到画布行，撤销恢复（§6.1）', async ({ page }) => {
   await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const library = panel.getByRole('complementary', { name: '节点库' });
-  const canvas = panel.getByRole('application', { name: '节点画布' });
+  await addToolNode(page, 'var-decl');
+  const id = await nodeIdOf(page, 'var-decl');
 
-  // 两级目录：分类 → 节点，不再进入子分类。
-  await expect(library.locator('button[data-category]')).toHaveCount(9);
-  await expect(library.locator('button[data-kind]')).toHaveCount(0);
+  await selectNode(page, id);
+  const inspector = inspectorOf(page);
+  await expect(inspector.locator('.inspector-id')).toHaveText(id);
 
-  // 搜索按名字过滤，并显示路径。
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill('填充');
-  await expect(library.getByRole('button', { name: '填充字节', exact: true })).toBeVisible();
-  await expect(library.getByRole('button', { name: '整数转字节', exact: true })).toHaveCount(0);
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill('');
+  const nameField = inspector.locator('.field-name');
+  await expect(nameField).toHaveValue('a');
+  await nameField.fill('count');
+  await nameField.press('Tab');
+  await expect.poll(async () => nameOf(await readDocument(page), id)).toBe('count');
+  await expect(panelOf(page).locator(`.node-box[data-node="${id}"]`)).toContainText('count');
 
-  await library.getByRole('button', { name: '字节与载荷', exact: true }).click();
-  await expect(library.locator('button[data-section]')).toHaveCount(0);
-  const fill = library.getByRole('button', { name: '填充字节', exact: true });
-  const back = library.getByRole('button', { name: '返回上一级', exact: true });
-  const backBox = await back.boundingBox();
-  const fillBox = await fill.boundingBox();
-  await expect(library.getByRole('heading', { name: '节点库', exact: true })).toHaveCount(0);
-  const searchBox = await library.getByRole('searchbox', { name: '搜索节点' }).boundingBox();
-  expect(Math.abs((backBox?.width ?? 0) - (fillBox?.width ?? 0))).toBeLessThanOrEqual(2);
-  expect(Math.abs((backBox?.x ?? 0) - (fillBox?.x ?? 0))).toBeLessThanOrEqual(2);
-  expect((backBox?.y ?? 0) + (backBox?.height ?? 0)).toBeLessThan(searchBox?.y ?? 0);
-  await fill.hover();
-  const colors = await fill.evaluate((element) => {
-    const view = element.ownerDocument.defaultView;
-    return {
-      background: view?.getComputedStyle(element).backgroundColor,
-      title: view?.getComputedStyle(element.querySelector('.node-title')!).color,
-      summary: view?.getComputedStyle(element.querySelector('.preview-summary')!).color,
-    };
-  });
-  expect(colors).toEqual({ background: 'rgb(255, 255, 255)', title: 'rgb(12, 12, 12)', summary: 'rgb(12, 12, 12)' });
+  // 一次改名 = 一条撤销记录：撤销回到目录默认名，画布行跟着回去。
+  await panelOf(page).locator('.btn-undo').click();
+  await expect.poll(async () => nameOf(await readDocument(page), id)).toBe('a');
+  await expect(panelOf(page).locator(`.node-box[data-node="${id}"]`)).not.toContainText('count');
+});
 
-  await expect(fill.locator('.static-node')).toBeVisible();
-  await page.mouse.move(0, 0);
-  await expect(fill.locator('.static-node')).toBeVisible();
-  // 搜索其他分类后，清空搜索仍回到原目录。
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill('data.int');
-  await expect(library.locator('button[data-kind="data.int"] .preview')).toBeVisible();
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill('');
-  await expect(fill).toBeVisible();
-  await library.getByRole('button', { name: '返回上一级', exact: true }).click();
-  await expect(library.getByRole('button', { name: '字节与载荷', exact: true })).toBeVisible();
-  await library.getByRole('button', { name: '字节与载荷', exact: true }).click();
-  await fill.scrollIntoViewIfNeeded();
+test('双击「值」行就地编辑：Enter 提交、Esc 取消（§6.1）', async ({ page }) => {
+  await openChallenge(page);
+  await addToolNode(page, 'value');
+  const id = await nodeIdOf(page, 'value');
+  const row = panelOf(page).locator(`.row.editable[data-node="${id}"]`).first();
+  const input = panelOf(page).locator('.row-input');
 
-  // 拖入画布：落点附近生成节点，且不落在画布外。
-  const entry = await library.getByRole('button', { name: '填充字节', exact: true }).boundingBox();
-  const area = await canvas.boundingBox();
-  if (entry === null || area === null) throw new Error('节点库条目或画布没有尺寸');
-  await page.mouse.move(entry.x + entry.width / 2, entry.y + entry.height / 2);
+  await row.dblclick();
+  await expect(input).toBeVisible();
+  await input.fill('7');
+  await input.press('Enter');
+  await expect.poll(async () => valueOf(await readDocument(page), id)).toBe('7');
+  await expect(input).toHaveCount(0);
+
+  // Esc 取消：输入框关掉，文档保持上一次提交的值。
+  await row.dblclick();
+  await expect(input).toBeVisible();
+  await input.fill('9');
+  await input.press('Escape');
+  await expect(input).toHaveCount(0);
+  expect(valueOf(await readDocument(page), id)).toBe('7');
+});
+
+test('拖动节点只改坐标，松手后写回文档，Ctrl+Z 撤回（§6.2）', async ({ page }) => {
+  await openChallenge(page);
+  await addToolNode(page, 'value');
+  const id = await nodeIdOf(page, 'value');
+  const before = (await readDocument(page)).layout[id];
+  if (before === undefined) throw new Error('新加的节点没有布局');
+
+  await dragBy(page, panelOf(page).locator(`.node-box[data-node="${id}"] .title`), 64, 32);
+
+  // 松手时坐标吸附到 8px 网格，所以允许一格误差；结构（节点与主序列）不变。
+  await expect
+    .poll(async () => {
+      const after = (await readDocument(page)).layout[id];
+      return after === undefined ? Number.NaN : after.x - before.x;
+    })
+    .toBeGreaterThan(56);
+  const moved = await readDocument(page);
+  expect(Math.abs((moved.layout[id]?.x ?? 0) - before.x - 64)).toBeLessThanOrEqual(8);
+  expect(Math.abs((moved.layout[id]?.y ?? 0) - before.y - 32)).toBeLessThanOrEqual(8);
+  expect(moved.nodes.map((node) => node.kind)).toEqual(['start', 'value']);
+
+  await panelOf(page).locator('.btn-undo').click();
+  await expect.poll(async () => (await readDocument(page)).layout[id]?.x).toBe(before.x);
+});
+
+test('从输入端口拉线接到别的节点，Delete 删节点可撤销（§6.3）', async ({ page }) => {
+  await openChallenge(page);
+  await addToolNode(page, 'method');
+  const methodId = await nodeIdOf(page, 'method');
+  await addToolNode(page, 'value');
+  const valueId = await nodeIdOf(page, 'value');
+
+  // 方法节点先选题目声明的方法，才会长出该方法的参数端口。
+  await selectNode(page, methodId);
+  await inspectorOf(page).locator('.field-block').selectOption('gets');
+  const port = portOf(page, methodId, 'data');
+  await expect(port).toHaveClass(/\bhollow\b/);
+
+  // 新版画布只有输入端口：接线 = 把端口拖到提供值的节点身上。
+  await dragBetween(page, port, panelOf(page).locator(`.node-box[data-node="${valueId}"]`));
+  await expect.poll(async () => argsOf(await readDocument(page), methodId)?.['data']).toBe(valueId);
+  await expect(portOf(page, methodId, 'data')).toHaveClass(/\bconnected\b/);
+
+  // Delete 删掉选中的方法节点；撤销把它连同那条接线一起装回来。
+  await selectNode(page, methodId);
+  await panelOf(page).press('Delete');
+  await expect.poll(async () => (await readDocument(page)).nodes.map((node) => node.kind)).toEqual(['start', 'value']);
+  await panelOf(page).locator('.btn-undo').click();
+  await expect.poll(async () => argsOf(await readDocument(page), methodId)?.['data']).toBe(valueId);
+});
+
+test('空白处拖出选框，框到的节点一起选中（§6.2）', async ({ page }) => {
+  await openChallenge(page);
+  await addToolNode(page, 'value');
+  const id = await nodeIdOf(page, 'value');
+  const node = panelOf(page).locator(`.node-box[data-node="${id}"]`);
+  const nodeBox = await node.boundingBox();
+  const stageBox = await stageOf(page).boundingBox();
+  if (nodeBox === null || stageBox === null) throw new Error('节点或画布没有实际尺寸');
+
+  // 从画布右下角（空白处）往左上拖，选框覆盖到节点。
+  await page.mouse.move(stageBox.x + stageBox.width - 16, stageBox.y + stageBox.height - 16);
   await page.mouse.down();
-  const targetX = area.x + area.width * 0.55;
-  const targetY = area.y + area.height * 0.5;
-  await page.mouse.move(entry.x + entry.width / 2 + 20, entry.y + entry.height / 2 + 20, { steps: 4 });
-  await page.mouse.move(targetX, targetY, { steps: 8 });
+  await page.mouse.move(nodeBox.x + 4, nodeBox.y + 4, { steps: 6 });
+  await expect(panelOf(page).locator('.marquee')).toBeVisible();
   await page.mouse.up();
 
-  const created = (await readDoc(page)).layout.fill;
-  expect(created).toBeDefined();
-  // 视口默认 1 倍缩放：落点换算成图坐标后应与指针位置一致（允许图标偏移与取整）。
-  const worldX = await panel.evaluate((element, point) => {
-    const host = element as unknown as {
-      renderRoot: { querySelector(selector: string): unknown };
-    };
-    const canvasElement = host.renderRoot.querySelector('pwn2block-graph-canvas') as unknown as {
-      worldFromClient(x: number, y: number): { x: number; y: number };
-    };
-    return canvasElement.worldFromClient(point.x, point.y);
-  }, { x: targetX, y: targetY });
-  expect(Math.abs((created?.x ?? 0) - worldX.x)).toBeLessThan(40);
-  expect(Math.abs((created?.y ?? 0) - worldX.y)).toBeLessThan(40);
-});
-
-test('拖动节点：不同缩放下连续拖动时预览跟随指针，松手不跳变（10 §3.2）', async ({ page }) => {
-  await openChallenge(page);
-  const canvas = page.locator('pwn2block-graph-canvas');
-  await addNode(page, '填充字节');
-  for (const zoom of [0.65, 1, 1.5]) {
-    await canvas.evaluate((element, value) => (element as unknown as { setZoom(value: number): void }).setZoom(value), zoom);
-    const node = await focusNode(page, 'fill');
-    await node.scrollIntoViewIfNeeded();
-    for (let repeat = 0; repeat < 2; repeat += 1) {
-      const before = (await readDoc(page)).layout.fill;
-      if (before === undefined) throw new Error('节点没有布局');
-      const head = await stableBox(page, node.locator('.node-head'));
-      const startX = head.x + 28;
-      const startY = head.y + head.height / 2;
-      await page.mouse.move(startX, startY);
-      await page.mouse.down();
-      for (const [dx, dy] of [[0, 0], [20, 10], [40, 30], [70, 40]] as const) {
-        await page.mouse.move(startX + dx, startY + dy);
-        // 检查真实渲染位置，不能只检查松手后写回的文档坐标。
-        await expect.poll(async () => {
-          const current = await node.locator('.node-head').boundingBox();
-          if (current === null) return Infinity;
-          return Math.max(Math.abs(current.x - head.x - dx), Math.abs(current.y - head.y - dy));
-        }).toBeLessThanOrEqual(2);
-        expect((await readDoc(page)).layout.fill).toEqual(before);
-        expect(await page.evaluate<string>('getSelection()?.toString() ?? ""')).toBe('');
-      }
-      await page.mouse.up();
-      const after = (await readDoc(page)).layout.fill;
-      expect(Math.abs((after?.x ?? 0) - (before.x + 70 / zoom))).toBeLessThanOrEqual(2);
-      expect(Math.abs((after?.y ?? 0) - (before.y + 40 / zoom))).toBeLessThanOrEqual(2);
-      const released = await stableBox(page, node.locator('.node-head'));
-      expect(Math.abs(released.x - head.x - 70)).toBeLessThanOrEqual(2);
-      expect(Math.abs(released.y - head.y - 40)).toBeLessThanOrEqual(2);
-    }
-  }
-});
-
-test('画布标签不能被拖选，侧栏输入框仍能选择和编辑文字（10 §3.2）', async ({ page }) => {
-  await openChallenge(page);
-  const canvas = page.locator('pwn2block-graph-canvas');
-  await addNode(page, '填充字节');
-  await canvas.evaluate((element) => (element as unknown as { setZoom(value: number): void }).setZoom(1));
-  const node = await focusNode(page, 'fill');
-  await node.scrollIntoViewIfNeeded();
-  const before = (await readDoc(page)).layout.fill;
-  const label = await stableBox(page, node.locator('.row-label').first());
-  const startX = label.x + Math.min(28, label.width / 3);
-  const startY = label.y + label.height / 2;
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  for (let step = 1; step <= 4; step += 1) {
-    await page.mouse.move(startX + 20 * step, startY + 10 * step);
-    expect(await page.evaluate<string>('getSelection()?.toString() ?? ""')).toBe('');
-  }
-  await page.mouse.up();
-  expect((await readDoc(page)).layout.fill).toEqual(before);
-
-  const input = page.locator('pwn2block-graph-panel aside.inspector input').first();
-  await input.fill('42');
-  await input.press('ControlOrMeta+A');
-  expect(await input.evaluate((element) => {
-    const field = element as unknown as { selectionStart: number | null; selectionEnd: number | null };
-    return [field.selectionStart, field.selectionEnd];
-  })).toEqual([0, 2]);
-  await input.press('4');
-  await input.press('Tab');
-  await expect(input).toHaveValue('4');
-  expect((await readDoc(page)).layout.fill).toEqual(before);
-});
-
-test('双模式接线：点击—点击与拖拽都能连上，折线正交且带箭头（10 §3.3、§3.4）', async ({ page }) => {
-  await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const canvas = panel.getByRole('application', { name: '节点画布' });
-
-  await addNode(page, '开始');
-  await addNode(page, '十六进制字节');
-  await addNode(page, '题目专用动作');
-  const author = await nodeIdOf(page, 'action.author');
-  await focusNode(page, author);
-  await setAuthorBlock(page, author, 'gets');
-  const hexFirst = await nodeIdOf(page, 'data.hex');
-  await focusNode(page, hexFirst);
-  // 节点栏宽度随屏幕调整：先让两个端口同时位于画布内，再执行真实点击。
-  await canvas.evaluate((element) => (element as unknown as { fit(): void }).fit());
-
-  // ① 点击—点击：先点输出端口，再点兼容的输入端口。
-  await canvas.locator(`.port-hit.out[data-node="${hexFirst}"]`).click();
-  await expect(canvas.locator('.port-hit.in.compatible').first()).toBeVisible();
-  await canvas.locator(`.port-hit.in[data-node="${author}"][data-port="data"]`).click();
-  await expect
-    .poll(async () => (await readDoc(page)).connections.length)
-    .toBe(1);
-  const edge = (await readDoc(page)).connections[0];
-  expect(edge?.from.node).toBe(hexFirst);
-  expect(edge?.to).toMatchObject({ node: author, port: 'data' });
-
-  // 折线只有水平/垂直段（允许 M/L 命令），并且带箭头 marker。
-  const path = canvas.locator('path.edge-line').first();
-  const d = (await path.getAttribute('d')) ?? '';
-  expect(d).toMatch(/^M [\d.-]+ [\d.-]+/);
-  expect(d).not.toMatch(/[CQAST]/);
-  const points = [...d.matchAll(/([\d.-]+) ([\d.-]+)/g)].map((match) => ({
-    x: Number(match[1]),
-    y: Number(match[2]),
-  }));
-  expect(points.length).toBeGreaterThan(1);
-  for (let index = 1; index < points.length; index += 1) {
-    const from = points[index - 1];
-    const to = points[index];
-    if (from === undefined || to === undefined) continue;
-    expect(from.x === to.x || from.y === to.y).toBe(true);
-  }
-  expect(await path.getAttribute('marker-end')).toContain('arrow');
-
-  // ② 拖拽接线：第二个十六进制节点连到第二个题目动作的 data 端口。
-  await addNode(page, '十六进制字节');
-  await addNode(page, '题目专用动作');
-  const document = await readDoc(page);
-  const hexSecond = document.nodes.filter((node) => node.kind === 'data.hex')[1]?.id;
-  const authorSecond = document.nodes.filter((node) => node.kind === 'action.author')[1]?.id;
-  if (hexSecond === undefined || authorSecond === undefined) throw new Error('第二个节点没有建出来');
-  // 选中第二个动作节点，去属性面板选积木，让 data 输入端口出现；随后 fit 一屏放下所有节点。
-  await focusNode(page, authorSecond);
-  await setAuthorBlock(page, authorSecond, 'gets');
-  await canvas.evaluate((element) => (element as unknown as { fit(): void }).fit());
-  const from = await portCenter(page, canvas, hexSecond, 'out', 'out');
-  const to = await portCenter(page, canvas, authorSecond, 'data', 'in');
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(to.x, to.y, { steps: 10 });
-  await page.mouse.up();
-  await expect
-    .poll(async () => (await readDoc(page)).connections.length)
-    .toBe(2);
-});
-
-test('接到已占用的输入端口会替换原连接，撤销后恢复（10 §3.3）', async ({ page }) => {
-  await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const canvas = panel.getByRole('application', { name: '节点画布' });
-
-  await addNode(page, '十六进制字节');
-  await addNode(page, '十六进制字节');
-  await addNode(page, '题目专用动作');
-  const document = await readDoc(page);
-  const [first, second] = document.nodes.filter((node) => node.kind === 'data.hex').map((node) => node.id);
-  const author = document.nodes.find((node) => node.kind === 'action.author')?.id;
-  if (first === undefined || second === undefined || author === undefined) throw new Error('节点没有建全');
-  await focusNode(page, author);
-  await setAuthorBlock(page, author, 'gets');
-  // 画布在视图下方：先滚到画布，再 fit，保证两个端口都落在窗口内（elementFromPoint 才有结果）。
-  await canvas.scrollIntoViewIfNeeded();
-  await canvas.evaluate((element) => (element as unknown as { fit(): void }).fit());
-  await page.waitForTimeout(200);
-  // 先接第一根：点击端口两次（点击接线模式）。
-  const source = await portCenter(page, canvas, first, 'out', 'out');
-  const target = await portCenter(page, canvas, author, 'data', 'in');
-  await page.mouse.click(source.x, source.y);
-  await page.mouse.click(target.x, target.y);
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-
-  // 拖第二根到同一个输入端口：单输入端口只保留一根，新的替换旧的。
-  const replacement = await portCenter(page, canvas, second, 'out', 'out');
-  const again = await portCenter(page, canvas, author, 'data', 'in');
-  await page.mouse.move(replacement.x, replacement.y);
-  await page.mouse.down();
-  await page.mouse.move(again.x, again.y, { steps: 10 });
-  await page.mouse.up();
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-  await expect
-    .poll(async () => (await readDoc(page)).connections[0]?.from.node)
-    .toBe(second);
-
-  // 替换是一次可撤销操作：撤销后回到原来的连接。
-  await canvas.press('Control+z');
-  await expect
-    .poll(async () => (await readDoc(page)).connections[0]?.from.node)
-    .toBe(first);
-});
-
-test('拖动连线端点改接：接到另一个节点的输入端口，撤销后回到原位（10 §3.3）', async ({ page }) => {
-  await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const canvas = panel.getByRole('application', { name: '节点画布' });
-
-  await addNode(page, '十六进制字节');
-  await addNode(page, '题目专用动作');
-  await addNode(page, '题目专用动作');
-  await addNode(page, '题目专用动作');
-  const document = await readDoc(page);
-  const hex = document.nodes.find((node) => node.kind === 'data.hex')?.id;
-  const authors = document.nodes.filter((node) => node.kind === 'action.author').map((node) => node.id);
-  const [first, second] = authors;
-  if (hex === undefined || first === undefined || second === undefined) throw new Error('节点没有建全');
-  await focusNode(page, first);
-  await setAuthorBlock(page, first, 'gets');
-  await focusNode(page, second);
-  await setAuthorBlock(page, second, 'gets');
-
-  await canvas.scrollIntoViewIfNeeded();
-  await canvas.evaluate((element) => (element as unknown as { fit(): void }).fit());
-  await page.waitForTimeout(200);
-
-  // 先接上第一个动作节点。
-  const source = await portCenter(page, canvas, hex, 'out', 'out');
-  const firstData = await portCenter(page, canvas, first, 'data', 'in');
-  await page.mouse.click(source.x, source.y);
-  await page.mouse.click(firstData.x, firstData.y);
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-
-  // 拖动「输入端」把手到第二个动作节点的 data 端口：改接成功才替换。
-  // 把手只在连线被悬停或选中时可点，先点中这条线。
-  await clickEdge(page, 0);
-  await expect(canvas.locator('g.edge.selected')).toHaveCount(1);
-  const handle = canvas.locator('.edge-end[data-edge-end="to"]').first();
-  const from = await handle.boundingBox();
-  if (from === null) throw new Error('改成把手没有尺寸');
-  const secondData = await portCenter(page, canvas, second, 'data', 'in');
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(secondData.x, secondData.y, { steps: 10 });
-  await page.mouse.up();
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-  await expect
-    .poll(async () => (await readDoc(page)).connections[0]?.to.node)
-    .toBe(second);
-
-  await canvas.press('Control+z');
-  await expect
-    .poll(async () => (await readDoc(page)).connections[0]?.to.node)
-    .toBe(first);
-});
-
-test('选中连线后 Delete 删除、Ctrl+Z 撤销；双击断线也能撤销（10 §3.3）', async ({ page }) => {
-  await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const canvas = panel.getByRole('application', { name: '节点画布' });
-
-  await addNode(page, '十六进制字节');
-  await addNode(page, '题目专用动作');
-  const author = await nodeIdOf(page, 'action.author');
-  await focusNode(page, author);
-  await setAuthorBlock(page, author, 'gets');
-  const hex = await nodeIdOf(page, 'data.hex');
-  await focusNode(page, hex);
-  await canvas.locator(`.port-hit.out[data-node="${hex}"]`).click();
-  await canvas.locator(`.port-hit.in[data-node="${author}"][data-port="data"]`).click();
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-
-  // 点连线本体选中，再 Delete。
-  await clickEdge(page, 0);
-  await canvas.press('Delete');
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(0);
-  await canvas.press('Control+z');
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-
-  // 双击断线是快捷键，同样可撤销。
-  await clickEdge(page, 0, { double: true });
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(0);
-  await canvas.press('Control+z');
-  await expect.poll(async () => (await readDoc(page)).connections.length).toBe(1);
-});
-
-test('空存档刷新后仍是空的；缺「开始」只提示、不自动补节点（10 §5）', async ({ page }) => {
-  await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  await expect(panel.locator('.empty-hint')).toBeVisible();
-  expect((await readDoc(page)).nodes).toEqual([]);
-
-  // 刷新：空存档仍然是空的（不会偷偷塞一个开始节点）。
-  await page.reload();
-  await expect(panel).toBeVisible();
-  await expect(panel.locator('.empty-hint')).toBeVisible();
-  expect((await readDoc(page)).nodes).toEqual([]);
-
-  // 只放一个动作节点：编译失败于缺「开始」，节点列表原样保留。
-  await addNode(page, '题目专用动作');
-  await panel.getByRole('button', { name: '编译', exact: true }).click();
-  await expect(panel).toContainText('编译失败');
-  await expect(panel.locator('.issues')).toContainText('开始');
-  expect((await readDoc(page)).nodes.map((node) => node.kind)).toEqual(['action.author']);
-});
-
-
-test('交互动作按题目过滤，搜索也不能添加禁用动作', async ({ page }) => {
-  await openChallenge(page);
-  const library = page.getByRole('complementary', { name: '节点库' });
-  await library.getByRole('button', { name: '交互动作', exact: true }).click();
-  await expect(library.locator('.entry')).toHaveCount(3);
-  for (const kind of ['action.step', 'action.run', 'action.author']) {
-    await expect(library.locator(`[data-kind="${kind}"]`)).toBeVisible();
-  }
-  await library.getByRole('searchbox').fill('action.write');
-  await expect(library.locator('.entry')).toHaveCount(0);
-  await library.getByRole('searchbox').fill('action.push');
-  await expect(library.locator('.entry')).toHaveCount(0);
+  await expect(panelOf(page).locator(`.node-box.selected[data-node="${id}"]`)).toBeVisible();
 });

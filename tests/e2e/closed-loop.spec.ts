@@ -1,16 +1,38 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import {
+  addToolNode,
+  dragBetween,
+  inspectorOf,
+  nodeIdOf,
+  openChallenge,
+  panelOf,
+  portOf,
+  readDocument,
+  selectNode,
+  type CanvasDocumentJson,
+} from './helpers';
 
 /**
- * 节点画布闭环：真实浏览器 + 真实后端 + 生产构建，不 mock API。
+ * 新版画布的闭环：真实浏览器 + 真实后端 + 生产构建，不 mock API。
  *
- * 用界面本身构造 ret2win 的 payload：节点库里放「开始」「题目专用动作」「执行指令」，
- * 检查器里选 `gets(buf)`、填字节、把单步次数改成 3，然后编译、先提交一次错的
- * （验证来源定位把出错动作指回画布），再改对并提交拿到 flag。
+ * 这条用例走的是「建图 → 编译 → 判题 → 刷新恢复」整条链路：
+ * 1. 首屏是**只有一个开始节点**的新文档（新版画布不再要求用户先自己放一个开始节点）；
+ * 2. 从工具箱加方法节点、在检查器里选 `gets(buf)`、把整数值接到 `data` 端口：
+ *    接得上（目录按 ANY 放行），但编译期按题目声明判类型不符——错误进输出区，
+ *    点「定位积木」能选中出错的节点；
+ * 3. 用面板的 `setDocument()`（「导入存档」走的同一个入口）装进一份合法 payload，
+ *    编译成功、提交判题、拿到判题结论；
+ * 4. 刷新后新档把图装回来并重新编译一次。
+ *
+ * **已知缺口**（阶段三未完成，见 `docs/节点画布改版计划.md` §4）：画布只产出
+ * `{ type: 'block' }`，不产出 `step` / `run`，所以本题的判胜 payload 目前**无法**从界面构造出来；
+ * 同理界面也还没有「字面值种类切换」，字节串字面值只能靠导入存档得到。这就是第 3 步走
+ * `setDocument()` 而不是走点的原因——判胜与 flag 的断言等两个缺口补上以后再放回来。
  */
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要 PWN2BLOCK_E2E=1 和已启动的真实后端');
 
+/** 32 字节全 `41`：写满 buf + saved rbp + ret addr，返回地址会变成 0x4141414141414141。 */
 const PAYLOAD_WRONG = '41'.repeat(32);
-const PAYLOAD_WIN = '41'.repeat(16) + '42'.repeat(8) + '0200400000000000';
 
 async function capture(page: Page, info: TestInfo, name: string): Promise<void> {
   const path = info.outputPath(`${name}.png`);
@@ -32,137 +54,100 @@ async function runCommand(page: Page, name: string): Promise<void> {
   await menu.getByRole('button', { name, exact: true }).click();
 }
 
-/** 画布上的节点 id（读面板自己的文档，不猜 DOM 顺序）。 */
-async function nodeIdOf(page: Page, kind: string): Promise<string> {
-  const panel = page.locator('pwn2block-graph-panel');
-  const id = await panel.evaluate((element, wanted) => {
-    const document = (element as unknown as { currentDocument(): { nodes: { id: string; kind: string }[] } })
-      .currentDocument();
-    return document.nodes.find((node) => node.kind === wanted)?.id;
-  }, kind);
-  if (id === undefined) throw new Error(`画布上没有 ${kind} 节点`);
-  return id;
+/** 一份「开始 → gets(buf)」的合法文档：方法块的动作展开仍由服务端完成。 */
+function payloadDocument(hex: string) {
+  return {
+    format: 'pwn2block.canvas',
+    version: 2,
+    nodes: [
+      { id: 'start', kind: 'start' },
+      { id: 'call', kind: 'method', block: 'gets', args: { data: 'payload' } },
+      { id: 'payload', kind: 'value', value: { kind: 'byte', hex } },
+    ],
+    layout: { start: { x: 48, y: 48 }, call: { x: 48, y: 200 }, payload: { x: 320, y: 48 } },
+    main: ['start', 'call'],
+  };
 }
 
-async function selectNode(page: Page, kind: string): Promise<Locator> {
-  const id = await nodeIdOf(page, kind);
-  const node = page.locator(`pwn2block-graph-canvas .node[data-node="${id}"]`);
-  // 用面板自己的定位入口选中：它会展开容器并把视口移到节点，比按坐标点画布稳定。
-  await page
-    .locator('pwn2block-graph-panel')
-    .evaluate((element, nodeId) => (element as unknown as { locate(request: { nodeId: string }): void }).locate({ nodeId }), id);
-  await expect(page.locator('pwn2block-graph-panel aside.inspector')).toContainText(id);
-  return node;
+/** 通过面板公开的导入入口替换文档（重置历史、立即落盘、重新编译）。 */
+async function installDocument(page: Page, document: ReturnType<typeof payloadDocument>): Promise<void> {
+  await panelOf(page).evaluate((element, next) => {
+    if (!('setDocument' in element) || typeof element.setDocument !== 'function') {
+      throw new Error('画布面板没有 setDocument');
+    }
+    element.setDocument(next);
+  }, document);
 }
 
-async function addNode(page: Page, label: string): Promise<void> {
-  const library = page.locator('pwn2block-graph-panel').getByRole('complementary', { name: '节点库' });
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill(label);
-  await library.getByRole('button', { name: label, exact: true }).click();
+function kindsOf(document: CanvasDocumentJson): readonly string[] {
+  return document.nodes.map((node) => node.kind);
 }
 
-async function setAuthorData(page: Page, hex: string): Promise<void> {
-  const node = await selectNode(page, 'action.author');
-  const id = await node.getAttribute('data-node');
-  if (id === null) throw new Error('节点没有 id');
-  const inspector = page.locator('pwn2block-graph-panel aside.inspector');
-  const block = inspector.locator(`input#${id}-id`);
-  await block.fill('gets');
-  await block.press('Tab');
-  const input = inspector.locator(`input#${id}-data`);
-  await input.fill(hex);
-  await input.dispatchEvent('change');
-  const saved = await page.locator('pwn2block-graph-panel').evaluate((element, nodeId) => {
-    const document = (element as unknown as {
-      currentDocument(): { nodes: { id: string; params: Record<string, unknown> }[] };
-    }).currentDocument();
-    return document.nodes.find((candidate) => candidate.id === nodeId)?.params;
-  }, id);
-  expect(saved).toMatchObject({ data: hex });
-}
-
-test('画布闭环：构造 payload、错误定位、改对后提交判胜并在刷新后恢复', async ({ page }, info) => {
+test('画布闭环：建图、编译错误定位、判题结论与刷新恢复', async ({ page }, info) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
 
-  await page.goto('/');
-  const panel = page.locator('pwn2block-graph-panel');
-  const picker = page.getByRole('region', { name: '选择题目' });
-  if (await picker.isVisible()) await picker.getByRole('button').first().click();
-  await expect(panel).toBeVisible();
+  await openChallenge(page);
+  const panel = panelOf(page);
 
-  await test.step('首次进入是空画布：没有预置节点，只提示下一步（10 §5）', async () => {
-    await expect(panel.locator('.empty-hint')).toBeVisible();
-    const nodes = await panel.evaluate((element) =>
-      (element as unknown as { currentDocument(): { nodes: unknown[] } }).currentDocument().nodes.length,
-    );
-    expect(nodes).toBe(0);
+  await test.step('首屏是一份空文档：只有一个开始节点，没有任何错误', async () => {
+    expect(kindsOf(await readDocument(page))).toEqual(['start']);
+    await expect(panel.locator('.status-error')).toContainText('错误 0');
+    await expect(panel.locator('.status-unconnected')).toContainText('未接线 0 处');
     await capture(page, info, '01-empty-canvas');
   });
 
-  await test.step('从节点库依次放「开始」「题目专用动作」「执行指令」', async () => {
-    await addNode(page, '开始');
-    await addNode(page, '题目专用动作');
-    await addNode(page, '执行指令');
-    expect(await nodeIdOf(page, 'start')).toBe('start');
-    await setAuthorData(page, PAYLOAD_WRONG);
-
-    const stepId = await nodeIdOf(page, 'action.step');
-    await selectNode(page, 'action.step');
-    const count = page.locator(`pwn2block-graph-panel aside.inspector input#${stepId}-count`);
-    await count.fill('3');
-    await count.press('Tab');
-
-    await panel.getByRole('button', { name: '编译', exact: true }).click();
-    await expect(panel).toContainText('编译成功');
-    await expect(page.locator('pwn2block-app .status')).toContainText('动作 0/2');
+  await test.step('方法节点选 gets(buf) 后才长出参数端口，未接线只提示不报错', async () => {
+    await addToolNode(page, 'method');
+    const methodId = await nodeIdOf(page, 'method');
+    await selectNode(page, methodId);
+    await inspectorOf(page).locator('.field-block').selectOption('gets');
+    await expect(portOf(page, methodId, 'data')).toHaveClass(/\bhollow\b/);
+    await expect(panel.locator('.status-unconnected')).toContainText('未接线 1 处');
+    await expect(panel.locator('.status-error')).toContainText('错误 0');
   });
-  await capture(page, info, '02-compiled-graph');
 
-  await test.step('先提交错误 payload：判题被拒，画布高亮产生被拒动作的节点', async () => {
+  await test.step('整数值接到 bytes 参数上：编译期报类型不符，点「定位积木」高亮出错的节点', async () => {
+    await addToolNode(page, 'value');
+    const methodId = await nodeIdOf(page, 'method');
+    const valueId = await nodeIdOf(page, 'value');
+    await dragBetween(page, portOf(page, methodId, 'data'), panel.locator(`.node-box[data-node="${valueId}"]`));
+    await expect(portOf(page, methodId, 'data')).toHaveClass(/\bconnected\b/);
+    await expect(panel.locator('.status-error')).not.toContainText('错误 0');
+
+    const output = page.locator('pwn2block-app .output');
+    await expect(output).toContainText('需要字节串');
+    await output.getByRole('button', { name: '定位积木' }).first().click();
+    // 高亮只持续 1.2s（`CanvasHighlight`），所以这里等的是「出现过」而不是「一直在」。
+    await expect(panel.locator('.node-box.highlight')).toHaveCount(1);
+    await capture(page, info, '02-compile-failed');
+  });
+
+  await test.step('装入合法 payload：编译成功，动作数与状态栏一致', async () => {
+    await installDocument(page, payloadDocument(PAYLOAD_WRONG));
+    await expect(panel.locator('.status-error')).toContainText('错误 0');
+    await expect(panel.locator('.status-unconnected')).toContainText('未接线 0 处');
+    await expect(page.locator('pwn2block-app p.status')).toContainText('动作 0/1');
+    await capture(page, info, '03-compiled');
+  });
+
+  await test.step('提交判题：结论由服务端给出（本题还缺 step/run，只能跑到「没有达成目标」）', async () => {
     await runCommand(page, '提交判题');
     const verdict = page.locator('pwn2block-verdict-panel');
     await expect(verdict).toBeVisible();
-    await expect(verdict).toContainText('运行失败');
-    await expect(verdict).toContainText('第 2 个动作「step」');
-
-    await capture(page, info, '03-failed-verdict');
+    await expect(verdict).toContainText('payload 跑完了，但没有达成目标');
+    await capture(page, info, '04-verdict');
   });
 
-  await test.step('回到调试、改成正确地址再提交：判胜并下发 flag', async () => {
-    await page
-      .locator('pwn2block-verdict-panel')
-      .getByRole('button', { name: '回到调试', exact: true })
-      .click();
-    await expect(panel).toBeVisible();
-    await setAuthorData(page, PAYLOAD_WIN);
-    await panel.getByRole('button', { name: '编译', exact: true }).click();
-    await expect(panel).toContainText('编译成功');
-
-    await runCommand(page, '提交判题');
-    const verdict = page.locator('pwn2block-verdict-panel');
-    await expect(verdict).toContainText('通过');
-    await expect(verdict).toContainText('flag{e2e-graph}');
-    await capture(page, info, '04-won');
-  });
-
-  await test.step('刷新后新存档把图装回来并重新编译', async () => {
-    const before = await panel.evaluate((element) =>
-      (element as unknown as { currentDocument(): { nodes: { id: string; kind: string }[] } })
-        .currentDocument()
-        .nodes.map((node) => `${node.kind}:${node.id}`),
-    );
+  await test.step('刷新后新档把图装回来并重新编译一次', async () => {
+    const before = (await readDocument(page)).nodes.map((node) => `${node.kind}:${node.id}`);
     await page.reload();
     await expect(panel).toBeVisible();
-    await expect(panel).toContainText('编译成功');
-    const after = await panel.evaluate((element) =>
-      (element as unknown as { currentDocument(): { nodes: { id: string; kind: string }[] } })
-        .currentDocument()
-        .nodes.map((node) => `${node.kind}:${node.id}`),
-    );
+    await expect(page.locator('pwn2block-app p.status')).toContainText('动作 0/1');
+    const after = (await readDocument(page)).nodes.map((node) => `${node.kind}:${node.id}`);
     expect(after).toEqual(before);
     await capture(page, info, '05-restored');
   });

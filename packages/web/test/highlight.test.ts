@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_ORIGIN_VERSION, MESSAGE_NO_START_BLOCK } from '../src/compiler/types';
+import { ACTION_ORIGIN_VERSION } from '../src/compiler/types';
 import { blockIdForAction } from '../src/compiler/locate';
 import { debugOffset, highlightBlockId, rejectedRowFor } from '../src/viewmodel/highlight';
 import { makeArtifact } from './fake-api';
@@ -13,14 +13,17 @@ import { makeArtifact } from './fake-api';
 
 const ACTIONS = [{ type: 'ret' }, { type: 'push', value: '0x1' }] as const;
 
+/** 「没有具体位置」的编译错误：`blockId` 空串表示整张画布都有问题（05 §4 的唯一例外）。 */
+const NO_POSITION = { blockId: '', message: '画布上缺少开始节点' } as const;
+
 describe('编译错误的定位（05 §4）', () => {
   it('第一条错误没有位置时继续往后找，而不是直接放弃定位', () => {
-    // 「画布上没有开始积木」这条错误的 blockId 是空串：它没有具体位置可指。
+    // 这条错误的 blockId 是空串：它没有具体位置可指。
     const id = highlightBlockId({
       mode: 'debug',
       artifact: undefined,
       errors: [
-        { blockId: '', message: MESSAGE_NO_START_BLOCK },
+        NO_POSITION,
         { blockId: 'blk-later', message: '循环展开超过上限' },
       ],
       results: [],
@@ -34,7 +37,7 @@ describe('编译错误的定位（05 §4）', () => {
       highlightBlockId({
         mode: 'debug',
         artifact: undefined,
-        errors: [{ blockId: '', message: MESSAGE_NO_START_BLOCK }],
+        errors: [NO_POSITION],
         results: [],
         cursor: 0,
       }),

@@ -1,10 +1,11 @@
 /**
- * 本地保存（05 §3.1、09 §3.2）：**画布存档**与「刷新后接回会话」所需的会话记录。
+ * 本地保存（05 §3.1、09 §3.2）：**刷新后接回会话**所需的会话记录、上次的视图标签，
+ * 以及一条「存储到底能不能写」的探针。
  *
  * 三条硬约束：
- * 1. **存储位置与键名归 D**（`localStorage`，按题目 id 区分）；**序列化格式归 H**
- *    （`BlocklyBridge.save()`），这里只搬运不解释内容。
- * 2. 画布存档与会话记录分开存、分开读：05 §3.1 要求刷新后**先还原画布、再还原会话状态**。
+ * 1. 存储位置与键名归这里；**画布存档的键与格式归 `canvas/save.ts`**（新版画布自己读写），
+ *    这里不再搬运画布内容——旧画布的 `pwn2block.canvas.v1.<题目>` 键随旧画布一起删掉了。
+ * 2. 会话记录与画布存档分开存、分开读：05 §3.1 要求刷新后**先还原画布、再还原会话状态**。
  * 3. 丢失 / 损坏 / 被禁用 / 写不进去，都只是「便利消失」，绝不影响做题（同 `viewmodel/hints.ts`）。
  *
  * 会话记录里除了 `sessionId` 还带上 `cursor` / `results` / `actionsLength`：调试实例的**服务端**
@@ -36,12 +37,7 @@ export interface KeyValueStore {
   removeItem?(key: string): void;
 }
 
-/** 画布存档的键名（05 §3.1：按题目 id 区分）。 */
-export function canvasStorageKey(challengeId: string): string {
-  return `pwn2block.canvas.v${STORAGE_VERSION}.${challengeId}`;
-}
-
-/** 会话记录的键名（同上）。 */
+/** 会话记录的键名（05 §3.1：按题目 id 区分）。 */
 export function sessionStorageKey(challengeId: string): string {
   return `pwn2block.session.v${STORAGE_VERSION}.${challengeId}`;
 }
@@ -123,45 +119,6 @@ function remove(store: KeyValueStore | undefined, key: string): boolean {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * 读画布存档。`undefined` 表示「没有存档或存档不可用」——包含 JSON 坏掉、不是对象、
- * 以及空的 `{}`（`{}` 在 H 的桥上等价于清空画布，装回去只会把用户的程序抹掉，所以不认它）。
- */
-export function readCanvas(
-  store: KeyValueStore | undefined,
-  challengeId: string,
-): Record<string, unknown> | undefined {
-  const raw = read(store, canvasStorageKey(challengeId));
-  if (raw === undefined || raw === '') return undefined;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!isPlainObject(parsed) || Object.keys(parsed).length === 0) return undefined;
-    return parsed;
-  } catch {
-    return undefined;
-  }
-}
-
-/** 存画布存档；返回是否真的落盘（`false` 只表示本地保存不可用，调用方不该因此中断做题）。 */
-export function writeCanvas(
-  store: KeyValueStore | undefined,
-  challengeId: string,
-  state: Record<string, unknown>,
-): boolean {
-  let raw: string;
-  try {
-    raw = JSON.stringify(state);
-  } catch {
-    // 序列化出来的东西不可 stringify（循环引用等）：宁可什么都不存，也不存半个。
-    return false;
-  }
-  return write(store, canvasStorageKey(challengeId), raw);
-}
-
-export function clearCanvas(store: KeyValueStore | undefined, challengeId: string): boolean {
-  return remove(store, canvasStorageKey(challengeId));
 }
 
 function isActionResult(value: unknown): value is ActionResultView {

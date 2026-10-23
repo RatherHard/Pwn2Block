@@ -8,15 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   cachedStore,
-  canvasStorageKey,
-  clearCanvas,
   clearSession,
   defaultStore,
-  readCanvas,
   readSession,
   sessionStorageKey,
   STORAGE_VERSION,
-  writeCanvas,
   writeSession,
   type KeyValueStore,
   type StoredSession,
@@ -53,17 +49,14 @@ function validSession(): StoredSession {
 
 describe('本地保存：键名与版本（05 §3.1）', () => {
   it('键名按题目 id 与版本号区分', () => {
-    expect(canvasStorageKey('ret2win')).toBe(`pwn2block.canvas.v${STORAGE_VERSION}.ret2win`);
     expect(sessionStorageKey('ret2win')).toBe(`pwn2block.session.v${STORAGE_VERSION}.ret2win`);
-    expect(canvasStorageKey('a')).not.toBe(canvasStorageKey('b'));
+    expect(sessionStorageKey('a')).not.toBe(sessionStorageKey('b'));
   });
 
   it('没有存储（node / 隐私模式）时读写都安全退化', () => {
-    expect(readCanvas(undefined, 'ret2win')).toBeUndefined();
-    expect(writeCanvas(undefined, 'ret2win', { blocks: [] })).toBe(false);
     expect(readSession(undefined, 'ret2win')).toBeUndefined();
     expect(writeSession(undefined, 'ret2win', validSession())).toBe(false);
-    expect(clearCanvas(undefined, 'ret2win')).toBe(false);
+    expect(clearSession(undefined, 'ret2win')).toBe(false);
   });
 
   it('写入抛错（配额满）时返回 false，不抛出', () => {
@@ -73,41 +66,8 @@ describe('本地保存：键名与版本（05 §3.1）', () => {
         throw new Error('QuotaExceededError');
       },
     };
-    expect(writeCanvas(full, 'ret2win', { blocks: [] })).toBe(false);
     expect(writeSession(full, 'ret2win', validSession())).toBe(false);
-    expect(clearCanvas(full, 'ret2win')).toBe(false);
-  });
-});
-
-describe('本地保存：画布存档（09 §3.2）', () => {
-  it('存进去什么就读回来什么，且不解释内容', () => {
-    const store = memoryStore();
-    const archive = { blocks: { blocks: [{ type: 'p2b_start' }] }, 自定义: 1 };
-    expect(writeCanvas(store, 'ret2win', archive)).toBe(true);
-    expect(readCanvas(store, 'ret2win')).toEqual(archive);
-  });
-
-  it('坏数据一律当「没有存档」：JSON 坏、不是对象、空对象', () => {
-    const store = memoryStore();
-    const key = canvasStorageKey('ret2win');
-    store.setItem(key, '{不是 json');
-    expect(readCanvas(store, 'ret2win')).toBeUndefined();
-    store.setItem(key, '[]');
-    expect(readCanvas(store, 'ret2win')).toBeUndefined();
-    store.setItem(key, 'null');
-    expect(readCanvas(store, 'ret2win')).toBeUndefined();
-    store.setItem(key, '');
-    expect(readCanvas(store, 'ret2win')).toBeUndefined();
-    // `{}` 在桥那边等于「清空画布」：装回去只会抹掉用户的程序，所以不当成存档。
-    store.setItem(key, '{}');
-    expect(readCanvas(store, 'ret2win')).toBeUndefined();
-  });
-
-  it('清除后读不到（旧键不会残留）', () => {
-    const store = memoryStore();
-    writeCanvas(store, 'ret2win', { blocks: [] });
-    expect(clearCanvas(store, 'ret2win')).toBe(true);
-    expect(readCanvas(store, 'ret2win')).toBeUndefined();
+    expect(clearSession(full, 'ret2win')).toBe(false);
   });
 });
 
@@ -172,9 +132,9 @@ describe('本地保存：会话记录（04 §1.1、05 §3.1）', () => {
     const store = defaultStore();
     expect(store).toBeDefined();
     if (store === undefined) return;
-    expect(writeCanvas(store, 'probe', { blocks: [] })).toBe(true);
-    expect(readCanvas(store, 'probe')).toEqual({ blocks: [] });
-    clearCanvas(store, 'probe');
+    expect(writeSession(store, 'probe', validSession())).toBe(true);
+    expect(readSession(store, 'probe')?.sessionId).toBe(SESSION_ID);
+    clearSession(store, 'probe');
   });
 });
 

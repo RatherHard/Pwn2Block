@@ -24,7 +24,7 @@ import {
 import type { ApiClient } from '../src/api';
 import type { ArtifactTracker, PayloadArtifact, PayloadCompileState } from '../src/compiler/artifact';
 import { ACTION_ORIGIN_VERSION } from '../src/compiler/types';
-import type { CompiledAction, NormalizedWorkspace } from '../src/compiler/types';
+import type { CompiledAction } from '../src/compiler/types';
 import type { ControllerState } from '../src/viewmodel/controller';
 import { createPageState } from '../src/viewmodel/session';
 import { makeProjection, makeVma } from './helpers';
@@ -150,15 +150,13 @@ export function createFakeApi(options: FakeApiOptions = {}): FakeApi {
 
 export interface FakeTracker {
   readonly tracker: ArtifactTracker;
-  readonly compileCalls: NormalizedWorkspace[];
-  /** 设定下一次 `compile()` 的产物，并立刻反映到 `state`（测试里就不用真的拼积木了）。 */
+  /** 直接设定当前产物，并立刻反映到 `state`（测试里就不用真的拼画布节点了）。 */
   setArtifact(artifact: PayloadArtifact | undefined): void;
   setErrors(errors: PayloadCompileState['errors']): void;
 }
 
-/** 假追踪器：只实现 `ArtifactTracker` 的状态机语义，省掉“先拼积木再编译”的构造开销。 */
+/** 假追踪器：只实现 `ArtifactTracker` 的状态机语义，省掉“先拼节点再编译”的构造开销。 */
 export function createFakeTracker(): FakeTracker {
-  const compileCalls: NormalizedWorkspace[] = [];
   let produced: PayloadArtifact | undefined;
   let errors: PayloadCompileState['errors'] = [];
   let state: PayloadCompileState = { artifact: undefined, errors: [], stale: false, revision: 0 };
@@ -166,16 +164,6 @@ export function createFakeTracker(): FakeTracker {
   const tracker: ArtifactTracker = {
     get state(): PayloadCompileState {
       return state;
-    },
-    compile(program: NormalizedWorkspace): PayloadArtifact | undefined {
-      compileCalls.push(program);
-      state = {
-        artifact: produced,
-        errors: produced === undefined ? errors : [],
-        stale: false,
-        revision: produced === undefined ? state.revision : state.revision + 1,
-      };
-      return state.artifact;
     },
     adopt(actions, origins): PayloadArtifact {
       produced = { actions, origins, originsVersion: ACTION_ORIGIN_VERSION, revision: state.revision + 1 };
@@ -200,7 +188,6 @@ export function createFakeTracker(): FakeTracker {
 
   return {
     tracker,
-    compileCalls,
     setArtifact(next: PayloadArtifact | undefined): void {
       produced = next;
       state = {
