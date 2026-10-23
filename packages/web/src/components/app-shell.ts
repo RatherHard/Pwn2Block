@@ -38,7 +38,7 @@ import {
 } from '../viewmodel/session';
 import { cachedStore, defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import { outputEntries } from '../viewmodel/output';
-import { runMenuModel, type RunMenuInput } from '../viewmodel/toolbar';
+import { payloadControls, runMenuModel, type RunMenuInput } from '../viewmodel/toolbar';
 import {
   availableViews as availableViewsOf,
   createViewManagerState,
@@ -146,6 +146,21 @@ export class Pwn2BlockApp extends LitElement {
         background: var(--p2b-bg);
       }
       .right > pwn2block-canvas-panel { flex: 1 1 auto; min-height: 0; }
+      /* 运行中要能中断：新画布面板没有这个按钮，外壳在画布上方补一个（禁用原因来自控制器）。 */
+      .abort-bar {
+        display: flex;
+        justify-content: flex-end;
+        padding: 0.4rem 0.8rem 0;
+      }
+      .abort-bar button {
+        font: inherit;
+        color: var(--p2b-fg);
+        background: var(--p2b-bg);
+        border: 1px solid var(--p2b-border);
+        padding: 0.25rem 0.75rem;
+        cursor: pointer;
+      }
+      .abort-bar button:disabled { color: var(--p2b-dim); cursor: not-allowed; }
       .output {
         flex: none;
         margin: 0 0.8rem 0.8rem;
@@ -456,7 +471,7 @@ export class Pwn2BlockApp extends LitElement {
       <main>
         <section class="left" aria-label="视图管理器">${left}</section>
         <section class="right" aria-label="payload 窗口">
-          ${this.renderLegacyBar()} ${this.renderCanvasPanel(challenge)}
+          ${this.renderLegacyBar()} ${this.renderAbortBar(state)} ${this.renderCanvasPanel(challenge)}
         </section>
       </main>
       ${this.renderOutput(state)}
@@ -479,6 +494,28 @@ export class Pwn2BlockApp extends LitElement {
       @p2b-canvas-legacy=${this.onCanvasLegacy}
     ></pwn2block-canvas-panel>`;
   }
+
+  /**
+   * 终止按钮：控制器把「能否中断 / 为什么不能」算在 `payloadControls` 里，外壳只渲染与派发。
+   * 旧画布把它放在画布顶栏，新面板只有「运行」，所以中断入口放在这里，避免能力悄悄消失。
+   */
+  private renderAbortBar(state: ControllerState) {
+    const abort = payloadControls({ ...this.menuInputOf(state), running: state.running }).abort;
+    return html`<div class="abort-bar">
+      <button
+        type="button"
+        ?disabled=${!abort.enabled}
+        title=${abort.disabledReason ?? abort.hint}
+        @click=${this.onAbort}
+      >
+        ${abort.label}
+      </button>
+    </div>`;
+  }
+
+  private onAbort = (): void => {
+    this.controller?.run({ kind: 'abort' });
+  };
 
   /**
    * 旧档提示条（《节点画布大型修改》§8）：非模态，标题 / 正文 / 两个出口都在
