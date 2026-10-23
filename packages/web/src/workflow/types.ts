@@ -61,10 +61,19 @@ export interface NodePlacement {
   readonly index: number;
 }
 
+/**
+ * 预览条目的类型标签。
+ *
+ * 旧编译按端口类型标注；新版画布（`canvas/compile.ts`）产出的预览不属于任何端口，
+ * 统一标成 `canvas`。界面目前只读 `summary`，所以这里是**加宽**而不是换一套类型：
+ * 阶段三删掉旧 `workflow/` 时，这个联合一起收敛成 `'canvas'`。
+ */
+export type PreviewType = PortType | 'canvas';
+
 /** 节点预览：每个数据节点自带的结果摘要（06 §8）。 */
 export interface NodePreview {
   readonly nodeId: string;
-  readonly type: PortType;
+  readonly type: PreviewType;
   /** 一行摘要：整数给十进制与十六进制，字节给长度与开头。 */
   readonly summary: string;
   readonly length?: number;
