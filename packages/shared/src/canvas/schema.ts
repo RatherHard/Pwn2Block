@@ -10,7 +10,6 @@ import {
   CANVAS_MAX_TEXT_CHARS,
   CANVAS_MAX_VAR_NAME_CHARS,
 } from '../limits';
-import { WORKFLOW_FORMAT } from '../workflow/types';
 import {
   CANVAS_FORMAT,
   CANVAS_NODE_ID_RE,
@@ -348,6 +347,16 @@ export const CanvasDocumentSchema = z.strictObject({
 // 解析
 // ---------------------------------------------------------------------------
 
+/**
+ * 旧工作流存档的格式标识（`format` 字段的值）。
+ *
+ * 从 `shared/src/workflow/types.ts` 的 `WORKFLOW_FORMAT` 搬来：新画布**只需要认它**，
+ * 以便把旧档报成 `legacy` 并原样导出，不需要旧工作流的其余类型。所以这个字面量从今天起
+ * 住在 `canvas/` 里，旧 `workflow/` 整体删除后它仍然留着；那边临时还留着一份同名常量，
+ * 两步之后一并消失（届时本常量就是唯一事实来源）。
+ */
+export const LEGACY_WORKFLOW_FORMAT = 'pwn2block.workflow';
+
 export type ParseCanvasFailureReason = 'legacy' | 'format' | 'version' | 'invalid';
 
 export type ParseCanvasResult =
@@ -355,7 +364,7 @@ export type ParseCanvasResult =
   | { readonly ok: false; readonly reason: ParseCanvasFailureReason; readonly message: string };
 
 /** 旧存档的提示文案：明确告诉学习者「不兼容」和接下来做什么，不尝试迁移、不清空。 */
-const LEGACY_MESSAGE = `这是旧版画布存档（${WORKFLOW_FORMAT}），新版画布不兼容；请先导出旧文件，再新建画布`;
+const LEGACY_MESSAGE = `这是旧版画布存档（${LEGACY_WORKFLOW_FORMAT}），新版画布不兼容；请先导出旧文件，再新建画布`;
 
 /**
  * 解析一份存档：先认格式与版本，再验形状；不做语义校验（那是 `validate.ts` 的事）。
@@ -365,7 +374,7 @@ const LEGACY_MESSAGE = `这是旧版画布存档（${WORKFLOW_FORMAT}），新�
  */
 export function parseCanvasDocument(raw: unknown): ParseCanvasResult {
   const record = asRecord(raw);
-  if (record?.format === WORKFLOW_FORMAT) {
+  if (record?.format === LEGACY_WORKFLOW_FORMAT) {
     return { ok: false, reason: 'legacy', message: LEGACY_MESSAGE };
   }
   if (record !== undefined && record.format !== undefined && record.format !== CANVAS_FORMAT) {

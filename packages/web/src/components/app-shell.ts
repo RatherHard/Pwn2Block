@@ -12,8 +12,9 @@
  * 画布面板自己读档、防抖存档、编译；外壳只把它的四类事件接到控制器上，并负责旧档提示。
  */
 import { LitElement, css, html } from 'lit';
-import type { Hint, Projection, PublicChallenge, WorkflowIssue } from '@pwn2block/shared';
+import type { Hint, Projection, PublicChallenge } from '@pwn2block/shared';
 import { createApiClient, type ApiClient } from '../api';
+import type { WorkflowArtifact, WorkflowIssue } from '../canvas/artifact';
 import type { CanvasStore } from '../canvas/save';
 import type { ActionOrigin, CompileError } from '../compiler/types';
 import { createViewContext } from '../viewmodel/context';
@@ -45,7 +46,6 @@ import {
   type ViewKind,
 } from '../viewmodel/views';
 import { sharedStyles, terminalTheme } from '../theme';
-import type { WorkflowArtifact } from '../workflow/types';
 import './briefing-panel';
 import './canvas-panel';
 import './output-view';

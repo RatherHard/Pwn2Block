@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
-import type { PublicChallenge, WorkflowIssue } from '@pwn2block/shared';
+import type { PublicChallenge } from '@pwn2block/shared';
 import type { CompiledAction } from '../src/compiler/types';
 // 副作用导入：注册自定义元素（只在类型位置用到类名时，编译期会把 import 整条删掉）。
 import '../src/components/app-shell';
@@ -10,12 +10,11 @@ import type { CanvasPanelElement } from '../src/components/canvas-panel';
 import { canvasStoreOf } from '../src/components/legacy-archive-bar';
 import { ApiClientError } from '../src/api';
 import { legacyArchiveNotice, scanLegacyArchives } from '../src/canvas/archive';
+import { WORKFLOW_ORIGIN_VERSION, type WorkflowArtifact, type WorkflowIssue } from '../src/canvas/artifact';
 import { canvasV2StorageKey, saveCanvas } from '../src/canvas/save';
 import { MESSAGE_REPLAY_DISASM_STALE } from '../src/viewmodel/replay';
 import { MESSAGE_STALE } from '../src/viewmodel/program';
 import { sessionStorageKey } from '../src/viewmodel/storage';
-import { WORKFLOW_ORIGIN_VERSION } from '../src/workflow/types';
-import type { WorkflowArtifact } from '../src/workflow/types';
 import {
   CHANGED_CODE_VMA,
   createFakeApi,

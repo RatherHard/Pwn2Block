@@ -1,4 +1,4 @@
-import { WORKFLOW_FORMAT, canvas } from '@pwn2block/shared';
+import { canvas } from '@pwn2block/shared';
 
 /**
  * 新版画布的本地存档（需求 §8；08 §4）。
@@ -85,7 +85,7 @@ export function parseCanvasSave(raw: unknown, expectedChallengeId?: string): Can
 
   const format = raw['format'];
   if (format === canvas.CANVAS_FORMAT) return parseBareDocument(raw, expectedChallengeId);
-  if (format === WORKFLOW_FORMAT) {
+  if (format === canvas.LEGACY_WORKFLOW_FORMAT) {
     return { ok: false, reason: 'legacy', message: legacyMessage(format) };
   }
   if (format !== CANVAS_SAVE_FORMAT) {

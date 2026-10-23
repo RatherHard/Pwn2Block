@@ -1,21 +1,22 @@
 import { canvas } from '@pwn2block/shared';
-import type { Action as CanvasAction, AuthorBlock, WorkflowIssue } from '@pwn2block/shared';
-import { WORKFLOW_ORIGIN_VERSION } from '../workflow/types';
+import type { Action as CanvasAction, AuthorBlock } from '@pwn2block/shared';
+import { WORKFLOW_ORIGIN_VERSION } from './artifact';
 import type {
   CompiledAction,
   CompileOutcome,
   CompileTraceEntry,
   NodePreview,
   WorkflowArtifact,
+  WorkflowIssue,
   WorkflowOrigin,
-} from '../workflow/types';
+} from './artifact';
 
 /**
  * 新版画布 → 旧编译产物形状的接缝（阶段三「前端切到新版画布」时，界面只认这一层）。
  *
  * 为什么要有这层：新版画布的生成器（`@pwn2block/shared` 的 `canvas/actions`）产出
- * `{ actions, steps }`，而界面、网络请求与回放共用的是旧 `workflow/types` 里的
- * `WorkflowArtifact`。这里只搬运，不解释：
+ * `{ actions, steps }`，而界面、网络请求与回放共用的是 `canvas/artifact` 里的
+ * `WorkflowArtifact`（新旧画布同一份契约，旧画布删除后仍留在这里）。这里只搬运，不解释：
  * - 动作原样交给服务端展开，客户端不展开出题人积木（01 §6 第 3 条）；
  * - 问题代码映射成旧代码，只为让现有界面按熟悉的分组渲染；
  * - 步骤快照 `steps` **不进产物**（产物是网络与回放共用的形状），由另一个入口单独给出。

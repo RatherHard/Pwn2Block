@@ -1,7 +1,8 @@
 import { LitElement, html } from 'lit';
 import type { PropertyValues, TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
-import type { PublicChallenge, WorkflowIssue } from '@pwn2block/shared';
+import type { PublicChallenge } from '@pwn2block/shared';
+import type { WorkflowIssue } from '../canvas/artifact';
 import { compileCanvas } from '../canvas/compile';
 import type { CanvasEdit } from '../canvas/editor';
 import { loadCanvas, makeCanvasSave } from '../canvas/save';

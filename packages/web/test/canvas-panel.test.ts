@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WORKFLOW_FORMAT, canvas, ret2winPublic } from '@pwn2block/shared';
+import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
 import { CanvasPanelElement } from '../src/components/canvas-panel';
 import { CANVAS_CATALOG, CANVAS_CATEGORY_LABELS } from '../src/canvas/catalog';
@@ -166,7 +166,7 @@ describe('画布面板：加载', () => {
 
   it('读到旧工作流存档时发 p2b-canvas-legacy，并保留原文', async () => {
     const store = new MemoryStore();
-    const raw = JSON.stringify({ format: WORKFLOW_FORMAT, version: 1, challengeId: CHALLENGE.id, graph: {} });
+    const raw = JSON.stringify({ format: canvas.LEGACY_WORKFLOW_FORMAT, version: 1, challengeId: CHALLENGE.id, graph: {} });
     store.setItem(KEY, raw);
     const panel = createPanel();
     panel.challenge = CHALLENGE;

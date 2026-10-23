@@ -13,7 +13,7 @@ import type { CanvasStore } from './save';
  * （`pwn2block.canvas.v2.<题目>`）与「这是旧档」这一条失败原因；它不枚举存储、
  * 不认旧键的形状，读取路径上也不该顺手清理。旧键的形状是历史事实
  * （`graph/storage.ts` 的 `graph.v1` / 裸图、`viewmodel/storage.ts:40` 的 `canvas.v1`、
- * `workflow/types.ts` 的 `pwn2block.workflow`），把它们集中在这里，
+ * `@pwn2block/shared` 的 `LEGACY_WORKFLOW_FORMAT`，即 `pwn2block.workflow`），把它们集中在这里，
  * 将来再加一代存档只需往 `LEGACY_STORAGE_KEYS` 前面插一行。
  *
  * 三条硬约束：
