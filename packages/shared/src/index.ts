@@ -20,3 +20,9 @@ export * from './solution';
 export * from './validate';
 export * from './vm';
 export * from './workflow';
+/**
+ * 新版画布（节点画布改版）的语义层。用命名空间导出而不是 `export *`：
+ * 它和旧 `workflow/` 里同名的 `EncodedValue`、`Value` 等概念并存一段时间，
+ * 命名空间能让调用点显式写 `canvas.xxx`，改版完成后旧的那一份整体删除。
+ */
+export * as canvas from './canvas';

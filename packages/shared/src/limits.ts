@@ -143,3 +143,44 @@ export const WORKFLOW_MAX_LOOP_ITERATIONS = 256;
 
 /** 一次编译里所有循环累计的轮数上限：嵌套循环共享同一份预算。 */
 export const WORKFLOW_MAX_TOTAL_ITERATIONS = 4096;
+
+// ---------------------------------------------------------------------------
+// 新版画布（数据值、吸附组合、转换包络）
+//
+// 新画布把「值」本身变成编辑器的一等公民：一个字节串、一个列表、一个字典都要能整体计算与
+// 存档。因此这里补一组**值域容量**上限，与旧画布的「节点/连线数量」上限分开——
+// 前者约束构造结果的大小，后者约束图的规模。
+// ---------------------------------------------------------------------------
+
+/** 一张新版画布的节点数上限。数据节点比旧节点碎，上限相应放宽。 */
+export const CANVAS_MAX_NODES = 512;
+
+/** 一个吸附组合的行数上限。 */
+export const CANVAS_MAX_GROUP_ROWS = 32;
+
+/** 吸附组合每一行的成员数上限。 */
+export const CANVAS_MAX_ROW_MEMBERS = 64;
+
+/** 单个集合（列表元素、字典条目）的元素数上限。 */
+export const CANVAS_MAX_COLLECTION_ITEMS = 1024;
+
+/** 值嵌套深度上限：列表套列表、字典套列表都算一层。 */
+export const CANVAS_MAX_VALUE_DEPTH = 16;
+
+/** 整数的位数上限。超过就按「不可信输入」拒绝，而不是让 bigint 吃满内存。 */
+export const CANVAS_MAX_INT_BITS = 1024;
+
+/** 字节串长度上限：与请求体上限同一量级，hex 编码后还要翻倍。 */
+export const CANVAS_MAX_BYTES = MAX_BYTE_CONSTRUCTION_BYTES;
+
+/** 文本长度上限（按 Unicode 码点计）：结果还要进存档与预览。 */
+export const CANVAS_MAX_TEXT_CHARS = 256 * 1024;
+
+/** 字典键（整数或文本）的文本长度上限。 */
+export const CANVAS_MAX_KEY_CHARS = 128;
+
+/** 一次求值最多计算的表达式节点数：与旧的节点求值预算同量级。 */
+export const CANVAS_MAX_EVAL_STEPS = 4096;
+
+/** 一次求值里表达式嵌套深度上限：防脏存档把递归拖死。 */
+export const CANVAS_MAX_EXPR_DEPTH = 64;
