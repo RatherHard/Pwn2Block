@@ -79,7 +79,7 @@ export const MAX_PSEUDOCODE_CHARS = 20_000;
 export const DEFAULT_PORT = 8787;
 
 // ---------------------------------------------------------------------------
-// 节点画布与 Python 数据处理（06 §5.3、§6；07 §P1 / §P6）
+// 节点画布（06 §5.3、§6；07 §P1 / §P6）
 // ---------------------------------------------------------------------------
 
 /**
@@ -107,36 +107,6 @@ export const WORKFLOW_MODULE_DEPTH_LIMIT = 4;
 
 /** 一份存档里允许定义的模块数上限；与节点上限同属「不接受恶意存档」的护栏。 */
 export const WORKFLOW_MAX_MODULES = 64;
-
-/** 单次 Python 求值的墙钟上限。超时按失败处理，不返回部分结果。 */
-export const PYTHON_EVAL_TIMEOUT_MS = 2_000;
-
-/** 单个 Python 任务的地址空间上限（MB），由运行器尽力施加。 */
-export const PYTHON_EVAL_MEMORY_MB = 64;
-
-/** Python 代码字符数上限。 */
-export const PYTHON_MAX_CODE_CHARS = 20_000;
-
-/** 单次 Python 求值允许的输出字节数上限。 */
-export const PYTHON_MAX_OUTPUT_BYTES = 8 * 1024;
-
-/** 单次 Python 求值允许的用户日志字节数上限（日志与协议输出必须分离）。 */
-export const PYTHON_MAX_LOG_BYTES = 4 * 1024;
-
-/** Python 节点的命名输入个数上限。 */
-export const PYTHON_MAX_INPUTS = 8;
-
-/** 整数传输的十进制位数上限：防止超大整数撑爆内存与传输。 */
-export const PYTHON_MAX_INT_DIGITS = 512;
-
-/** 服务端同时运行的 Python 任务数上限。 */
-export const PYTHON_MAX_CONCURRENT = 2;
-
-/** Python 任务排队长度上限：超过就直接回「忙」，不无限排队。 */
-export const PYTHON_QUEUE_LIMIT = 8;
-
-/** 一次编译允许发起的 Python 求值次数上限。 */
-export const PYTHON_MAX_EVALS_PER_COMPILE = 64;
 
 /** 单个循环最多执行的轮数。超过就报错定位到循环，不悄悄截断（06 §5.3）。 */
 export const WORKFLOW_MAX_LOOP_ITERATIONS = 256;

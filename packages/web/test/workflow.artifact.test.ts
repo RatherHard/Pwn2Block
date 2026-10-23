@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NODE } from '@pwn2block/shared';
-import type { PythonEvalRequest } from '@pwn2block/shared';
 import { createWorkflowTracker } from '../src/workflow/artifact';
-import type { PythonEvalResult, WorkflowContext } from '../src/workflow/types';
 import { WORKFLOW_CONTEXT, wfEdge, wfNode, workflow } from './workflow-helpers';
 
 /**
@@ -11,31 +9,11 @@ import { WORKFLOW_CONTEXT, wfEdge, wfNode, workflow } from './workflow-helpers';
  * 这些是并发相关的行为，必须用真实 Promise 时序断言，而不是只测同步分支。
  */
 
-interface Deferred {
-  readonly promise: Promise<PythonEvalResult>;
-  resolve(result: PythonEvalResult): void;
-}
-
-function deferred(): Deferred {
-  let resolve!: (result: PythonEvalResult) => void;
-  const promise = new Promise<PythonEvalResult>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-function payloadGraph(): ReturnType<typeof workflow> {
+function payloadGraph(hex = '41414141'): ReturnType<typeof workflow> {
   return workflow({
-    nodes: [wfNode('hex', NODE.hex, { hex: '41414141' }), wfNode('feed', NODE.feed)],
+    nodes: [wfNode('hex', NODE.hex, { hex }), wfNode('feed', NODE.feed)],
     edges: [wfEdge('hex', 'feed', 'data')],
     main: ['feed'],
-  });
-}
-
-function pythonGraph(): ReturnType<typeof workflow> {
-  return workflow({
-    nodes: [wfNode('py', NODE.python, { code: 'result = b"A"', outputType: 'bytes', inputs: [] })],
-    main: ['py'],
   });
 }
 
@@ -103,12 +81,7 @@ describe('产物状态机：基本流转', () => {
 
 describe('产物状态机：竞态', () => {
   it('编译途中改图：旧请求的结果被丢弃，不会变成 ready', async () => {
-    const gate = deferred();
-    const context: WorkflowContext = {
-      ...WORKFLOW_CONTEXT,
-      python: { evaluate: () => gate.promise },
-    };
-    const tracker = createWorkflowTracker(() => ({ document: pythonGraph(), context }));
+    const tracker = createWorkflowTracker(() => ({ document: payloadGraph(), context: WORKFLOW_CONTEXT }));
 
     const pending = tracker.compile();
     expect(tracker.state.status).toBe('compiling');
@@ -116,7 +89,6 @@ describe('产物状态机：竞态', () => {
 
     // 用户在这期间改了图：在途请求必须失效。
     tracker.noteSemanticEdit();
-    gate.resolve({ ok: true, value: { kind: 'bytes', hex: '41' } });
     const artifact = await pending;
 
     expect(artifact).toBeUndefined();
@@ -125,43 +97,28 @@ describe('产物状态机：竞态', () => {
   });
 
   it('取消正在进行的编译：状态是 cancelled，且没有产物', async () => {
-    const gate = deferred();
-    const context: WorkflowContext = { ...WORKFLOW_CONTEXT, python: { evaluate: () => gate.promise } };
-    const tracker = createWorkflowTracker(() => ({ document: pythonGraph(), context }));
+    const tracker = createWorkflowTracker(() => ({ document: payloadGraph(), context: WORKFLOW_CONTEXT }));
 
     const pending = tracker.compile();
     tracker.cancel();
     expect(tracker.state.status).toBe('cancelled');
-    gate.resolve({ ok: true, value: { kind: 'bytes', hex: '41' } });
     expect(await pending).toBeUndefined();
     expect(tracker.state.artifact).toBeUndefined();
     expect(tracker.gate().ok).toBe(false);
   });
 
   it('连续两次编译：先发起的请求即使后返回也不能覆盖后发起的结果', async () => {
-    const first = deferred();
-    const second = deferred();
-    const requests: PythonEvalRequest[] = [];
-    const context: WorkflowContext = {
-      ...WORKFLOW_CONTEXT,
-      python: {
-        evaluate: (request) => {
-          requests.push(request);
-          return requests.length === 1 ? first.promise : second.promise;
-        },
-      },
-    };
-    const tracker = createWorkflowTracker(() => ({ document: pythonGraph(), context }));
+    let current = payloadGraph('41414141');
+    const tracker = createWorkflowTracker(() => ({ document: current, context: WORKFLOW_CONTEXT }));
 
     const pendingFirst = tracker.compile();
+    // 第二次编译前图改成了另一份字节：两次请求的产物不同，才能断言谁生效。
+    current = payloadGraph('42424242');
     const pendingSecond = tracker.compile();
-    expect(requests).toHaveLength(2);
 
-    second.resolve({ ok: true, value: { kind: 'bytes', hex: '42' } });
     expect(await pendingSecond).toBeDefined();
-    first.resolve({ ok: true, value: { kind: 'bytes', hex: '41' } });
     expect(await pendingFirst).toBeUndefined();
     expect(tracker.state.status).toBe('ready');
-    expect(tracker.state.artifact?.previews[0]?.hex).toBe('42');
+    expect(tracker.state.artifact?.actions[0]).toEqual({ type: 'feed', hex: '42424242' });
   });
 });

@@ -1,4 +1,0 @@
-# Python 运行器产生的字节码缓存：本仓库只跑 `-B`（不写 .pyc）的正式路径，
-# 但本地 `python -m unittest` 会留下 __pycache__，别让它进 git。
-__pycache__/
-*.pyc

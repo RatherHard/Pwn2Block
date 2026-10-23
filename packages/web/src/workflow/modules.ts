@@ -25,7 +25,7 @@ import type { WorkflowValue } from './types';
  * - 版本固定：调用节点带 `moduleVersion`，定义升级不会改掉已有实例；
  * - 不递归：调用栈里出现同一个模块就报 `module_recursion`，深度超过
  *   `WORKFLOW_MODULE_DEPTH_LIMIT` 报 `module_depth`；
- * - 状态隔离：模块体有独立作用域与求值缓存，两次调用互不污染，预算（步数、轮次、Python 次数）
+ * - 状态隔离：模块体有独立作用域与求值缓存，两次调用互不污染，预算（步数、轮次）
  *   仍与主图共享，避免用模块把额度翻倍。
  */
 

@@ -43,7 +43,6 @@ node --env-file=.env.example --import tsx packages/server/src/index.ts
 - 每道题的 flag 变量名是 `FLAG_<ID大写>`，例如 `FLAG_RET2WIN`。缺失或为空时该题拒绝加载。
 - 端口用 `PORT` 覆盖，默认 8787；监听地址固定为 `127.0.0.1`。
 - 会话只存在服务端内存里，重启后丢失。
-- Python 节点默认不可用；要在部署环境启用隔离求值，按 [09-Python 求值部署与诊断](docs/09-Python求值部署与诊断.md) 配置 `PWN2BLOCK_PYTHON_BACKEND=docker` 并准备镜像。普通 `process` 后端只用于开发，不算隔离。
 
 开发时用 `pnpm dev` 同时起 server 和 Vite（5173 端口，`/api` 代理到后端），同样需要先在环境中设置 `FLAG_*`。
 
@@ -95,7 +94,6 @@ presets/             默认编码表
 
 - [基本架构](docs/01-基本架构.md) / [当前已实现能力](docs/02-已实现需求.md)
 - [未实现需求](docs/03-未实现需求.md) / [待办与验收债务](docs/05-未完成工作.md)
-- [Python 求值部署与诊断](docs/09-Python求值部署与诊断.md)
 - [历史归档](docs/archive/README.md)：MVP、旧前端设计、节点画布基础与交互布局阶段的需求、计划和验收记录
 
 贡献约定（分支、提交、测试要求）见 [CLAUDE.md](CLAUDE.md)。flag 真值、`.env` 和凭证不得进 git。

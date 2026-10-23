@@ -16,7 +16,6 @@ import type {
   GraphDocument,
   ParamValue,
   PublicChallenge,
-  PythonCapability,
   WorkflowIssue,
 } from '@pwn2block/shared';
 import { compileGraph } from '../workflow/compile';
@@ -49,7 +48,6 @@ import { locateTarget, type LocateRequest } from '../graph/locate';
 import { moduleViewState, withModuleBody } from '../graph/module-view';
 import { importDocument } from '../graph/transfer';
 import { clearGraph, loadGraph, saveGraph } from '../graph/storage';
-import { createHttpPython, fetchPythonCapability } from '../workflow/python-evaluator';
 import type { WorkflowArtifact, WorkflowContext } from '../workflow/types';
 import { defaultStore, type KeyValueStore } from '../viewmodel/storage';
 import type { PayloadControlsModel } from '../viewmodel/toolbar';
@@ -57,14 +55,12 @@ import { sharedStyles, terminalTheme } from '../theme';
 import './graph-canvas';
 import './node-library';
 import './node-inspector';
-import type { Pwn2BlockCodeEditor } from './code-editor';
 import {
   moduleCallParams,
   renderGroups,
   renderIssues,
   renderLoadFailure,
   renderModules,
-  renderPythonStatus,
   renderRunControls,
   renderTrace,
   type ChromeHandlers,
@@ -81,8 +77,7 @@ import type { LibraryDragEndDetail } from './node-library';
  *
  * 边界：
  * - **只做装配**：手势来自画布、库与面板的事件，编辑结果落 `graph/editor` 的纯函数，文档存本地。
- * - **编译是本地纯计算**：数据节点求值 + 生成动作，产物只用于预览与后续运行；Python 求值经注入的
- *   `python` 求值器（服务端隔离运行器未启用时明确报 `python_unavailable`，不回落到浏览器执行）。
+ * - **编译是本地纯计算**：数据节点求值 + 生成动作，产物只用于预览与后续运行，不发送任何请求。
  * - **空画布是合法状态**：没有存档与「存档是空画布」分开处理；损坏存档不会被静默覆盖。
  */
 
@@ -177,12 +172,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
         display: flex;
       }
       .canvas-host pwn2block-graph-canvas[hidden] { display: none; }
-      .canvas-host > pwn2block-code-editor {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-      }
       .canvas-host pwn2block-graph-canvas {
         flex: 1 1 auto;
       }
@@ -276,8 +265,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private compiledRevision = -1;
   private message = '';
   private loadedFor = '';
-  private pythonCapability: PythonCapability | undefined;
-  private capabilityLoaded = false;
   /** 编辑模块体时保存主图；`editingModuleId` 为空表示当前就在主图。 */
   private mainEditor?: GraphEditorState;
   private editingModuleId?: string;
@@ -300,7 +287,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
   private editingNodeId?: string;
   /** 从节点库拖入时的节点种类：用于画布上的落点预览。 */
   private dragKind?: string;
-  private expandedCodeNodeId?: string;
 
   private readonly chrome: ChromeHandlers = {
     onCommand: (command) => {
@@ -315,19 +301,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
     onDiscardArchive: () => this.discardCorruptArchive(),
   };
 
-  override connectedCallback(): void {
-    super.connectedCallback();
-    void this.loadCapability();
-  }
-
-  /** 读一次 Python 能力；失败就保持「未知」，不把节点当成可用。 */
-  private async loadCapability(): Promise<void> {
-    if (this.capabilityLoaded) return;
-    this.capabilityLoaded = true;
-    this.pythonCapability = await fetchPythonCapability();
-    this.requestUpdate();
-  }
-
   override render() {
     const challenge = this.challenge;
     if (challenge === undefined) return html`<p>正在等待题面…</p>`;
@@ -336,7 +309,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
     const selected = state.selection
       .map((id) => state.document.nodes.find((node) => node.id === id))
       .find((node) => node !== undefined);
-    const expandedNode = selected !== undefined && selected.id === this.expandedCodeNodeId && selected.kind === NODE.python ? selected : undefined;
     const stale = this.compiledRevision !== state.semanticRevision;
     return html`
       <header>
@@ -376,7 +348,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
                   @change=${(event: Event) => this.importGraph(event)}
               /></label>`
           : nothing}
-        ${renderPythonStatus(this.pythonCapability)}
         <span class=${stale ? 'bad' : 'ok'}>${this.status}</span>
       </header>
       <section class="workspace">
@@ -397,7 +368,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
         </aside>
         <div class="canvas-host">
           <pwn2block-graph-canvas
-            ?hidden=${expandedNode !== undefined}
             .state=${state}
             .context=${this.portContext(challenge)}
             .previews=${this.artifact?.previews ?? []}
@@ -415,16 +385,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
             @p2b-graph-open=${(event: CustomEvent<{ nodeId: string }>) => this.openInspector(event.detail.nodeId)}
             @p2b-graph-message=${(event: CustomEvent<{ message: string }>) => this.say(event.detail.message)}
           ></pwn2block-graph-canvas>
-          ${expandedNode === undefined ? nothing : html`<pwn2block-code-editor
-            class="canvas-code-editor"
-            .label=${`Python 代码 · ${expandedNode.id}`}
-            .value=${typeof expandedNode.params.code === 'string' ? expandedNode.params.code : ''}
-            .expanded=${true}
-            @p2b-code-change=${(event: CustomEvent<{ value: string }>) =>
-              this.setEditor(setInlineParam(this.editor, expandedNode.id, 'code', event.detail.value, this.portContextOf()))}
-            @p2b-code-expand=${() => this.closeCodeEditor()}
-            @p2b-code-cancel=${() => this.closeCodeEditor()}
-          ></pwn2block-code-editor>`}
         </div>
         <aside class="inspector" aria-label="属性">
           <pwn2block-node-inspector
@@ -437,7 +397,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
               : this.artifact?.previews.find((item) => item.nodeId === selected.id)}
             .selectionCount=${state.selection.length}
             .collapsed=${selected !== undefined && state.document.layout[selected.id]?.collapsed === true}
-            @p2b-inspector-code-expand=${() => this.openCodeEditor()}
             @p2b-inspector-param=${(event: CustomEvent<{ name: string; value: ParamValue }>) =>
               this.onInspectorParam(event.detail.name, event.detail.value)}
             @p2b-inspector-mode=${(event: CustomEvent<{ port: string; mode: 'inline' | 'port' }>) =>
@@ -575,7 +534,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
     this.loadNote = '';
     this.archiveLocked = false;
     this.editingNodeId = undefined;
-    this.expandedCodeNodeId = undefined;
     if (!loaded.ok) {
       this.editor = createEditor(emptyGraphDocument());
       this.status = '画布是空的：从左侧节点库添加节点。';
@@ -687,9 +645,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
   // ------------------------------------------------------------ 编辑器状态
 
   private setEditor(next: GraphEditorState): void {
-    if (next.selection[0] !== this.expandedCodeNodeId || !next.document.nodes.some((node) => node.id === this.expandedCodeNodeId)) {
-      this.expandedCodeNodeId = undefined;
-    }
     if (this.mainEditor !== undefined && this.editingModuleId !== undefined) {
       // 只改选中：画布与属性面板要立刻反映，但不写回主图、不涨语义版本。
       if (next.document === this.editor.document) {
@@ -698,7 +653,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
         return;
       }
       const semanticChanged = next.semanticRevision !== this.editor.semanticRevision;
-      if (semanticChanged) this.abort?.abort();
       const merged = withModuleBody(
         this.mainEditor,
         this.editingModuleId,
@@ -722,8 +676,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
       return;
     }
     const semanticChanged = next.semanticRevision !== this.editor.semanticRevision;
-    // 语义变了，正在跑的 Python 求值已经没有意义：取消，别让迟到结果覆盖新产物（07 §P7）。
-    if (semanticChanged) this.abort?.abort();
     this.editor = next;
     this.persist();
     if (semanticChanged) this.dispatchEvent(new CustomEvent('p2b-graph-edited', { bubbles: true, composed: true }));
@@ -972,24 +924,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
     }
   }
 
-  private async openCodeEditor(): Promise<void> {
-    const node = this.editor.document.nodes.find((item) => item.id === this.editor.selection[0]);
-    if (node?.kind !== NODE.python) return;
-    this.expandedCodeNodeId = node.id;
-    this.requestUpdate();
-    await this.updateComplete;
-    const editor = this.renderRoot.querySelector<Pwn2BlockCodeEditor>('pwn2block-code-editor.canvas-code-editor');
-    await editor?.updateComplete;
-    editor?.shadowRoot?.querySelector('textarea')?.focus();
-  }
-
-  private async closeCodeEditor(): Promise<void> {
-    this.expandedCodeNodeId = undefined;
-    this.requestUpdate();
-    await this.updateComplete;
-    this.canvas()?.focus({ preventScroll: true });
-  }
-
   /** 属性面板的修改：统一通过编辑命令提交，一次修改对应一次撤销。 */
   private onInspectorParam(name: string, value: ParamValue): void {
     const nodeId = this.editor.selection[0];
@@ -1065,9 +999,6 @@ export class Pwn2BlockGraphPanel extends LitElement {
         (ACTION_NAMES as readonly string[]).includes(name),
       ),
       ...(challenge.authorBlocks === undefined ? {} : { authorBlocks: challenge.authorBlocks }),
-      ...(this.pythonCapability?.available === true
-        ? { python: createHttpPython({ signal: controller.signal }) }
-        : {}),
     };
     this.status = '正在编译…';
     this.requestUpdate();

@@ -5,9 +5,8 @@ import type {
   GraphModule,
   GraphNode,
   ParamValues,
-  PythonEvalRequest,
 } from '@pwn2block/shared';
-import type { PythonEvalResult, WorkflowContext } from '../src/workflow/types';
+import type { WorkflowContext } from '../src/workflow/types';
 
 /**
  * 图测试的构造工具：把「节点 + 连线 + 执行序列」写成最短形式。
@@ -66,24 +65,4 @@ export function workflow(spec: WorkflowSpec): GraphDocument {
     layout,
     ...(spec.modules === undefined ? {} : { modules: spec.modules }),
   };
-}
-
-/** 可替换的 Python 求值器：记录每次请求，便于断言「未选中的分支没有发起求值」。 */
-export interface FakePython {
-  readonly context: WorkflowContext;
-  readonly calls: PythonEvalRequest[];
-}
-
-export function fakePython(handler: (request: PythonEvalRequest) => PythonEvalResult): FakePython {
-  const calls: PythonEvalRequest[] = [];
-  const context: WorkflowContext = {
-    ...WORKFLOW_CONTEXT,
-    python: {
-      async evaluate(request) {
-        calls.push(request);
-        return handler(request);
-      },
-    },
-  };
-  return { context, calls };
 }

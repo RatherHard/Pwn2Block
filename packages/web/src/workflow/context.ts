@@ -59,7 +59,6 @@ export interface EvalContext {
   steps: number;
   /** 已执行的循环轮次总数：所有嵌套循环共享（06 §5.3）。 */
   iterations: number;
-  pythonCalls: number;
   failed: boolean;
   /** 变量声明/赋值次数：变化的变量会换掉缓存键。 */
   revision: number;
@@ -87,7 +86,6 @@ export function createEvalContext(
     produced: new Map(),
     steps: 0,
     iterations: 0,
-    pythonCalls: 0,
     failed: false,
     revision: 0,
     moduleStack: [],

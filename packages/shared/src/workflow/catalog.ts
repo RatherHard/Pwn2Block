@@ -1,6 +1,6 @@
 import { NODE } from './kinds';
 import { CONTROL_SPECS } from './catalog-control';
-import { MODULE_SPECS, declaredInputs } from './catalog-modules';
+import { MODULE_SPECS } from './catalog-modules';
 import type { ArchBits } from '../primitives';
 import type { AuthorBlock } from '../challenge';
 import type {
@@ -22,7 +22,7 @@ import type {
  * 三处各写一份必然漂移，而漂移的后果是把「表单允许、编译器拒绝」变成学习者的困惑。
  *
  * 目录里的节点按交付阶段标注 `stage`：`p2` 是基础题路径（填充/地址/拼接 + 动作），
- * `p3` 是补齐的数据节点，`p7` 是 Python 与定位序列工具。UI 只展示当前阶段可用的节点，
+ * `p3` 是补齐的数据节点，`p7` 是定位序列工具。UI 只展示当前阶段可用的节点，
  * 但存档里出现更新阶段的节点时要给出明确提示，不能静默丢弃。
  */
 
@@ -361,45 +361,6 @@ const FIND: NodeKindSpec = {
   output: 'int',
 };
 
-const PYTHON: NodeKindSpec = {
-  kind: NODE.python,
-  label: 'Python 处理',
-  category: 'data',
-  summary: '对显式输入执行 Python 代码，返回一个有类型的结果',
-  version: 1,
-  stage: 'p7',
-  exec: false,
-  params: [
-    {
-      name: 'code',
-      label: '代码',
-      kind: 'code',
-      default: '# 输入：in0、in1…  结果：result\nresult = in0 + in1\n',
-    },
-    {
-      name: 'outputType',
-      label: '输出类型',
-      kind: 'type',
-      default: 'bytes',
-      options: [
-        { value: 'bytes', label: '字节' },
-        { value: 'int', label: '整数' },
-        { value: 'text', label: '文本' },
-        { value: 'bool', label: '布尔' },
-      ],
-    },
-    {
-      name: 'inputs',
-      label: '输入',
-      kind: 'portList',
-      default: [],
-      help: '每行一个 name:类型，例如 a:int',
-    },
-  ],
-  dynamicInputs: (params) => pythonInputs(params),
-  dynamicOutput: (params) => asPortType(params.outputType, 'bytes'),
-};
-
 // ---------------------------------------------------------------------------
 // 动作节点
 // ---------------------------------------------------------------------------
@@ -548,7 +509,6 @@ export const NODE_SPECS: readonly NodeKindSpec[] = [
   SELECT,
   CYCLIC,
   FIND,
-  PYTHON,
   FEED,
   WRITE,
   PUSH,
@@ -692,12 +652,6 @@ function selectType(params: ParamValues): PortType {
 
 function asPortType(raw: ParamValue | undefined, fallback: PortType): PortType {
   return raw === 'int' || raw === 'bool' || raw === 'bytes' || raw === 'text' ? raw : fallback;
-}
-
-/** Python 节点的命名输入：`name:类型` 一行一个。 */
-/** Python 节点的命名输入：与模块调用节点共用同一套解析。 */
-export function pythonInputs(params: ParamValues): readonly InputPortSpec[] {
-  return declaredInputs(params);
 }
 
 /** 出题人积木的输入端口由 `authorBlocks` 声明决定；未声明时只留 `id` 参数。 */

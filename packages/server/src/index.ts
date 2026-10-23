@@ -7,12 +7,6 @@ export { buildApp };
 export type { BuildAppOptions };
 export { defaultStaticRoot } from './static';
 export type { RateLimitOptions, RateLimitConfig, SessionLimits, WindowLimit } from './limits';
-export { createPythonEvaluator } from './python';
-export type {
-  PythonDiagnostic,
-  PythonEvaluator,
-  PythonEvaluatorConfig,
-} from './python';
 
 /**
  * 服务端开发入口：Fastify 单进程同时承担引擎、API 与静态托管（07 §7）。

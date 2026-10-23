@@ -3,7 +3,7 @@ import { NODE } from '@pwn2block/shared';
 import type { AuthorBlock } from '@pwn2block/shared';
 import { compileGraph } from '../src/workflow/compile';
 import type { WorkflowArtifact, WorkflowContext } from '../src/workflow/types';
-import { WORKFLOW_CONTEXT, fakePython, wfEdge, wfNode, workflow } from './workflow-helpers';
+import { WORKFLOW_CONTEXT, wfEdge, wfNode, workflow } from './workflow-helpers';
 
 /**
  * 图编译（06 §2、§4.1；07 §P2 验证项）：同样的图得到同样的动作，失败时不发布部分产物。
@@ -214,110 +214,28 @@ describe('编译：数据节点规则', () => {
     expect(outcome.issues[0]?.message).toContain('重叠');
   });
 
-  it('条件选值只求值被选中的候选值（未选中分支里的 Python 不执行）', async () => {
-    const python = fakePython(() => ({ ok: true, value: { kind: 'bytes', hex: 'dead' } }));
+  it('条件选值只求值被选中的候选值（未选中分支即使会报错也不执行）', async () => {
     const document = workflow({
       nodes: [
         wfNode('cmp', NODE.compare, { op: 'EQ', a: 1, b: 1 }),
         wfNode('left', NODE.hex, { hex: 'aaaa' }),
-        wfNode('right', NODE.python, {
-          code: 'result = 1',
-          outputType: 'bytes',
-          inputs: [],
-        }),
+        // 2 字节里取 8 字节：真被求值就会报「越界」。
+        wfNode('short', NODE.hex, { hex: 'bb' }),
+        wfNode('right', NODE.slice, { offset: 0, length: 8 }),
         wfNode('pick', NODE.select, { type: 'bytes' }),
         wfNode('write', NODE.write),
       ],
       edges: [
         wfEdge('cmp', 'pick', 'cond'),
         wfEdge('left', 'pick', 'a'),
+        wfEdge('short', 'right', 'bytes'),
         wfEdge('right', 'pick', 'b'),
         wfEdge('pick', 'write', 'data'),
       ],
       main: ['cmp', 'left', 'pick', 'write'],
     });
-    const artifact = artifactOf(await compile(document, python.context));
-    expect(python.calls).toEqual([]);
+    const artifact = artifactOf(await compile(document));
     expect(artifact.actions[0]).toEqual({ type: 'write_bytes', addr: '0x0', hex: 'aaaa' });
-  });
-});
-
-describe('编译：Python 节点', () => {
-  it('没有求值器时明确报 python_unavailable，而不是静默失败', async () => {
-    const document = workflow({
-      nodes: [wfNode('py', NODE.python, { code: 'result = 1', outputType: 'bytes', inputs: [] })],
-      main: ['py'],
-    });
-    const outcome = await compile(document);
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.issues[0]?.code).toBe('python_unavailable');
-    expect(outcome.issues[0]?.nodeId).toBe('py');
-  });
-
-  it('Python 与内置节点生成相同字节，输出类型不符时拒绝', async () => {
-    const python = fakePython(() => ({ ok: true, value: { kind: 'bytes', hex: '41414141' } }));
-    const document = workflow({
-      nodes: [
-        wfNode('py', NODE.python, { code: 'result = b"AAAA"', outputType: 'bytes', inputs: [] }),
-        wfNode('feed', NODE.feed),
-      ],
-      edges: [wfEdge('py', 'feed', 'data')],
-      main: ['feed'],
-    });
-    expect(artifactOf(await compile(document, python.context)).actions[0]).toEqual({
-      type: 'feed',
-      hex: '41414141',
-    });
-
-    const wrongType = fakePython(() => ({ ok: true, value: { kind: 'text', text: 'x' } }));
-    const mismatch = await compile(document, wrongType.context);
-    expect(mismatch.ok).toBe(false);
-    if (mismatch.ok) return;
-    expect(mismatch.issues[0]?.code).toBe('python_failed');
-    expect(mismatch.issues[0]?.message).toContain('输出类型');
-  });
-
-  it('命名输入按声明类型传给 Python，大整数不丢精度', async () => {
-    const big = (1n << 100n) + 7n;
-    const python = fakePython(() => ({ ok: true, value: { kind: 'bytes', hex: '0100000000002000' } }));
-    const document = workflow({
-      nodes: [
-        wfNode('value', NODE.arith, { op: 'ADD', a: big.toString(), b: '0' }),
-        wfNode('py', NODE.python, { code: 'result = a.to_bytes(8, "little")', outputType: 'bytes', inputs: ['a:int'] }),
-        wfNode('write', NODE.write),
-      ],
-      edges: [wfEdge('value', 'py', 'a'), wfEdge('py', 'write', 'data')],
-      main: ['value', 'py', 'write'],
-    });
-    const outcome = await compile(document, python.context);
-    expect(python.calls).toHaveLength(1);
-    expect(python.calls[0]?.inputs).toEqual([
-      { name: 'a', type: 'int', value: { kind: 'int', value: big.toString() } },
-    ]);
-    const artifact = artifactOf(outcome);
-    expect(artifact.actions[0]).toEqual({
-      type: 'write_bytes',
-      addr: '0x0',
-      hex: '0100000000002000',
-    });
-  });
-
-  it('Python 报错时带上节点与行号，且不发布产物', async () => {
-    const python = fakePython(() => ({
-      ok: false,
-      error: { code: 'runtime', message: 'ZeroDivisionError: division by zero', line: 2 },
-    }));
-    const document = workflow({
-      nodes: [wfNode('py', NODE.python, { code: 'x = 1\nresult = x / 0', outputType: 'int', inputs: [] })],
-      main: ['py'],
-    });
-    const outcome = await compile(document, python.context);
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.issues[0]?.nodeId).toBe('py');
-    expect(outcome.issues[0]?.message).toContain('第 2 行');
-    expect(outcome.issues[0]?.message).toContain('ZeroDivisionError');
   });
 });
 

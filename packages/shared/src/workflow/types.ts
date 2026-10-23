@@ -2,8 +2,8 @@
  * 节点画布的数据模型（06 §2、§3；07 §3「图文档」）。
  *
  * 这一层只描述**可序列化的文档**：节点、参数、数据连接、结构化执行区域、布局。
- * 它不 import 任何画布库、不碰 DOM，也不依赖求值实现——画布、编译器、存档和 Python
- * 协议都从这份定义出发，所以「表单、编译器、存档用同一份描述」（07 §P1）。
+ * 它不 import 任何画布库、不碰 DOM，也不依赖求值实现——画布、编译器与存档
+ * 都从这份定义出发，所以「表单、编译器、存档用同一份描述」（07 §P1）。
  *
  * 三条建模决定：
  * - **数据连接表达值的依赖**：`connections` 是端口到端口的边，数据从左向右流。
@@ -22,7 +22,7 @@ export const WORKFLOW_FORMAT = 'pwn2block.workflow';
 /** 文档格式版本。不兼容的改动必须进位，读旧版本时给出明确错误而不是猜。 */
 export const WORKFLOW_VERSION = 1;
 
-/** 端口类型（06 §6：Python 只传这四类，不传任意对象）。 */
+/** 端口类型（06 §6：只传这四类，不传任意对象）。 */
 export const PORT_TYPES = ['int', 'bool', 'bytes', 'text'] as const;
 export type PortType = (typeof PORT_TYPES)[number];
 
@@ -35,7 +35,7 @@ export const PORT_TYPE_LABELS: Readonly<Record<PortType, string>> = {
 };
 
 /**
- * 参数的取值：整数、文本、下拉、十六进制串，以及「一组字符串」（Python 节点的命名输入）。
+ * 参数的取值：整数、文本、下拉、十六进制串，以及「一组字符串」（模块节点的命名输入）。
  * 数组只用于声明端口列表，不用于承载任意对象（06 §6）。
  */
 export type ParamValue = string | number | readonly string[];
@@ -170,8 +170,6 @@ export const WORKFLOW_ISSUE_CODES = [
   'limit_exceeded',
   'eval_failed',
   'cancelled',
-  'python_unavailable',
-  'python_failed',
   'result_outside_control',
   'missing_region_result',
   'region_result_type_mismatch',
@@ -217,8 +215,7 @@ export interface WorkflowIssue {
  * 参数输入形态。
  *
  * `int` / `text` / `hex` 是可直接填写的值；`select` 是封闭下拉；`type` 是端口类型下拉；
- * `code` 是 Python 代码（侧栏编辑）；`portList` 是「一组 name:类型」声明；
- * `authorBlock` 是从题目声明的出题人积木里选一个。
+ * `portList` 是「一组 name:类型」声明；`authorBlock` 是从题目声明的出题人积木里选一个。
  */
 export type ParamKind =
   | 'int'
@@ -226,7 +223,6 @@ export type ParamKind =
   | 'hex'
   | 'select'
   | 'type'
-  | 'code'
   | 'portList'
   | 'authorBlock';
 
@@ -298,7 +294,7 @@ export interface NodeKindSpec {
     readonly label: string;
     readonly type: PortType;
   };
-  /** 端口类型依赖参数的节点（条件选值、Python、出题人积木）。 */
+  /** 端口类型依赖参数的节点（条件选值、出题人积木）。 */
   readonly dynamicInputs?: (
     params: ParamValues,
     context: {
@@ -308,7 +304,7 @@ export interface NodeKindSpec {
   ) => readonly InputPortSpec[];
   /** 固定输出类型。 */
   readonly output?: PortType;
-  /** 输出类型由参数声明的节点（条件选值、Python）。 */
+  /** 输出类型由参数声明的节点（条件选值）。 */
   readonly dynamicOutput?: (params: ParamValues) => PortType | undefined;
   /** 容器区域（条件分支、循环体）。 */
   readonly regions?: readonly {

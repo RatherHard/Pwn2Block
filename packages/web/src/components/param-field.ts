@@ -1,7 +1,6 @@
 import { html, nothing } from 'lit';
 import type { ParamSpec, ParamValue } from '@pwn2block/shared';
 import { checkParam } from '../workflow/params';
-import './code-editor';
 
 /**
  * 属性面板的参数控件：统一负责值、手填/接线模式和校验提示。
@@ -20,9 +19,6 @@ export interface ParamFieldOptions {
   readonly source?: string;
   readonly onValue: (value: ParamValue) => void;
   readonly onMode?: (mode: 'inline' | 'port') => void;
-  /** 代码编辑器是否处于扩大状态（由属性面板持有，退出后保留内容）。 */
-  readonly expanded?: boolean;
-  readonly onExpand?: (expanded: boolean) => void;
 }
 
 /** 属性面板参数控件的 DOM id。 */
@@ -100,18 +96,7 @@ function renderControl(
     </select>`;
   }
 
-  if (param.kind === 'code' || param.kind === 'portList') {
-    if (param.kind === 'code') {
-      return html`<pwn2block-code-editor
-        id=${id}
-        .label=${param.label}
-        .value=${typeof current === 'string' ? current : ''}
-        .expanded=${options.expanded === true}
-        .rows=${10}
-        @p2b-code-change=${(event: CustomEvent<{ value: string }>) => options.onValue(event.detail.value)}
-        @p2b-code-expand=${(event: CustomEvent<{ expanded: boolean }>) => options.onExpand?.(event.detail.expanded)}
-      ></pwn2block-code-editor>`;
-    }
+  if (param.kind === 'portList') {
     const text = Array.isArray(current) ? current.join(', ') : String(current);
     return html`<textarea
       id=${id}

@@ -8,7 +8,7 @@
 import { NODE } from './kinds';
 import type { NodeCategory, NodeKindSpec } from './types';
 
-export const LIBRARY_CATEGORY_IDS = ['data', 'compute', 'payload', 'pattern', 'control', 'loop', 'variable', 'action', 'python', 'module'] as const;
+export const LIBRARY_CATEGORY_IDS = ['data', 'compute', 'payload', 'pattern', 'control', 'loop', 'variable', 'action', 'module'] as const;
 
 export type LibraryCategoryId = (typeof LIBRARY_CATEGORY_IDS)[number];
 
@@ -30,7 +30,6 @@ export const LIBRARY_CATEGORIES: readonly LibraryCategoryInfo[] = [
   { id: 'loop', label: '循环', summary: '重复执行、循环控制、索引与累加。' },
   { id: 'variable', label: '变量', summary: '声明、读取与修改变量。' },
   { id: 'action', label: '交互动作', summary: '当前实际支持的动作用节点：真正推进 VM 的只有这些。' },
-  { id: 'python', label: 'Python', summary: 'Python 数据处理节点，代码只在服务端隔离运行器里跑。' },
   { id: 'module', label: '我的模块', summary: '自己封装并保存的可复用模块，以及模块内的结果出口。' },
 ];
 
@@ -116,8 +115,7 @@ const PLACEMENTS: Readonly<Record<string, Placement | undefined>> = {
   [NODE.step]: { category: 'action' },
   [NODE.run]: { category: 'action' },
   [NODE.author]: { category: 'action' },
-  // Python 与模块：各自只有一类东西，只有一级。
-  [NODE.python]: { category: 'python' },
+  // 模块：只有一类东西，只有一级。
   [NODE.moduleData]: { category: 'module' },
   [NODE.moduleCall]: { category: 'module' },
   [NODE.moduleReturn]: { category: 'module' },

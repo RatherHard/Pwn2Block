@@ -1,16 +1,12 @@
 import {
   NODE,
   bytesToHex,
-  encodeBool,
-  encodeBytes,
-  encodeInt,
-  encodeText,
   nodeInputs,
   nodeOutput,
   nodeSpec,
   WORKFLOW_EVAL_STEP_LIMIT,
 } from '@pwn2block/shared';
-import type { EncodedValue, GraphConnection, GraphNode, NodeKindSpec } from '@pwn2block/shared';
+import type { GraphConnection, GraphNode, NodeKindSpec } from '@pwn2block/shared';
 import { computeNode, type EvalHelpers } from './compute-nodes';
 import { cacheKeyOf, createEvalContext, report, type EvalContext, type ValueResult } from './context';
 import { edgeKeyOf, paramsOf } from './document';
@@ -23,7 +19,7 @@ import type { NodePreview, PreviewSegment, WorkflowValue } from './types';
  *
  * 求值规则：
  * - **按依赖求值**：只有被动作（或其它数据节点）需要的节点才计算；没被选中分支里的节点不执行
- *   （06 §2「未选中分支中的 Python 不执行」）。
+ *   （06 §2「未选中分支里的节点不执行」）。
  * - **纯函数式**：数据节点只读自己的参数、上游结果和当前作用域里的变量，不读 VM 状态（06 §2）。
  * - **按执行上下文缓存**：同一个节点在循环每轮、不同分支里可能是不同的值，缓存键带上作用域、
  *   轮次和变量版本（`cacheKeyOf`），不用节点 id 当键（07 §P4）。
@@ -93,7 +89,6 @@ export async function evalNodeValue(
 function helpersFor(ctx: EvalContext): EvalHelpers {
   return {
     resolve: (node, spec, port) => resolveInput(ctx, node, spec, port),
-    encode: encodeValue,
   };
 }
 
@@ -199,19 +194,3 @@ function connectionInto(ctx: EvalContext, nodeId: string, portName: string): Gra
     to: { node: incoming.node, port: incoming.port },
   };
 }
-
-function encodeValue(value: WorkflowValue): EncodedValue {
-  switch (value.kind) {
-    case 'int':
-      return encodeInt(value.value);
-    case 'bool':
-      return encodeBool(value.value);
-    case 'bytes':
-      return encodeBytes(value.bytes);
-    case 'text':
-      return encodeText(value.text);
-  }
-}
-
-/** 内部值 → 传输编码（Python 输入）。 */
-export const encodeWorkflowValue = encodeValue;

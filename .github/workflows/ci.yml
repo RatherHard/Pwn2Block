@@ -21,8 +21,6 @@ jobs:
       FLAG_STACKFRAME: pwn2block-ci-sentinel
       FLAG_LOCALVAR: pwn2block-ci-sentinel
       FLAG_RET2ROP: pwn2block-ci-sentinel
-      # CI 里 docker 与 python3 都在：要求真实隔离后端真的跑起来，缺一就失败而不是 skip。
-      PWN2BLOCK_REQUIRE_PYTHON: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,20 +32,10 @@ jobs:
           cache: pnpm
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
-      # `python-real.test.ts` 不在测试里拉镜像（避免依赖网络）；CI 先显式拉好，再让真实
-      # docker 后端用例执行。`PWN2BLOCK_REQUIRE_PYTHON=1` 会把「镜像缺席」从 skip 变成失败。
-      - name: 拉取 Python 隔离镜像
-        run: docker pull python:3.12-alpine
       - name: 类型检查
         run: pnpm typecheck
       - name: Lint
         run: pnpm lint
-      # P6：运行器自测只用标准库，ubuntu-latest 自带 python3，所以这条在 CI 里是真跑的。
-      # 服务端那组真实解释器用例由 `pnpm test` 驱动；docker 后端用例在守护进程或镜像缺席时
-      # 整组跳过——跳过不等于通过，报告里必须写明。
-      - name: Python 运行器单元测试
-        working-directory: packages/python-runner
-        run: python3 -m unittest discover -s . -p "test_*.py" -v
       # 必须在测试之前构建：`packages/server/test/c04-static.test.ts` 里有两条**真实产物**用例
       # （对 `packages/web/dist` 实际发请求），产物缺席时整组跳过。先构建才能让静态托管与发布
       # 边界在 CI 里真的被执行，而不是被 skip 掉当成通过。

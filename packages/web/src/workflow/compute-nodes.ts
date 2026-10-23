@@ -3,20 +3,15 @@ import {
   bytesToHex,
   cyclicFind,
   cyclicSequence,
-  hexToBytes,
-  nodeInputs,
   nodeSpec,
-  nodeOutput,
   NODE,
-  PYTHON_MAX_EVALS_PER_COMPILE,
 } from '@pwn2block/shared';
-import type { EncodedValue, GraphNode, NodeKindSpec, PortType } from '@pwn2block/shared';
+import type { GraphNode, NodeKindSpec } from '@pwn2block/shared';
 import { addr, concat, int, padding, string, wordBytes, ByteBuildError } from '../compiler/bytes';
-import { paramsOf } from './document';
 import { findVar } from './context';
 import { report, type EvalContext, type ValueResult } from './context';
 import { MAX_INT_BITS } from './params';
-import type { PreviewSegment, PythonEvalResult, WorkflowValue } from './types';
+import type { PreviewSegment, WorkflowValue } from './types';
 
 /**
  * 各数据节点的计算（06 §4.1）。
@@ -29,8 +24,6 @@ import type { PreviewSegment, PythonEvalResult, WorkflowValue } from './types';
 /** 求值器提供给节点计算的回调（避免与本模块的递归依赖）。 */
 export interface EvalHelpers {
   readonly resolve: (node: GraphNode, spec: NodeKindSpec, port: string) => Promise<ValueResult>;
-  /** 内部值 → 传输编码（Python 节点的输入）。 */
-  readonly encode: (value: WorkflowValue) => EncodedValue;
 }
 
 function bytesOf(value: Uint8Array): ValueResult {
@@ -151,8 +144,6 @@ export function computeNode(
       return computeCyclic(ctx, node, spec, helpers);
     case NODE.find:
       return computeFind(ctx, node, spec, helpers);
-    case NODE.python:
-      return computePython(ctx, node, spec, helpers);
     case NODE.varGet:
       return Promise.resolve(computeVarGet(ctx, node));
     case NODE.index:
@@ -472,7 +463,7 @@ async function computeSelect(
 ): Promise<ValueResult> {
   const condition = await boolInput(ctx, node, spec, 'cond', helpers);
   if (condition === undefined) return { ok: false };
-  // 只求值被选中的候选值：没被选中的分支即使有错（甚至要跑 Python）也不该执行。
+  // 只求值被选中的候选值：没被选中的分支即使有错也不该执行。
   return helpers.resolve(node, spec, condition ? 'a' : 'b');
 }
 
@@ -512,82 +503,6 @@ async function computeFind(
     );
   }
   return intOf(BigInt(offset));
-}
-
-async function computePython(
-  ctx: EvalContext,
-  node: GraphNode,
-  spec: NodeKindSpec,
-  helpers: EvalHelpers,
-): Promise<ValueResult> {
-  const evaluator = ctx.workflow.python;
-  if (evaluator === undefined) {
-    return report(ctx, 'python_unavailable', node.id, 'Python 求值不可用：服务端没有启用隔离运行器');
-  }
-  if (ctx.pythonCalls >= PYTHON_MAX_EVALS_PER_COMPILE) {
-    return report(
-      ctx,
-      'limit_exceeded',
-      node.id,
-      `一次编译最多发起 ${PYTHON_MAX_EVALS_PER_COMPILE} 次 Python 求值（06 §5.3）`,
-    );
-  }
-  const outputType = nodeOutput(spec, paramsOf(node, spec))?.type;
-  if (outputType === undefined) return report(ctx, 'eval_failed', node.id, 'Python 节点没有声明输出类型');
-  const code = typeof node.params.code === 'string' ? node.params.code : '';
-  if (code.trim() === '') return report(ctx, 'invalid_param', node.id, 'Python 节点的代码是空的');
-
-  const ports = nodeInputs(spec, paramsOf(node, spec), ctx.portContext);
-  const inputs: { name: string; type: PortType; value: EncodedValue }[] = [];
-  for (const port of ports) {
-    const result = await helpers.resolve(node, spec, port.name);
-    if (!result.ok) return result;
-    inputs.push({ name: port.name, type: port.type, value: helpers.encode(result.value) });
-  }
-
-  ctx.pythonCalls += 1;
-  let result: PythonEvalResult;
-  try {
-    result = await evaluator.evaluate({ code, outputType, inputs });
-  } catch (error) {
-    return report(
-      ctx,
-      'python_failed',
-      node.id,
-      `Python 求值请求失败：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (!result.ok) {
-    const line = result.error.line === undefined ? '' : `（第 ${result.error.line} 行）`;
-    return report(ctx, 'python_failed', node.id, `Python ${result.error.code}${line}：${result.error.message}`);
-  }
-  if (result.value.kind !== outputType) {
-    return report(
-      ctx,
-      'python_failed',
-      node.id,
-      `Python 输出类型是 ${result.value.kind}，但节点声明的是 ${outputType}`,
-    );
-  }
-  const decoded = decodeEncoded(result.value);
-  if (decoded === undefined) return report(ctx, 'python_failed', node.id, 'Python 返回值无法解码');
-  return { ok: true, value: decoded };
-}
-
-function decodeEncoded(value: EncodedValue): WorkflowValue | undefined {
-  switch (value.kind) {
-    case 'int': {
-      if (!/^-?(?:0|[1-9][0-9]*)$/.test(value.value)) return undefined;
-      return { kind: 'int', value: BigInt(value.value) };
-    }
-    case 'bool':
-      return { kind: 'bool', value: value.value };
-    case 'bytes':
-      if (!/^(?:[0-9a-fA-F]{2})*$/.test(value.hex)) return undefined;
-      return { kind: 'bytes', bytes: hexToBytes(value.hex) };
-    case 'text':
-      return { kind: 'text', text: value.text };
-  }
 }
 
 // ---------------------------------------------------------------------------

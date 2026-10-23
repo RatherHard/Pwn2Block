@@ -9,7 +9,7 @@ import type { WorkflowValue } from './types';
  * - 校验阶段：`checkParam` 给出「第几个参数、哪里不对」，UI 直接标在表单上；
  * - 编译阶段：`inlineValue` 把内填值转成端口值，越界 / 非法 hex / 负移位这类规则在这里截住。
  *
- * 整数一律走 `bigint` 与十进制字符串，不经 `number`，所以 64 位地址与 Python 回来的大整数
+ * 整数一律走 `bigint` 与十进制字符串，不经 `number`，所以 64 位地址与超大整数
  * 都不损失精度（06 §6）。
  */
 
@@ -79,8 +79,7 @@ export function checkParam(param: ParamSpec, raw: ParamValue | undefined): strin
       }
       return undefined;
     }
-    case 'text':
-    case 'code': {
+    case 'text': {
       if (typeof raw !== 'string') return `${param.label}需要文本`;
       return undefined;
     }

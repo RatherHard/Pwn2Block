@@ -16,13 +16,12 @@ import type { NodePreview } from '../workflow/types';
 import { sharedStyles, terminalTheme } from '../theme';
 import { nodeSkin } from './node-skin';
 import { renderParamField } from './param-field';
-import './code-editor';
 
 /**
  * 常驻属性面板（10 §2.1、§2.2、§6）。
  *
  * 所有属性编辑统一在这里完成，修改通过命令写入文档，画布同步展示只读值。
- * Python 代码、命名输入与题目动作配置均使用同一份文档。
+ * 命名输入与题目动作配置均使用同一份文档。
  */
 
 export type InspectorAction =
@@ -77,10 +76,6 @@ export class Pwn2BlockNodeInspector extends LitElement {
         align-items: center;
         gap: 0.3rem;
         flex-wrap: wrap;
-      }
-      .param-line pwn2block-code-editor {
-        width: 100%;
-        min-width: 0;
       }
       .param-line input[type='text'],
       .param-line select,
@@ -212,7 +207,6 @@ export class Pwn2BlockNodeInspector extends LitElement {
           ...(mode?.source === undefined ? {} : { source: mode.source }),
           onValue: (value: ParamValue) => this.emitParam(param.name, value),
           onMode: (next) => this.emitMode(param.name, next),
-          onExpand: () => this.dispatchEvent(new CustomEvent('p2b-inspector-code-expand', { bubbles: true, composed: true })),
         });
       })}
     </section>`;

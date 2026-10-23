@@ -19,7 +19,6 @@ import {
   nodeOutput,
   nodeSpec,
   parseGraphDocument,
-  pythonInputs,
   stageAvailable,
 } from '../src/index';
 
@@ -46,11 +45,10 @@ describe('节点目录', () => {
     expect(kinds.size).toBeGreaterThan(15);
   });
 
-  it('工具箱按阶段开放：p3 阶段不出现 Python 与定位序列节点', () => {
+  it('工具箱按阶段开放：p3 阶段不出现定位序列节点', () => {
     const kinds = availableNodeSpecs('p3').map((spec) => spec.kind);
     expect(kinds).toContain(NODE.fill);
     expect(kinds).toContain(NODE.write);
-    expect(kinds).not.toContain(NODE.python);
     expect(kinds).not.toContain(NODE.cyclic);
     expect(stageAvailable('p7', 'p3')).toBe(false);
     expect(stageAvailable('p2', 'p3')).toBe(true);
@@ -97,18 +95,6 @@ describe('节点目录', () => {
     const textInputs = nodeInputs(spec, { type: 'text' }, CONTEXT);
     expect(textInputs.find((input) => input.name === 'a')?.type).toBe('text');
     expect(nodeOutput(spec, { type: 'int' })?.type).toBe('int');
-  });
-
-  it('Python 节点由 portList 参数声明命名输入', () => {
-    const spec = nodeSpec(NODE.python);
-    if (spec === undefined) throw new Error('目录缺少 python');
-    expect(pythonInputs({ inputs: ['a:int', 'b:bytes'] }).map((input) => `${input.name}:${input.type}`)).toEqual([
-      'a:int',
-      'b:bytes',
-    ]);
-    expect(nodeOutput(spec, { outputType: 'bool' })?.type).toBe('bool');
-    // 非法的名字直接忽略（校验器会报参数问题，这里不做半套解析）。
-    expect(pythonInputs({ inputs: ['Bad:int'] })).toEqual([]);
   });
 });
 
@@ -170,10 +156,10 @@ describe('图存档 Schema', () => {
       version: WORKFLOW_VERSION,
       nodes: [
         { id: 'start', kind: 'start', params: {} },
-        { id: 'py', kind: 'data.python', params: { inputs: ['a:int'], code: 'result = a', outputType: 'int' } },
+        { id: 'mod', kind: 'module.call', params: { inputs: ['a:int'], name: 'mine', width: 8 } },
       ],
       connections: [],
-      main: ['py'],
+      main: ['mod'],
       layout: {},
     });
     expect(parsed.ok).toBe(true);

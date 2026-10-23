@@ -23,7 +23,7 @@ import { sharedStyles, terminalTheme } from '../theme';
  * - `p2b-library-dragstart/dragmove/dragend`：拖拽全过程，父组件按落点建节点。
  *
  * 预览走 `renderStaticNode`，与画布上的节点同一套外观；它只调用目录里的纯函数，
- * 不执行 Python、不发起请求。目录路径是纯便利数据，存不进去只影响下次打开。
+ * 不执行任何代码、不发起请求。目录路径是纯便利数据，存不进去只影响下次打开。
  */
 
 /** 独立于旧版折叠状态，保存当前目录路径。 */
@@ -377,7 +377,7 @@ export class Pwn2BlockNodeLibrary extends LitElement {
     this.requestUpdate();
   }
 
-  /** 预览只用目录里的纯函数：不执行 Python，也不发起请求。 */
+  /** 预览只用目录里的纯函数：不执行代码，也不发起请求。 */
   private renderPreview(spec: NodeKindSpec) {
     const params = defaultParams(spec);
     const context = this.context ?? { archBits: 64 };

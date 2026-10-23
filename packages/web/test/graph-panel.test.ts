@@ -88,48 +88,12 @@ function feedGraph(): unknown {
   });
 }
 
-describe('画布面板：Python 能力', () => {
-  it('服务端报隔离运行器不可用时，面板写清原因', async () => {
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({ python: { available: false, backend: 'none', isolated: false, reason: '未配置隔离后端' } }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
-    try {
-      const { panel } = await mount();
-      await vi.waitFor(() => {
-        expect(panel.shadowRoot?.textContent ?? '').toContain('Python：不可用');
-      });
-      expect(panel.shadowRoot?.textContent ?? '').toContain('未配置隔离后端');
-    } finally {
-      globalThis.fetch = original;
-    }
-  });
-
-  it('隔离后端可用时显示后端与「已隔离」', async () => {
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ python: { available: true, backend: 'docker', isolated: true } }), {
-        status: 200,
-      })) as unknown as typeof fetch;
-    try {
-      const { panel } = await mount();
-      await vi.waitFor(() => {
-        expect(panel.shadowRoot?.textContent ?? '').toContain('Python：docker · 已隔离');
-      });
-    } finally {
-      globalThis.fetch = original;
-    }
-  });
-});
-
 describe('画布面板：工具箱与存档', () => {
   it('节点库按分类列出节点，点一下就加进画布', async () => {
     const { panel } = await mount();
     const library = panel.shadowRoot?.querySelector('pwn2block-node-library');
     const entries = library?.shadowRoot?.querySelectorAll('button[data-category]') ?? [];
-    expect(entries.length).toBe(10);
+    expect(entries.length).toBe(9);
     const fill = await libraryButton(panel, 'data.fill');
     expect(fill).not.toBeNull();
     fill?.click();
@@ -394,7 +358,6 @@ describe('节点库题目权限', () => {
     expect(await libraryButton(panel, NODE.write)).toBeNull();
     expect(await libraryButton(panel, NODE.push)).toBeNull();
     expect(await libraryButton(panel, NODE.author)).not.toBeNull();
-    expect(panel.shadowRoot?.textContent).not.toContain('Python 模板');
 
     panel.challenge = { ...ret2winPublic, allowedActions: ['push'], authorBlocks: [] };
     await settle(panel);

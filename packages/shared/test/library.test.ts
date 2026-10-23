@@ -50,9 +50,9 @@ const UNKNOWN_DATA: NodeKindSpec = {
 
 describe('节点库一级分类', () => {
   it('分类的 id 与顺序固定', () => {
-    expect(LIBRARY_CATEGORY_IDS).toEqual(['data', 'compute', 'payload', 'pattern', 'control', 'loop', 'variable', 'action', 'python', 'module']);
+    expect(LIBRARY_CATEGORY_IDS).toEqual(['data', 'compute', 'payload', 'pattern', 'control', 'loop', 'variable', 'action', 'module']);
     expect(LIBRARY_CATEGORIES.map((info) => info.id)).toEqual([...LIBRARY_CATEGORY_IDS]);
-    expect(new Set(LIBRARY_CATEGORIES.map((info) => info.id)).size).toBe(10);
+    expect(new Set(LIBRARY_CATEGORIES.map((info) => info.id)).size).toBe(9);
   });
 
   it('每个分类的中文名与用途说明齐全', () => {
@@ -65,7 +65,6 @@ describe('节点库一级分类', () => {
       '循环',
       '变量',
       '交互动作',
-      'Python',
       '我的模块',
     ]);
     for (const info of LIBRARY_CATEGORIES) {
@@ -116,8 +115,7 @@ describe('目录 → 分类的派生视图', () => {
       expect.arrayContaining([NODE.feed, NODE.write, NODE.push, NODE.pop, NODE.call, NODE.ret, NODE.step, NODE.run]),
     );
     expect(kindsIn('action')).not.toContain(NODE.start);
-    // Python 与我的模块
-    expect(kindsIn('python')).toEqual([NODE.python]);
+    // 我的模块
     expect(kindsIn('module')).toEqual(
       expect.arrayContaining([NODE.moduleData, NODE.moduleCall, NODE.moduleReturn]),
     );
@@ -155,7 +153,7 @@ describe('节点库搜索', () => {
     const spaced = searchLibrary(SPECS, '  concat  ').map((match) => match.kind);
     expect(upper).toContain(NODE.concat);
     expect(spaced).toEqual(upper);
-    expect(searchLibrary(SPECS, 'PYTHON').map((match) => match.path)).toContain('Python');
+    expect(searchLibrary(SPECS, 'MODULE').map((match) => match.path)).toContain('我的模块');
   });
 
   it('空查询返回全部条目且不重复', () => {

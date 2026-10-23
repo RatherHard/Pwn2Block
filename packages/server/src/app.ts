@@ -6,13 +6,10 @@ import {
   ActionsRequestSchema,
   ActionsResponseSchema,
   ApiErrorSchema,
-  CapabilitiesResponseSchema,
   ChallengeSummarySchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   MAX_BODY_BYTES,
-  PythonEvalRequestSchema,
-  PythonEvalResultSchema,
   SessionStateResponseSchema,
   SubmitRequestSchema,
   SubmitResponseSchema,
@@ -30,8 +27,6 @@ import { defaultChallengeDir, loadChallengeDir, resolveFlag } from './challenges
 import { SlidingWindowLimiter, resolveRateLimit } from './limits';
 import type { RateLimitOptions, SessionLimits } from './limits';
 import { mapActionResults, projectReplay, projectState, projectionContextOf } from './projection';
-import { createPythonEvaluator } from './python';
-import type { PythonEvaluator, PythonEvaluatorConfig } from './python';
 import { engineRuntimeFactory } from './runtime';
 import { SessionStore } from './sessions';
 import type { Session, SessionStoreOptions } from './sessions';
@@ -63,13 +58,6 @@ export interface BuildAppOptions {
   readonly staticRoot?: string;
   /** 是否注册静态托管，默认 `true`；关掉后非 `/api/**` 的路径全部 404。 */
   readonly serveStatic?: boolean;
-  /**
-   * Python 求值后端配置（06 §6、07 §P6）。后端由 `PWN2BLOCK_PYTHON_BACKEND` 决定，
-   * 默认 `none`：Python 节点不可用，绝不退化成宿主直接执行。
-   */
-  readonly python?: PythonEvaluatorConfig;
-  /** 直接注入求值器（替身或已构造好的实例），优先于 `python` 配置。 */
-  readonly pythonEvaluator?: PythonEvaluator;
 }
 
 /** 限流的对外文案：固定字符串，不回显请求内容，也不含任何内部信息（04 §6）。 */
@@ -132,24 +120,6 @@ function missingSession(reply: FastifyReply, expired: boolean): FastifyReply {
     : fail(reply, 'not_found', '会话不存在');
 }
 
-/**
- * 客户端断开时取消 Python 求值（07 §P6「客户端断开……回收整个任务」）。
- *
- * 正常响应结束时 `writableEnded` 已经是 true，所以只有「还没写完连接就断了」才取消——
- * keep-alive 连接在响应之后仍可能 close，不这样区分会误伤后续请求。
- */
-function attachAbort(reply: FastifyReply, controller: AbortController): () => void {
-  const raw = reply.raw;
-  if (typeof raw.on !== 'function') return () => undefined;
-  const onClose = (): void => {
-    if (!raw.writableEnded) controller.abort();
-  };
-  raw.on('close', onClose);
-  return () => {
-    if (typeof raw.off === 'function') raw.off('close', onClose);
-  };
-}
-
 function currentProjection(session: Session): Projection {
   return projectState(
     projectionContextOf(session.runtime),
@@ -185,16 +155,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   );
   const submitLimiter = new SlidingWindowLimiter(limits.submit, limits.now, limits.maxTrackedKeys);
 
-  // Python 求值入口（06 §6、07 §P6）。默认后端是 `none`：不配置就不可用，
-  // 绝不回退成在宿主进程里直接执行。诊断走 fastify logger，不出现在响应里。
-  const python = options.pythonEvaluator ?? createPythonEvaluator({
-    env,
-    ...options.python,
-    onDiagnostic: options.python?.onDiagnostic ?? ((diagnostic) => {
-      app.log.warn({ event: diagnostic.event, detail: diagnostic.detail }, diagnostic.message);
-    }),
-  });
-
   // 按 IP 限流（04 §6）。钩子必须早于路由注册，否则只对之后注册的路由生效。
   // 拒绝发生在路由处理之前：不进引擎、不动 `failures`、不压快照、不分配会话。
   app.addHook('onRequest', async (request, reply) => {
@@ -214,33 +174,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     sessions.clear();
     requestLimiter.clear();
     submitLimiter.clear();
-    // 关闭即回收 Python 子进程/容器，不留僵尸进程（07 §P6）。
-    await python.close();
   });
 
   app.get('/api/health', async () => ({ ok: true }));
-
-  // 能力查询（07 §P6）：前端据此禁用 Python 节点，而不是等用户拼完图再报错。
-  app.get('/api/capabilities', async () =>
-    CapabilitiesResponseSchema.parse({ python: python.capability() }),
-  );
-
-  // Python 求值（06 §6）。它与具体题目、会话无关，所以不要求 sessionId；
-  // 求值失败是**结果**（`ok:false` + 节点级错误码），不是 HTTP 错误。
-  app.post('/api/python/eval', async (request, reply) => {
-    const parsed = PythonEvalRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return fail(reply, 'invalid_request', requestIssueMessage(parsed.error, request.body));
-    }
-
-    const controller = new AbortController();
-    const detach = attachAbort(reply, controller);
-    try {
-      return PythonEvalResultSchema.parse(await python.evaluate(parsed.data, controller.signal));
-    } finally {
-      detach();
-    }
-  });
 
   // 题目列表：只含加载成功的题目；目录为空时返回 `[]` 是正确行为。
   app.get('/api/challenges', async () =>

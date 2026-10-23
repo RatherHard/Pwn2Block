@@ -189,84 +189,6 @@ test('侧栏修改属性同步到只读节点，撤销恢复原值（10 §2.2）
   await expect(countValue).toHaveText(String(original));
 });
 
-test('Python 编辑：没有文件导入入口，行号与扩大可用，代码随图保存（10 §6）', async ({ page }) => {
-  await openChallenge(page);
-  const panel = page.locator('pwn2block-graph-panel');
-  const inspector = panel.locator('aside.inspector');
-
-  await addNode(page, 'Python 处理');
-  const id = await nodeIdOf(page, 'data.python');
-  await focusNode(page, id);
-  // 文件导入入口已移除：面板里没有「导入…」类按钮。
-  await expect(inspector.getByRole('button', { name: /导入/ })).toHaveCount(0);
-
-  const editor = inspector.locator('pwn2block-code-editor');
-  await expect(editor.locator('.gutter')).toHaveCount(1);
-  await expect(editor.locator('.highlight')).toHaveCount(1);
-  const area = editor.locator('textarea.input');
-  await expect(area).toBeVisible();
-
-  // 改代码 → Tab 缩进 → 行号跟着内容 → 扩大再退出不丢内容 → 随图保存。
-  // 编辑器与多数输入框一样在失焦时提交，这里主动 blur 一次。
-  await area.fill('result = in0\n');
-  await area.evaluate((element) => (element as unknown as { blur(): void }).blur());
-  await expect
-    .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.python')?.params.code)
-    .toBe('result = in0\n');
-  await expect(editor.locator('.gutter')).toHaveText('1\n2');
-
-  await area.focus();
-  const beforeTab = await area.inputValue();
-  await area.press('Tab');
-  const afterTab = await area.inputValue();
-  expect(afterTab.length).toBeGreaterThan(beforeTab.length);
-  expect(afterTab.startsWith(beforeTab)).toBe(true);
-  await area.evaluate((element) => (element as unknown as { blur(): void }).blur());
-  await expect
-    .poll(async () => (await readDoc(page)).nodes.find((node) => node.kind === 'data.python')?.params.code)
-    .toBe(afterTab);
-
-  const canvas = panel.locator('pwn2block-graph-canvas');
-  const node = canvas.locator(`.node[data-node="${id}"]`);
-  const original = await stableBox(page, node);
-  const originalZoom = await canvas.evaluate((element) => (element as unknown as { zoom: number }).zoom);
-  const smallBox = await editor.boundingBox();
-  const fieldBox = await inspector.locator('select').first().boundingBox();
-  expect(smallBox).not.toBeNull();
-  expect(fieldBox).not.toBeNull();
-  expect(Math.abs((smallBox?.width ?? 0) - (fieldBox?.width ?? 0))).toBeLessThanOrEqual(2);
-  expect(Math.abs((smallBox?.x ?? 0) - (fieldBox?.x ?? 0))).toBeLessThanOrEqual(2);
-  await expect(node.getByRole('button', { name: '配置', exact: true })).toHaveCount(0);
-  await expect(node.locator('.node-status')).toHaveCount(0);
-
-  await editor.getByRole('button', { name: '扩大编辑' }).click();
-  const expanded = panel.locator('.canvas-code-editor');
-  await expect(expanded).toBeVisible();
-  await expect(canvas).toBeHidden();
-  await expect(expanded.locator('textarea')).toHaveValue(afterTab);
-  const largeBox = await expanded.boundingBox();
-  const hostBox = await panel.locator('.canvas-host').boundingBox();
-  expect(Math.abs((largeBox?.width ?? 0) - (hostBox?.width ?? 0))).toBeLessThanOrEqual(2);
-  expect(Math.abs((largeBox?.height ?? 0) - (hostBox?.height ?? 0))).toBeLessThanOrEqual(2);
-  const finalCode = 'result = b"expanded"';
-  await expanded.locator('textarea').fill(finalCode);
-  await expanded.locator('textarea').press('Escape');
-  await expect(expanded).toHaveCount(0);
-  await expect(area).toHaveValue(finalCode);
-  await expect(canvas).toBeVisible();
-  expect(await canvas.evaluate((element) => (element as unknown as { zoom: number }).zoom)).toBe(originalZoom);
-  const restored = await stableBox(page, node);
-  expect(Math.abs(restored.x - original.x)).toBeLessThanOrEqual(2);
-  expect(Math.abs(restored.y - original.y)).toBeLessThanOrEqual(2);
-  await expect(node).toHaveClass(/selected/);
-  await editor.getByRole('button', { name: '扩大编辑' }).click();
-  await expanded.locator('textarea').fill('result = b"saved"');
-  await expanded.getByRole('button', { name: '返回画布' }).click();
-  await expect(area).toHaveValue('result = b"saved"');
-  await page.reload();
-  await expect.poll(async () => (await readDoc(page)).nodes.find((node) => node.id === id)?.params.code).toBe('result = b"saved"');
-});
-
 test('节点库：两级目录、搜索过滤、常驻预览、拖入画布落点（10 §4）', async ({ page }) => {
   await openChallenge(page);
   const panel = page.locator('pwn2block-graph-panel');
@@ -274,14 +196,13 @@ test('节点库：两级目录、搜索过滤、常驻预览、拖入画布落�
   const canvas = panel.getByRole('application', { name: '节点画布' });
 
   // 两级目录：分类 → 节点，不再进入子分类。
-  await expect(library.locator('button[data-category]')).toHaveCount(10);
+  await expect(library.locator('button[data-category]')).toHaveCount(9);
   await expect(library.locator('button[data-kind]')).toHaveCount(0);
 
   // 搜索按名字过滤，并显示路径。
-  await library.getByRole('searchbox', { name: '搜索节点' }).fill('Python');
-  await expect(library.getByRole('button', { name: 'Python 处理', exact: true })).toBeVisible();
-  await expect(library.getByText('Python 模板')).toHaveCount(0);
-  await expect(library.getByRole('button', { name: '填充字节', exact: true })).toHaveCount(0);
+  await library.getByRole('searchbox', { name: '搜索节点' }).fill('填充');
+  await expect(library.getByRole('button', { name: '填充字节', exact: true })).toBeVisible();
+  await expect(library.getByRole('button', { name: '整数转字节', exact: true })).toHaveCount(0);
   await library.getByRole('searchbox', { name: '搜索节点' }).fill('');
 
   await library.getByRole('button', { name: '字节与载荷', exact: true }).click();

@@ -2,7 +2,6 @@ import type {
   ArchBits,
   AuthorBlock,
   BlockAction,
-  EncodedValue,
   GraphConnection,
   GraphDocument,
   GraphNode,
@@ -10,8 +9,6 @@ import type {
   ParamValues,
   PortType,
   PrimitiveAction,
-  PythonEvalError,
-  PythonEvalRequest,
   WorkflowIssue,
 } from '@pwn2block/shared';
 
@@ -37,18 +34,7 @@ export interface WorkflowContext {
   readonly archBits: ArchBits;
   readonly allowedActions: readonly string[];
   readonly authorBlocks?: readonly AuthorBlock[];
-  /** Python 求值入口。不提供时 Python 节点报「不可用」，而不是静默出错。 */
-  readonly python?: PythonEvaluator;
 }
-
-/** 浏览器侧的 Python 求值接口：可替换，测试用假实现，生产走服务端。 */
-export interface PythonEvaluator {
-  evaluate(request: PythonEvalRequest): Promise<PythonEvalResult>;
-}
-
-export type PythonEvalResult =
-  | { readonly ok: true; readonly value: EncodedValue }
-  | { readonly ok: false; readonly error: PythonEvalError };
 
 /** 节点在某个执行区域里的位置。`path` 由外向内，顶层是 `['main']`。 */
 export interface NodePlacement {

@@ -144,11 +144,6 @@ export function nodeRows(
 
 /** 参数值的一行摘要：太长就截断，完整值在属性面板里。 */
 export function summarizeParam(param: ParamSpec, value: ParamValue | undefined): string {
-  if (param.kind === 'code') {
-    const text = typeof value === 'string' ? value : '';
-    const lines = text === '' ? 0 : text.split('\n').length;
-    return `${lines} 行代码`;
-  }
   if (param.kind === 'portList') {
     const list = Array.isArray(value) ? value : [];
     return list.length === 0 ? '没有命名输入' : list.join(', ');

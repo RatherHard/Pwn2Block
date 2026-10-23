@@ -41,7 +41,7 @@ import { validateGraph } from './validate';
  * - **要么完整产物、要么带节点的错误**：任何一处失败都不发布部分动作（07 §P1）。
  * - **不推进 VM**：编译只算数据，`feed` / `step` / `run` 只是被排进序列（06 §2）。
  * - **可取消**：每个语句之前检查取消信号；取消返回 `cancelled`，不产生产物。
- * - 纯异步函数：不读 DOM、不读时间（Python 结果由注入的求值器提供）。
+ * - 纯异步函数：不读 DOM、不读时间（求值是纯计算，不受注入的求值器影响）。
  */
 
 /** 编译被取消：用异常穿透嵌套执行，外层统一转成 `cancelled` 问题。 */
@@ -73,7 +73,7 @@ export async function compileGraph(input: CompileGraphInput): Promise<CompileOut
     throw error;
   }
 
-  // 取消可能发生在一次长求值（Python）中间：优先报取消，不把半途的错误当结论。
+  // 取消可能发生在一次长求值中间：优先报取消，不把半途的错误当结论。
   if (input.signal?.aborted === true) return { ok: false, issues: [cancelledIssue('')] };
   if (ctx.issues.length > 0) return { ok: false, issues: [...ctx.issues] };
 

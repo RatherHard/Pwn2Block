@@ -23,7 +23,6 @@ export const NODE = {
   select: 'data.select',
   cyclic: 'data.cyclic',
   find: 'data.find',
-  python: 'data.python',
   feed: 'action.feed',
   write: 'action.write',
   push: 'action.push',

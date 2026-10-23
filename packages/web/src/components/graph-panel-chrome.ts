@@ -3,13 +3,12 @@ import type {
   GraphDocument,
   GraphModule,
   ParamValue,
-  PythonCapability,
   WorkflowIssue,
 } from '@pwn2block/shared';
 import type { PayloadControlsModel } from '../viewmodel/toolbar';
 
 /**
- * 画布面板的外围小部件（10 §2.1、§5、§6）：工具栏的运行按钮、Python 状态、节点库下方的
+ * 画布面板的外围小部件（10 §2.1、§5、§6）：工具栏的运行按钮、节点库下方的
  * 模板/模块/分组入口，以及问题与存档提示。
  *
  * 全是**纯渲染**：只接收数据与回调，不持有状态、不读存储、不发请求。面板因此只剩装配逻辑，
@@ -54,18 +53,6 @@ export function renderRunControls(controls: PayloadControlsModel | undefined, ha
     >${controls.abort.label}</button>
     <span id="run-reason" class="hint">${controls.run.enabled ? '' : controls.run.hint}</span>
   </span>`;
-}
-
-/** Python 能力：不可用时写清原因，避免学习者以为节点坏了（06 §6）。 */
-export function renderPythonStatus(capability: PythonCapability | undefined): unknown {
-  if (capability === undefined) return html`<span class="bad">Python：未知</span>`;
-  if (!capability.available) {
-    return html`<span class="bad"
-      >Python：不可用${capability.reason === undefined ? '' : `（${capability.reason}）`}</span
-    >`;
-  }
-  const isolation = capability.isolated ? '已隔离' : '未隔离，仅开发';
-  return html`<span class="ok">Python：${capability.backend} · ${isolation}</span>`;
 }
 
 /** 已定义的模块：显示种类/版本/被调用次数，并可插入调用节点（模块体在提取时生成）。 */

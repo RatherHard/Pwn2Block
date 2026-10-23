@@ -19,7 +19,7 @@ import { MODULE_KINDS, PORT_TYPES, WORKFLOW_FORMAT, WORKFLOW_VERSION, type Graph
 /** 节点 id：稳定、可读、能放进 CSS 选择器。 */
 export const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** 端口名：`out`、`data`、`item0`、用户声明的 Python 输入名。 */
+/** 端口名：`out`、`data`、`item0`、用户声明的命名输入。 */
 export const PORT_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 
 const ParamValueSchema = z.union([

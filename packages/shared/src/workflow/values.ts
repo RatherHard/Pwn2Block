@@ -1,12 +1,19 @@
 import { z } from 'zod';
 import { bytesToHex, hexToBytes } from '../hex';
-import { PYTHON_MAX_INT_DIGITS } from '../limits';
 import { PORT_TYPE_LABELS, PORT_TYPES, type PortType } from './types';
+
+/**
+ * 整数传输的十进制位数上限：防止超大整数撑爆内存与传输。
+ *
+ * 原先与 Python 求值的那组上限放在一起；Python 已删除，这里改成局部常量。
+ * 整个文件随旧画布一起删除时，跟着删。
+ */
+const MAX_INT_DIGITS = 512;
 
 /**
  * 值的传输编码（06 §6、07 §P1）。
  *
- * 编译期的值在浏览器里用 `bigint` / `Uint8Array` 表示；跨进程（Python）与存档只走这里的形式：
+ * 编译期的值在浏览器里用 `bigint` / `Uint8Array` 表示；跨进程与存档只走这里的形式：
  * - 整数用**十进制字符串**，不经 `number`，所以 64 位地址与超大整数都不丢精度；
  * - 字节用**无前缀 hex**，与仓库里其他"原始字节"同一口径（`hex.ts`）；
  * - 文本用 JSON 字符串；布尔用 JSON 布尔。
@@ -25,7 +32,7 @@ const HEX_BYTES_RE = /^(?:[0-9a-fA-F]{2})*$/;
 
 export const EncodedIntSchema = z
   .string()
-  .max(PYTHON_MAX_INT_DIGITS, `整数超过 ${PYTHON_MAX_INT_DIGITS} 位十进制数字`)
+  .max(MAX_INT_DIGITS, `整数超过 ${MAX_INT_DIGITS} 位十进制数字`)
   .regex(INT_RE, '整数必须是无前导零的十进制字符串');
 
 export const EncodedValueSchema = z.discriminatedUnion('kind', [
@@ -67,8 +74,8 @@ export type DecodeResult<T> =
 export function decodeInt(value: EncodedValue): DecodeResult<bigint> {
   if (value.kind !== 'int') return { ok: false, message: `期望整数，收到${PORT_TYPE_LABELS[value.kind]}` };
   if (!INT_RE.test(value.value)) return { ok: false, message: `整数格式非法：${value.value}` };
-  if (value.value.replace('-', '').length > PYTHON_MAX_INT_DIGITS) {
-    return { ok: false, message: `整数超过 ${PYTHON_MAX_INT_DIGITS} 位十进制数字` };
+  if (value.value.replace('-', '').length > MAX_INT_DIGITS) {
+    return { ok: false, message: `整数超过 ${MAX_INT_DIGITS} 位十进制数字` };
   }
   return { ok: true, value: BigInt(value.value) };
 }
