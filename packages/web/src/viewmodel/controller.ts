@@ -27,7 +27,7 @@ import {
 } from '@pwn2block/shared';
 import { ApiClientError, isSessionExpired, type ApiClient } from '../api';
 import { createArtifactTracker, type ArtifactTracker, type PayloadCompileState } from '../compiler/artifact';
-import type { ActionOrigin, CompiledAction, CompileError, NormalizedWorkspace } from '../compiler/types';
+import type { ActionOrigin, CompiledAction, CompileError } from '../compiler/types';
 import { stepAction } from './program';
 import { createSerialQueue } from './queue';
 import { defaultPosition, displayedView } from './replay';
@@ -176,7 +176,6 @@ export interface SessionController {
   /** 当前标签存在 `PageState.views` 里，改动经控制器并写进本地存储（设计 §3.1）。 */
   selectView(kind: ViewKind): void;
   cycleView(delta: -1 | 1): void;
-  compile(program: NormalizedWorkspace): void;
   /**
    * 采用画布编译出的动作与来源：写入同一个追踪器，运行/单步/提交照旧走既有链路。
    * 来源的 `blockId` 是画布节点 id。
@@ -946,21 +945,6 @@ export function createSessionController(deps: SessionControllerDeps): SessionCon
     publishErrors(errors: readonly CompileError[]): void {
       tracker.fail(errors);
       patch({ artifact: tracker.state, cursor: 0, results: [] });
-    },
-
-  compile(program: NormalizedWorkspace): void {
-      const challenge = state.challenge;
-      if (challenge === undefined) {
-        notify('warn', '会话还没准备好：先选一道题再编译');
-        return;
-      }
-      tracker.compile(program, challenge);
-      cursorStack = [];
-      patch({ artifact: tracker.state, cursor: 0, results: [] });
-      // 画布恢复会走到这里：产物刚编出来，正是判断「上次的游标还算不算数」的时候。
-      applyPendingResume();
-      // 产物条数是新的，会话记录里的 `actionsLength` 也要跟着走。
-      persistResume();
     },
 
     noteEdit(): void {

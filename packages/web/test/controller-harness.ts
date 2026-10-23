@@ -52,14 +52,15 @@ export async function open(options: FakeApiOptions = {}): Promise<Harness> {
   return { api, tracker, controller };
 }
 
-/** 让假追踪器产出指定动作，并让控制器发布这份快照（真实路径是 compile 一次）。 */
+/** 让控制器采用一份指定动作的产物（真实路径是画布编译完调 `publish`）。 */
 export function compileInto(
   tracker: FakeTracker,
   controller: SessionController,
   actions: readonly CompiledAction[],
 ): void {
-  tracker.setArtifact(makeArtifact(actions));
-  controller.compile({ blocks: [] });
+  const artifact = makeArtifact(actions);
+  tracker.setArtifact(artifact);
+  controller.publish(artifact.actions, artifact.origins);
 }
 
 export interface Deferred {
