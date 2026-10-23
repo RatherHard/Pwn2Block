@@ -41,6 +41,8 @@ export const CANVAS_ISSUE_CODES = [
   'flow_error',
   /** 方法节点的参数与题目声明不符（名称、类型、个数）。 */
   'method_mismatch',
+  /** 必填输入还没接线（编辑中的正常状态，生成前必须补上）。 */
+  'unconnected',
   /** 依赖流程状态，编辑期只能显示「待执行」（需求 §7）。 */
   'pending',
 ] as const;

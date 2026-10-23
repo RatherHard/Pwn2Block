@@ -1,6 +1,6 @@
 import type { BinaryOperator, ConversionSpec, UnaryOperator } from './operators';
+import { type ValueKind } from './value';
 import type { EncodedDictKey, EncodedScalarValue } from './value-codec';
-import type { ValueKind } from './value';
 
 /**
  * 新版画布的文档模型（需求 §2.2、§3、§4.1、§5.2、§6.1、§8）。
@@ -329,44 +329,92 @@ export function emptyCanvasDocument(): CanvasDocument {
 // 结构查询
 // ---------------------------------------------------------------------------
 
-/** 节点引用的上游**数据**节点 id，按输入顺序；重复引用（同一上游接两个输入）保留重复。 */
-export function inputIdsOf(node: CanvasNode): readonly string[] {
+/** 数据输入端口：字段名、中文标签、是否必填，以及当前接的节点（未接线时 `undefined`）。 */
+export interface InputRef {
+  readonly name: string;
+  readonly label: string;
+  readonly required: boolean;
+  readonly id: string | undefined;
+}
+
+/**
+ * 「未接线」的存档表示。
+ *
+ * 编辑中的图必然有半接好的节点，存档与 Schema 必须能表示「这个输入是空的」；
+ * 用空串而不是省略字段，是为了让「字段存在但没接」与「这个节点没有这个端口」区分开。
+ * 语义后果：`inputIdsOf` 会跳过它（不当作引用），校验报 `unconnected`，求值失败。
+ */
+export const UNCONNECTED = '';
+
+export function isConnected(id: string | undefined): id is string {
+  return id !== undefined && id !== UNCONNECTED;
+}
+
+/** 一个节点的全部数据输入端口，顺序即界面上从上到下的输入顺序。 */
+export function inputRefsOf(node: CanvasNode): readonly InputRef[] {
+  const ref = (name: string, label: string, id: string | undefined, required = true): InputRef => ({
+    name,
+    label,
+    required,
+    id: isConnected(id) ? id : undefined,
+  });
+
   switch (node.kind) {
     case 'value':
     case 'start':
-      return [];
-    case 'group':
-      return groupMembers(node);
-    case 'dict':
-      return node.entries.map((entry) => entry.value);
-    case 'relation':
-      return [node.left, node.right];
-    case 'unary':
-      return [node.operand];
-    case 'index':
-      return [node.target, node.index];
-    case 'lookup':
-      return [node.target, node.key];
-    case 'slice':
-      return [node.target, node.start, node.end, node.step].filter((id): id is string => id !== undefined);
-    case 'repeat':
-      return [node.target, node.count];
-    case 'convert':
-      return [node.input];
-    case 'var-decl':
-      return node.binding.mode === 'none' ? [] : [node.binding.input];
     case 'var-ref':
     case 'loop-index':
       return [];
+    case 'group':
+      return groupMembers(node).map((member, index) => ref(`member-${index}`, `第 ${index + 1} 项`, member));
+    case 'dict':
+      return node.entries.map((entry, index) =>
+        ref(`value-${index}`, `「${encodedKeyText(entry.key)}」的值`, entry.value),
+      );
+    case 'relation':
+      return [ref('left', '左', node.left), ref('right', '右', node.right)];
+    case 'unary':
+      return [ref('operand', '输入', node.operand)];
+    case 'index':
+      return [ref('target', '目标', node.target), ref('index', '下标', node.index)];
+    case 'lookup':
+      return [ref('target', '字典', node.target), ref('key', '键', node.key)];
+    case 'slice':
+      return [
+        ref('target', '目标', node.target),
+        ref('start', '起点', node.start, false),
+        ref('end', '终点', node.end, false),
+        ref('step', '步长', node.step, false),
+      ];
+    case 'repeat':
+      return [ref('target', '目标', node.target), ref('count', '次数', node.count)];
+    case 'convert':
+      return [ref('input', '输入', node.input)];
+    case 'var-decl':
+      return node.binding.mode === 'none'
+        ? []
+        : [ref('input', node.binding.mode === 'derived' ? '派生表达式' : '初始值', node.binding.input)];
     case 'assign':
-      return [node.value];
+      return [ref('value', '值', node.value)];
     case 'if':
-      return [node.cond];
+      return [ref('cond', '条件', node.cond)];
     case 'loop':
-      return [node.count];
+      return [ref('count', '次数', node.count)];
     case 'method':
-      return Object.values(node.args);
+      return Object.entries(node.args).map(([name, id]) => ref(name, name, id));
   }
+}
+
+/** 字典键的显示文本：整数键按十进制、文本键加引号（存档里存的是编码值，不是运行时键）。 */
+function encodedKeyText(key: EncodedDictKey): string {
+  return key.kind === 'int' ? key.value : `"${key.value}"`;
+}
+
+/** 节点引用的上游**数据**节点 id，按输入顺序；重复引用（同一上游接两个输入）保留重复。 */
+export function inputIdsOf(node: CanvasNode): readonly string[] {
+  return inputRefsOf(node)
+    .map((ref) => ref.id)
+    .filter((id): id is string => id !== undefined);
 }
 
 /** 组合的成员：先行后列（需求 §2.2「先从左到右、再从上到下」）。 */

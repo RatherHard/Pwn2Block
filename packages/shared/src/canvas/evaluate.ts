@@ -1,7 +1,16 @@
 import { CANVAS_MAX_BYTES, CANVAS_MAX_EVAL_STEPS, CANVAS_MAX_EXPR_DEPTH, CANVAS_MAX_TEXT_CHARS } from '../limits';
 import { indexOf, lookupOf, repeatOf } from './collection';
 import { applyConversion } from './convert';
-import { CANVAS_NODE_KIND_LABELS, groupMembers, inputIdsOf, isValueNode, nodeMapOf, type CanvasDocument, type CanvasNode } from './document';
+import {
+  CANVAS_NODE_KIND_LABELS,
+  groupMembers,
+  inputIdsOf,
+  inputRefsOf,
+  isValueNode,
+  nodeMapOf,
+  type CanvasDocument,
+  type CanvasNode,
+} from './document';
 import { dedupeIssues, errorIssue, warningIssue, type CanvasIssue, type CanvasIssueCode } from './issues';
 import { applyBinary, applyUnary, decidedByLeft } from './ops';
 import { binaryOperatorSpec } from './operators';
@@ -168,6 +177,14 @@ function evalById(state: EvalState, id: string): NodeResult {
 }
 
 function computeNode(state: EvalState, node: CanvasNode): NodeResult {
+  const missing = inputRefsOf(node).find((ref) => ref.required && ref.id === undefined);
+  if (missing !== undefined) {
+    return nodeFail(
+      node.id,
+      'unconnected',
+      `「${CANVAS_NODE_KIND_LABELS[node.kind]}」的「${missing.label}」还没接线`,
+    );
+  }
   switch (node.kind) {
     case 'value':
       return computeValue(node);

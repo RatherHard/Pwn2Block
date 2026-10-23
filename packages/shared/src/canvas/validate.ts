@@ -2,8 +2,10 @@ import { CANVAS_MAX_NODES } from '../limits';
 import {
   CANVAS_NODE_ID_RE,
   CANVAS_NODE_KINDS,
+  CANVAS_NODE_KIND_LABELS,
   groupMembers,
   inputIdsOf,
+  inputRefsOf,
   nodeMapOf,
   type CanvasDocument,
   type CanvasNode,
@@ -201,6 +203,7 @@ function checkNode(
   node: CanvasNode,
   issues: CanvasIssue[],
 ): void {
+  checkConnections(node, issues);
   switch (node.kind) {
     case 'value':
       checkLiteral(node, issues);
@@ -444,6 +447,16 @@ function checkAssign(
   const decl = resolveVariable(table, node.target);
   if (decl === undefined) return;
   expectType(state, node, issues, node.value, decl.type, `赋值给「${decl.name}」`);
+}
+
+/** 必填输入没接线：编辑期就该提示，生成前必须补齐（需求 §7「结构错误阻止生成」）。 */
+function checkConnections(node: CanvasNode, issues: CanvasIssue[]): void {
+  for (const ref of inputRefsOf(node)) {
+    if (!ref.required || ref.id !== undefined) continue;
+    issues.push(
+      errorIssue('unconnected', node.id, `「${CANVAS_NODE_KIND_LABELS[node.kind]}」的「${ref.label}」还没接线`),
+    );
+  }
 }
 
 /** 检查某个输入引用的静态类型；`undefined`/`any` 一律放过（留给求值阶段）。 */

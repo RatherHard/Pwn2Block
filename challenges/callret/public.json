@@ -109,6 +109,15 @@
     { "name": "call 压入的返回地址槽", "addr": "0x7ffffef8", "size": 8, "kind": "ret_addr" }
   ],
   "allowedActions": ["push", "step", "run", "undo", "reset"],
+  "authorBlocks": [
+    {
+      "id": "push_value",
+      "label": "压栈(值)",
+      "tooltip": "先把 RSP 减一个字宽（8 字节），再把值写进新的栈顶；`ret` 弹的就是这一格。",
+      "params": [{ "name": "value", "type": "addr" }],
+      "expand": [{ "type": "push", "value": "$value" }]
+    }
+  ],
   "hints": [
     {
       "text": "先 `step 1` 让 `vuln` 的第一条指令真的执行，然后同时看寄存器视图里的 `RSP` 和栈视图：`RSP` 从 0x7fffff00 变成了多少？哪个栈槽的内容从 00 变成了一个代码地址？那个值指向代码里的哪一条指令？"

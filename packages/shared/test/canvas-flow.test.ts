@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   CANVAS_FORMAT,
   CANVAS_VERSION,
+  inputIdsOf,
+  inputRefsOf,
   type CanvasDocument,
   type CanvasNode,
   type VariableBinding,
 } from '../src/canvas/document';
 import { generateCanvasActions } from '../src/canvas/actions';
+import { evaluateCanvasDocument } from '../src/canvas/evaluate';
+import { parseCanvasDocument } from '../src/canvas/schema';
 import { SubmitRequestSchema } from '../src/api';
 import { canvasMethodsOf, type CanvasMethodDecl } from '../src/canvas/methods';
 import { pendingValueNodes, previewCanvasDocument } from '../src/canvas/preview';
@@ -609,5 +613,74 @@ describe('方法目录（需求 §5.4）', () => {
     if (!result.ok) return;
     const parsed = SubmitRequestSchema.safeParse({ actions: result.sequence.actions });
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe('未接线（编辑中的正常状态）', () => {
+  it('存档形状接受空串，校验报 unconnected 并点明端口', () => {
+    const raw = {
+      format: 'pwn2block.canvas',
+      version: 2,
+      nodes: [
+        { kind: 'relation', id: 'add', op: 'int.add', left: '', right: '' },
+      ],
+      layout: {},
+      main: [],
+    };
+    const parsed = parseCanvasDocument(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const result = validateCanvasDocument(parsed.document);
+    expect(result.ok).toBe(false);
+    const messages = result.issues.map((issue) => issue.message);
+    expect(result.issues.every((issue) => issue.code === 'unconnected')).toBe(true);
+    expect(messages).toContain('「运算」的「左」还没接线');
+    expect(messages).toContain('「运算」的「右」还没接线');
+  });
+
+  it('求值遇到未接线回「还没接线」，不是「未知节点」', () => {
+    const document = docOf([{ kind: 'relation', id: 'add', op: 'int.add', left: '', right: '' }]);
+    const result = evaluateCanvasDocument(document);
+    expect(result.ok).toBe(false);
+    expect(result.issues[0]?.code).toBe('unconnected');
+    expect(result.issues[0]?.message).toContain('「左」还没接线');
+  });
+
+  it('生成动作被未接线挡住，且不产出动作', () => {
+    const document = docOf(
+      [start(), { kind: 'relation', id: 'add', op: 'int.add', left: '', right: 'one' }, intLit('one', 1), call('emit', { v: 'add' })],
+      ['start', 'emit'],
+    );
+    const result = generateCanvasActions(document, { methods: [EMIT] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((issue) => issue.code === 'unconnected')).toBe(true);
+  });
+
+  it('接上线之后同一个节点就合法了', () => {
+    const document = docOf(
+      [
+        start(),
+        intLit('one', 1),
+        intLit('two', 2),
+        { kind: 'relation', id: 'add', op: 'int.add', left: 'one', right: 'two' },
+        call('emit', { v: 'add' }),
+      ],
+      ['start', 'emit'],
+    );
+    const result = generateCanvasActions(document, { methods: [EMIT] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.sequence.actions).toEqual([{ type: 'block', id: 'emit', args: { v: '0x3' } }]);
+  });
+
+  it('inputIdsOf 跳过未接线，引用计数不把它当作引用', () => {
+    const node = { kind: 'relation', id: 'add', op: 'int.add', left: '', right: 'two' } as CanvasNode;
+    expect(inputIdsOf(node)).toEqual(['two']);
+    expect(inputRefsOf(node).map((ref) => [ref.name, ref.id, ref.required])).toEqual([
+      ['left', undefined, true],
+      ['right', 'two', true],
+    ]);
   });
 });

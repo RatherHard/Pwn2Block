@@ -53,14 +53,22 @@ const HEX_BYTES_RE = /^(?:[0-9a-fA-F]{2})*$/;
 const MAX_INT_TEXT_CHARS = 512;
 
 /**
- * 节点 id 与节点引用字段共用同一形状。
+ * 节点 id 的形状。
  *
- * 引用**不要求**目标存在：悬空引用是「这张图还差什么」的问题（由校验器报 `missing_input`），
+ * 引用**不要求**目标存在：悬空引用是「这张图还差什么」的问题（由校验器报出来），
  * 不是「存档坏了」。所以这里只查形状。
  */
 const CanvasNodeIdSchema = z
   .string()
   .regex(CANVAS_NODE_ID_RE, '节点 id 只能是字母、数字、下划线和连字符，长度 1–64');
+
+/**
+ * 输入引用字段：允许空串表示「还没接线」（见 `document.ts` 的 `UNCONNECTED`）。
+ *
+ * 编辑中的图必然有半接好的节点，存档要能表示这个状态；「必填端口没接线」由校验器报
+ * `unconnected`，不是存档形状错误。节点自己的 `id` 仍用 `CanvasNodeIdSchema`，不允许为空。
+ */
+const CanvasRefSchema = z.union([z.literal(''), CanvasNodeIdSchema]);
 
 /** 布局坐标：只影响显示，但脏存档不该带进 `Infinity` 或 1e9 这种值。 */
 const COORD_LIMIT = 100_000;
@@ -190,7 +198,7 @@ const RegionSequenceSchema = z
 const MethodArgsSchema = z
   .record(
     z.string().regex(METHOD_ARG_NAME_RE, '参数名只能以小写字母开头，含小写字母、数字和下划线，长度 1–16'),
-    CanvasNodeIdSchema,
+    CanvasRefSchema,
   )
   .refine((args) => Object.keys(args).length <= CANVAS_MAX_METHOD_ARGS, `方法参数最多 ${CANVAS_MAX_METHOD_ARGS} 个`);
 
@@ -206,7 +214,7 @@ const GroupRowSchema = z
 /** 字典的一条：键是字面键，值是另一个节点的 id。 */
 const DictEntrySchema = z.strictObject({
   key: EncodedDictKeySchema,
-  value: CanvasNodeIdSchema,
+  value: CanvasRefSchema,
 });
 
 /**
@@ -232,46 +240,46 @@ export const CanvasNodeSchema = z.discriminatedUnion('kind', [
     id: CanvasNodeIdSchema,
     kind: z.literal('relation'),
     op: z.enum(BINARY_OPERATORS),
-    left: CanvasNodeIdSchema,
-    right: CanvasNodeIdSchema,
+    left: CanvasRefSchema,
+    right: CanvasRefSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('unary'),
     op: z.enum(UNARY_OPERATORS),
-    operand: CanvasNodeIdSchema,
+    operand: CanvasRefSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('index'),
-    target: CanvasNodeIdSchema,
-    index: CanvasNodeIdSchema,
+    target: CanvasRefSchema,
+    index: CanvasRefSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('lookup'),
-    target: CanvasNodeIdSchema,
-    key: CanvasNodeIdSchema,
+    target: CanvasRefSchema,
+    key: CanvasRefSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('slice'),
-    target: CanvasNodeIdSchema,
-    start: CanvasNodeIdSchema.optional(),
-    end: CanvasNodeIdSchema.optional(),
-    step: CanvasNodeIdSchema.optional(),
+    target: CanvasRefSchema,
+    start: CanvasRefSchema.optional(),
+    end: CanvasRefSchema.optional(),
+    step: CanvasRefSchema.optional(),
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('repeat'),
-    target: CanvasNodeIdSchema,
-    count: CanvasNodeIdSchema,
+    target: CanvasRefSchema,
+    count: CanvasRefSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('convert'),
     spec: ConversionSpecSchema,
-    input: CanvasNodeIdSchema,
+    input: CanvasRefSchema,
   }),
   // —— 阶段二：变量（需求 §3）。声明就是节点，没有单独的 `vars` 字段。——
   z.strictObject({
@@ -284,34 +292,38 @@ export const CanvasNodeSchema = z.discriminatedUnion('kind', [
     type: z.enum(VALUE_KINDS),
     binding: VariableBindingSchema,
   }),
-  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('var-ref'), decl: CanvasNodeIdSchema }),
-  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('loop-index'), loop: CanvasNodeIdSchema }),
+  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('var-ref'), decl: CanvasRefSchema }),
+  z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('loop-index'), loop: CanvasRefSchema }),
   // —— 阶段二：流程（需求 §5）。区域用数组表达顺序，结构上就写不出回边。——
   z.strictObject({ id: CanvasNodeIdSchema, kind: z.literal('start') }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('if'),
-    cond: CanvasNodeIdSchema,
+    cond: CanvasRefSchema,
     then: RegionSequenceSchema,
     else: RegionSequenceSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('loop'),
-    count: CanvasNodeIdSchema,
+    count: CanvasRefSchema,
     body: RegionSequenceSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('method'),
-    block: z.string().regex(METHOD_BLOCK_RE, '方法标识只能以小写字母开头，含小写字母、数字和下划线，长度 1–32'),
+    // 空串表示「还没选方法」：新加的方法节点在校验期报 `method_mismatch`，存档形状仍合法。
+    block: z.union([
+      z.literal(''),
+      z.string().regex(METHOD_BLOCK_RE, '方法标识只能以小写字母开头，含小写字母、数字和下划线，长度 1–32'),
+    ]),
     args: MethodArgsSchema,
   }),
   z.strictObject({
     id: CanvasNodeIdSchema,
     kind: z.literal('assign'),
-    target: CanvasNodeIdSchema,
-    value: CanvasNodeIdSchema,
+    target: CanvasRefSchema,
+    value: CanvasRefSchema,
   }),
 ]);
 

@@ -94,6 +94,18 @@
     { "name": "目标槽", "addr": "0x7fffff08", "size": 8, "kind": "buffer" }
   ],
   "allowedActions": ["write_bytes", "step", "run", "undo", "reset"],
+  "authorBlocks": [
+    {
+      "id": "write_bytes",
+      "label": "写内存(地址, 字节)",
+      "tooltip": "把字节按你写的顺序原样写进目标地址：不替你换字节序，也不改变 RAX。",
+      "params": [
+        { "name": "addr", "type": "addr" },
+        { "name": "data", "type": "bytes" }
+      ],
+      "expand": [{ "type": "write_bytes", "addr": "$addr", "hex": "$data" }]
+    }
+  ],
   "hints": [
     { "text": "先在栈视图里找到标着「目标槽」的那一行（0x7fffff08）：它现在 8 个字节都是 00，和 RBP 的位置只差 8 个字节。" },
     { "text": "把目标值 0x1122334455667788 拆成 8 个字节，从最低位（0x88）到最高位（0x11）列一遍，再想它们从 0x7fffff08 开始应该往哪个方向排。写完 step 一次，对着寄存器视图里的 RAX 检查。" },

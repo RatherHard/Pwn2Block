@@ -91,6 +91,22 @@
     { "name": "第 2 次 push 落点", "addr": "0x7ffffef0", "size": 8, "kind": "custom" }
   ],
   "allowedActions": ["push", "pop", "step", "run", "undo", "reset"],
+  "authorBlocks": [
+    {
+      "id": "push_value",
+      "label": "压栈(值)",
+      "tooltip": "先把 RSP 减 8，再把值写进新的栈顶；栈顶因此下移一格。",
+      "params": [{ "name": "value", "type": "int" }],
+      "expand": [{ "type": "push", "value": "$value" }]
+    },
+    {
+      "id": "pop_value",
+      "label": "出栈()",
+      "tooltip": "读出栈顶那个字并让 RSP 加 8；读出的值不回写寄存器。",
+      "params": [],
+      "expand": [{ "type": "pop" }]
+    }
+  ],
   "hints": [
     {
       "text": "先看栈视图和寄存器视图，再试一次 `push`（这是个动作积木，不是执行指令）：`rsp` 是往低地址走还是往高地址走？一个栈槽几个字节？"
