@@ -6,7 +6,9 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * 旧画布（`pwn2block-graph-panel` / `pwn2block-graph-canvas` / 节点库 / Blockly 侧栏）已删除，
  * 所以这里只认新版画布的 DOM：
  * - 顶栏：`.top` 里的 `.btn-undo` / `.btn-redo` / `.btn-delete` / `.btn-run` 与 `.status-*` 计数；
- * - 工具箱：`aside.toolbox` 里每组 `.toolbox-group[data-category]` 下的 `.tool[data-kind]`；
+ * - 工具箱：`aside.toolbox` 里每组 `.toolbox-group[data-category]` 下的 `.tool[data-kind]`
+ *   （本题方法是 `.tool-block[data-block]`；搜索 `.library-query`、分类页 `.library-tab`，
+ *   不在当前页或不匹配搜索的条目带 `hidden`，计数仍然算得到）；
  * - 画布：`.stage > .surface` 里的 `.node-box[data-node]`、`.relation-box`、`.group-box`、
  *   `.port[data-node][data-port]`、`.marquee`；
  * - 检查器：`aside.inspector` 里按字段名生成的 `.field-<key>` 控件。
@@ -125,9 +127,14 @@ export async function addToolNode(page: Page, kind: string): Promise<void> {
   await toolboxOf(page).locator(`.tool[data-kind="${kind}"]`).click();
 }
 
-/** 点选一个节点，并等它带上选中样式。 */
+/**
+ * 点选一个节点，并等它带上选中样式。
+ *
+ * 点的是标题：节点已选中时单击可编辑行会直接开就地编辑框（工具箱加出来的节点本来就是选中的），
+ * 点标题只改选中，后续按键才会落到画布上。
+ */
 export async function selectNode(page: Page, nodeId: string): Promise<void> {
-  await panelOf(page).locator(`.node-box[data-node="${nodeId}"]`).click();
+  await panelOf(page).locator(`.node-box[data-node="${nodeId}"] .title`).click();
   await expect(panelOf(page).locator(`.node-box.selected[data-node="${nodeId}"]`)).toBeVisible();
 }
 
