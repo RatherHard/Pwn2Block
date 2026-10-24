@@ -45,7 +45,19 @@ pnpm e2e
 
 只跑某个 spec 或某个尺寸时加 `--project=...` 与文件路径；输出目录每轮换一个，避免 Playwright 清理上一轮现场。
 
-**同一个后端进程跑多轮会撞上会话上限。** 每个用例都会新建调试/判题会话，服务端默认同一来源最多 32 个存活会话（`packages/server/src/limits.ts`）。连跑几轮后前端会显示「同一来源的会话数已达上限」，此时用例失败与画布无关：重启后端再跑。完整套件应从干净后端开始运行。
+**同一个后端进程跑多轮会撞上会话上限。** 每个用例都会新建调试/判题会话，服务端默认同一来源最多 32 个存活会话（`packages/server/src/limits.ts`）。一个用例在不同题目/刷新之间还会再建会话，所以**一轮从干净后端开始也只能跑到大半套**：撞上后前端显示「同一来源的会话数已达上限」，此时失败与画布无关。推荐分两批跑，批间重启后端：
+
+```
+# 批一：画布交互、闭环、细节（11 例）
+pnpm exec playwright test --config tests/e2e/playwright.config.ts \
+  tests/e2e/canvas-interaction.spec.ts tests/e2e/closed-loop.spec.ts tests/e2e/frontend-details.spec.ts \
+  --project=chromium-desktop
+
+# 重启后端后，批二：六个视口的桌面冒烟（6 例）
+pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/desktop-smoke.spec.ts
+```
+
+两批合计 17 例，就是 `pnpm e2e` 的全集；CI 用干净后端一次跑，若撞上限就先重启再跑剩余项目。
 
 ## CI
 
