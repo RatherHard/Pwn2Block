@@ -1,5 +1,6 @@
 import { CANVAS_MAX_FLOW_DEPTH, CANVAS_MAX_FLOW_NODES } from '../limits';
 import {
+  UNCONNECTED,
   flowChildrenOf,
   inputIdsOf,
   isFlowNode,
@@ -339,6 +340,9 @@ function checkMethodNode(
 function checkMethodArg(ctx: FlowContext, node: MethodNode, param: CanvasMethodParam): void {
   const valueId = argIdOf(node.args, param.name);
   if (valueId === undefined) return;
+  // 「未接线」是一等编辑状态（`UNCONNECTED`）：接线检查自己会报 `unconnected`，
+  // 这里不能再把它当成「引用了不存在的节点」，否则新建一个方法节点会同时冒出两条错误。
+  if (valueId === UNCONNECTED) return;
   if (!ctx.nodes.has(valueId)) {
     const message = `方法 ${node.block} 的参数 ${param.name} 引用了不存在的节点 ${valueId}`;
     ctx.issues.push(errorIssue('flow_error', node.id, message));

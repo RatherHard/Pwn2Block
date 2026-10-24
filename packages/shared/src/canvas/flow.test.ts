@@ -15,6 +15,7 @@ import {
 } from './document';
 import { analyzeFlow, flowNodeIdsOf, isInsideLoop, type FlowRegionRef } from './flow';
 import type { CanvasMethodDecl } from './methods';
+import { validateCanvasDocument } from './validate';
 
 /**
  * 流程结构与作用域分析的契约测试（需求 §5、§11 AT-08 / AT-09）。
@@ -331,6 +332,15 @@ describe('方法节点', () => {
     expect(messagesOf(document, METHODS)).toEqual([
       '方法 write_mem 的参数 hex 引用了不存在的节点 ghost',
     ]);
+  });
+
+  it('参数未接线时只报 unconnected，不再叠一条「引用了不存在的节点」', () => {
+    const document = methodFlow('write_mem', { hex: '', n: 'v_one' });
+    // 引用检查在 flow 层：未接线（`UNCONNECTED`）不是引用错误，所以这里一条都不报；
+    // `unconnected` 由 `validateCanvasDocument` 的接线检查单独给出（见 canvas-validate.test.ts）。
+    expect(issueKeysOf(document, METHODS)).toEqual([]);
+    const issues = validateCanvasDocument(document, { methods: METHODS }).issues;
+    expect(issues.map((issue) => `${issue.code}@${issue.nodeId ?? ''}`)).toEqual(['unconnected@m']);
   });
 
   it('参数类型正确时没有问题', () => {
