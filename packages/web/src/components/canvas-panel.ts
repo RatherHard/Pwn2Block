@@ -3,7 +3,8 @@ import type { PropertyValues, TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
 import type { WorkflowIssue } from '../canvas/artifact';
-import { compileCanvas } from '../canvas/compile';
+import { compileCanvasWithSteps } from '../canvas/compile';
+import type { CanvasCompileOutcome } from '../canvas/compile';
 import type { CanvasEdit } from '../canvas/editor';
 import { loadCanvas, makeCanvasSave } from '../canvas/save';
 import type { CanvasStore } from '../canvas/save';
@@ -35,7 +36,11 @@ import { CanvasAutosave } from './canvas-panel-save';
 import { canvasPanelStyles } from './canvas-panel-styles';
 import { canvasPanelNodeStyles } from './canvas-panel-styles-node';
 import { canvasPanelSideStyles } from './canvas-panel-styles-side';
+import { canvasPanelStepsStyles } from './canvas-panel-styles-steps';
+import { nodeTitlesOf, renderSteps } from './canvas-panel-steps';
+import type { StepsState } from './canvas-panel-steps';
 import { renderToolbox, renderTopBar, statusCountsOf } from './canvas-panel-toolbox';
+import type { StatusCounts } from './canvas-panel-toolbox';
 
 /**
  * 新版画布面板 `<pwn2block-canvas-panel>`（阶段三核心交付）。
@@ -48,6 +53,9 @@ import { renderToolbox, renderTopBar, statusCountsOf } from './canvas-panel-tool
  *   与 `canvas-panel-actions`），所以类型、成环、上限都由命令层把关；
  * - 修订号由面板自己维护：每次文档变化 +1，撤销与加载同样算一次变化，父组件不必跟踪；
  * - 编译在每次文档变化后重跑：成功发产物、失败发错误列表，父组件据此决定「能不能运行」。
+ *
+ * 步骤快照（`canvas.CanvasStep`）是面板自己的状态：它**不进产物、也不进事件 payload**，
+ * 只喂给面板底部的「步骤与轮次」区（需求 §7）。于是父组件的产物契约一点没变。
  */
 
 /** `p2b-canvas-changed` 的 detail：父组件用它存档。 */
@@ -60,7 +68,14 @@ export interface CanvasChangedDetail {
 export type { CanvasLegacyDetail } from './canvas-panel-legacy';
 
 export class CanvasPanelElement extends LitElement {
-  static override styles = [terminalTheme, sharedStyles, canvasPanelStyles, canvasPanelNodeStyles, canvasPanelSideStyles];
+  static override styles = [
+    terminalTheme,
+    sharedStyles,
+    canvasPanelStyles,
+    canvasPanelNodeStyles,
+    canvasPanelSideStyles,
+    canvasPanelStepsStyles,
+  ];
 
   static override properties = {
     challenge: { attribute: false },
@@ -92,6 +107,10 @@ export class CanvasPanelElement extends LitElement {
   private selection: string[] = [];
   private message: string | undefined;
   private compileIssues: readonly WorkflowIssue[] = [];
+  /** 上一次编译成功给出的步骤快照；编译失败时清空（失败不发布部分动作，也不留上一轮的步骤）。 */
+  private steps: readonly canvas.CanvasStep[] = [];
+  /** 「步骤与轮次」区是否折叠：折叠状态归面板，重渲染不会把它忘掉。 */
+  private stepsCollapsed = false;
   private loadedFor: string | undefined;
   /** 上一次「已经处理过」的文档引用：用来识别父组件直接换文档，避免重复广播。 */
   private handledDocument: canvas.CanvasDocument | undefined;
@@ -270,10 +289,12 @@ export class CanvasPanelElement extends LitElement {
     const outcome = this.compile(document);
     if (outcome.ok) {
       this.compileIssues = outcome.warnings;
+      this.steps = outcome.steps;
       this.dispatch('p2b-canvas-compiled', { artifact: outcome.artifact });
       return;
     }
     this.compileIssues = outcome.issues;
+    this.steps = [];
     this.dispatch('p2b-canvas-compile-failed', { errors: outcome.issues });
   }
 
@@ -283,17 +304,19 @@ export class CanvasPanelElement extends LitElement {
     const outcome = this.compile(document);
     if (!outcome.ok) {
       this.compileIssues = outcome.issues;
+      this.steps = [];
       this.dispatch('p2b-canvas-compile-failed', { errors: outcome.issues });
       this.report(`还有 ${outcome.issues.length} 条问题，修好再运行`);
       return;
     }
+    this.steps = outcome.steps;
     this.dispatch('p2b-canvas-run', { artifact: outcome.artifact });
     this.report(undefined);
   }
 
-  private compile(document: canvas.CanvasDocument): ReturnType<typeof compileCanvas> {
+  private compile(document: canvas.CanvasDocument): CanvasCompileOutcome {
     const authorBlocks = this.challenge?.authorBlocks;
-    return compileCanvas({
+    return compileCanvasWithSteps({
       document,
       ...(authorBlocks === undefined ? {} : { authorBlocks }),
       documentRevision: this.revision,
@@ -347,12 +370,34 @@ export class CanvasPanelElement extends LitElement {
     };
   }
 
+  private toggleSteps(): void {
+    this.stepsCollapsed = !this.stepsCollapsed;
+    this.requestUpdate();
+  }
+
+  /** 顶栏的三个计数；文档还没到位时全是 0（不是「没问题」的假象，只是还没算）。 */
+  private countsOf(document: canvas.CanvasDocument | undefined): StatusCounts {
+    return document === undefined
+      ? { errors: 0, warnings: 0, unconnected: 0 }
+      : statusCountsOf(document, this.methods());
+  }
+
+  /** 「步骤与轮次」区的状态：步骤表自己拿着，标题从视图模型抄，点行回到 `locate`。 */
+  private stepsState(view: CanvasLayoutView | undefined): StepsState {
+    return {
+      steps: this.steps,
+      selection: this.selection,
+      titles: view === undefined ? new Map<string, string>() : nodeTitlesOf(view),
+      collapsed: this.stepsCollapsed,
+      onLocate: (nodeId) => this.locate(nodeId),
+      onToggle: () => this.toggleSteps(),
+    };
+  }
+
   override render(): TemplateResult {
     const document = this.interaction.displayDocument();
     const view = document === undefined ? undefined : this.layout();
-    const methods = this.methods();
-    const counts =
-      document === undefined ? { errors: 0, warnings: 0, unconnected: 0 } : statusCountsOf(document, methods);
+    const counts = this.countsOf(document);
     return html`<section class="panel" tabindex="0">
       ${renderTopBar({
         counts,
@@ -394,6 +439,7 @@ export class CanvasPanelElement extends LitElement {
               onChange: (change: InspectorChange) => applyInspectorField(this.host, change),
             })}
       </div>
+      ${renderSteps(this.stepsState(view))}
     </section>`;
   }
 }

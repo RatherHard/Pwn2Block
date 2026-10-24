@@ -26,9 +26,14 @@ export const canvasPanelStyles = css`
     border-color: var(--p2b-focus);
   }
 
+  /*
+   * 三段：顶栏 / 三栏主体 / 步骤与轮次。
+   * 「步骤与轮次」单独占最后一行（整宽），而不是塞进中间一列：三栏的列宽由工具箱与检查器
+   * 决定，把它放进中间列会让表格的可读宽度跟着侧栏变，窄屏上几乎没法看。
+   */
   .panel {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
   }
