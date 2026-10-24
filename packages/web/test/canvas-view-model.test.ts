@@ -157,7 +157,7 @@ describe('连线', () => {
 });
 
 describe('关系方框', () => {
-  it('两个已接线输入时落在来源输出点的中点', () => {
+  it('两个已接线输入时落在最右来源右侧 32 处，竖直对齐来源中心', () => {
     const view = layoutCanvas({
       document: documentWith([intValue('v1'), intValue('v2'), relationNode('r', 'v1', 'v2')], {
         v1: { x: 0, y: 0 },
@@ -166,7 +166,35 @@ describe('关系方框', () => {
       }),
     });
     const box = boxOf(view, 'r', 'relation');
-    expect(box).toMatchObject({ x: 307, y: 33, width: 58, height: 28 });
+    // 白框 180×94（值 + 预览两行），最右来源右边缘 480，再 +32；中心 47 − 方框半高 14。
+    expect(box).toMatchObject({ x: 512, y: 33, width: 58, height: 28 });
+  });
+
+  it('来源上下排时方框不压在两个白框之间', () => {
+    const view = layoutCanvas({
+      document: documentWith([intValue('v1'), intValue('v2'), relationNode('r', 'v1', 'v2')], {
+        v1: { x: 0, y: 0 },
+        v2: { x: 0, y: 120 },
+        r: { x: 0, y: 400 },
+      }),
+    });
+    // 两个中心 47 与 167 的平均 107，方框顶 93；x 在来源右侧 212。
+    expect(boxOf(view, 'r', 'relation')).toMatchObject({ x: 212, y: 93, width: 58, height: 28 });
+  });
+
+  it('首选位置被白框占住时按固定顺序避让，并留出 12 的空隙', () => {
+    const view = layoutCanvas({
+      document: documentWith([intValue('v1'), relationNode('r', 'v1', UN), intValue('blocker')], {
+        v1: { x: 0, y: 0 },
+        r: { x: 0, y: 400 },
+        blocker: { x: 220, y: 0 },
+      }),
+    });
+    const box = boxOf(view, 'r', 'relation');
+    // 首选 (212, 33) 撞上 blocker（220..400 × 0..94）。每档 28 + 12 = 40，按 0、+1、−1、+2 试：
+    // y=33、73、−7 外扩 12 后都与 blocker 相交，y=113 外扩后顶在 101，第一个不撞。
+    expect(box).toMatchObject({ x: 212, y: 113 });
+    expect(box!.y - 12).toBeGreaterThan(94);
   });
 
   it('输入都没接线时放在自己锚点上方 40 处', () => {
@@ -185,9 +213,9 @@ describe('关系方框', () => {
     const rect = boxOf(view, 'r', 'relation');
     const incoming = view.edges.find((edge) => edge.from.nodeId === 'v1');
     const outgoing = view.edges.find((edge) => edge.from.nodeId === 'r');
-    expect(incoming?.to).toEqual({ nodeId: 'r', x: 103, y: 137 });
+    expect(incoming?.to).toEqual({ nodeId: 'r', x: 206, y: 42 });
     expect(incoming?.viaRect).toMatchObject({ x: rect?.x, y: rect?.y, width: 58, height: 28 });
-    expect(outgoing?.from).toEqual({ nodeId: 'r', x: 173, y: 142 });
+    expect(outgoing?.from).toEqual({ nodeId: 'r', x: 276, y: 47 });
     expect(outgoing?.viaRect).toMatchObject({ x: rect?.x, y: rect?.y, width: 58, height: 28 });
   });
 });

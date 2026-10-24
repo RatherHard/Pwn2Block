@@ -50,6 +50,17 @@ export const RELATION_MAX_HEIGHT = 36;
 
 /** 运算节点的输入都没接线时，关系方框放在自己布局原点上方的高度。 */
 export const RELATION_ABOVE_GAP = 40;
+/**
+ * 关系方框左边缘离最右一个来源右边缘的距离（需求 §6.1「与两个数据节点均留有间距」）。
+ * 两侧端口各占 `PORT_GAP`，中间还剩 20px 的连线，方框不会贴着来源。
+ */
+export const RELATION_GAP = 32;
+/** 关系方框与任何大白框之间至少留出的空隙；候选位置撞上就换下一个。 */
+export const RELATION_CLEARANCE = 12;
+/** 避让时竖直方向最多试几档（上下交替），再往右挪一列。 */
+export const RELATION_DODGE_STEPS = 4;
+/** 避让时一整列都撞上，就往右挪这么多再试。 */
+export const RELATION_DODGE_COLUMN = 48;
 
 /** 中文与全角标点的估算宽度；其余按半角算。 */
 const WIDE_CHAR_WIDTH = 14;
@@ -189,6 +200,11 @@ export function flowPortPointOf(rect: Rect, direction: FlowPortDirection): Point
   return direction === 'out'
     ? { x, y: rect.y + rect.height + FLOW_PORT_GAP }
     : { x, y: rect.y - FLOW_PORT_GAP };
+}
+
+/** 两个矩形是否相交（只算重叠面积，贴边不算）。 */
+export function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
 /** 两点中点；取整是为了让图坐标保持整数（渲染与测试都更好读）。 */

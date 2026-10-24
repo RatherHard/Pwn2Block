@@ -3,15 +3,18 @@ import {
   anchorRectOf,
   canvasPositionsOf,
   centerOf,
-  midpointOf,
+  inflateRect,
   nodeBoxSize,
-  outputPointOf,
-  rectAround,
+  rectsOverlap,
   relationBoxSize,
   RELATION_ABOVE_GAP,
+  RELATION_CLEARANCE,
+  RELATION_DODGE_COLUMN,
+  RELATION_DODGE_STEPS,
+  RELATION_GAP,
 } from './view-model-geometry';
 import { isRelationBoxKind, toneOfKind } from './view-model-rows';
-import type { CanvasBox, CanvasRow, Point, Rect } from './view-model-types';
+import type { CanvasBox, CanvasRow, Rect } from './view-model-types';
 
 /**
  * 盒子的位置与尺寸（任务几何规则 1–3）。
@@ -137,37 +140,69 @@ function nodeRectOf(state: ResolverState, node: canvas.CanvasNode): Rect {
 }
 
 /**
- * 关系方框（任务规则 2）：
- * - 两个输入都接线 → 两个来源输出点的中点；
- * - 只有一个输入（`unary`，或关系只接了一边）→ 该来源与该节点自身锚点的中点；
+ * 关系方框（需求 §6.1「与两个数据节点均留有间距」）：
+ * - 有已接线的来源 → 方框放在**所有来源右边缘再往右 `RELATION_GAP`**，竖直对齐来源中心的平均值。
+ *   旧规则取两个输出点的中点，来源上下排时方框会正好压在两个白框之间、甚至盖住它们；
+ *   放在来源右侧的空隙里，进线一定是「来源 → 方框」的短横线，出线再接到下游。
  * - 一个都没接 → 放在自己锚点上方 40 处，x 与锚点对齐。
+ *
+ * 两种情况最后都过一遍避让（`dodge`）：与任何大白框或已经摆好的关系方框留出 `RELATION_CLEARANCE`。
+ * 避让只按「上下交替、再往右挪一列」的固定顺序试，同一份文档永远落在同一个位置。
  */
 function relationRectOf(state: ResolverState, node: canvas.CanvasNode): Rect {
   const size = relationBoxSize(state.decks.get(node.id)?.title ?? '');
-  const points = sourcePointsOf(state, node);
-  if (points.length === 0) {
+  const sources = sourceRectsOf(state, node);
+  if (sources.length === 0) {
     const anchor = anchorRectOf(state.positions.get(node.id) ?? { x: 0, y: 0 });
-    return {
-      x: anchor.x,
-      y: anchor.y - RELATION_ABOVE_GAP - size.height,
-      width: size.width,
-      height: size.height,
-    };
+    const above = { x: anchor.x, y: anchor.y - RELATION_ABOVE_GAP - size.height, ...size };
+    return dodge(state, node.id, above);
   }
-  const center =
-    points.length === 1
-      ? midpointOf(points[0], centerOf(anchorRectOf(state.positions.get(node.id) ?? { x: 0, y: 0 })))
-      : midpointOf(points[0], points[1]);
-  return rectAround(center, size);
+  const right = Math.max(...sources.map((rect) => rect.x + rect.width));
+  const middle = sources.reduce((sum, rect) => sum + centerOf(rect).y, 0) / sources.length;
+  const preferred = { x: right + RELATION_GAP, y: Math.round(middle - size.height / 2), ...size };
+  return dodge(state, node.id, preferred);
 }
 
-/** 已接线输入来源的输出点（按输入顺序）；来源没有盒子（悬空或成环）时跳过。 */
-function sourcePointsOf(state: ResolverState, node: canvas.CanvasNode): readonly Point[] {
-  const points: Point[] = [];
+/** 已接线输入来源的矩形（按输入顺序）；来源没有盒子（悬空或成环）时跳过。 */
+function sourceRectsOf(state: ResolverState, node: canvas.CanvasNode): readonly Rect[] {
+  const rects: Rect[] = [];
   for (const ref of canvas.inputRefsOf(node)) {
     if (ref.id === undefined) continue;
     const source = rectOf(state, ref.id);
-    if (source !== undefined) points.push(outputPointOf(source));
+    if (source !== undefined) rects.push(source);
   }
-  return points;
+  return rects;
+}
+
+/**
+ * 避让：从首选位置起，竖直方向按 0、+1、−1、+2、−2… 档（每档一个方框高 + 空隙）试，
+ * 一整列都撞上就往右挪一列再试；全部撞上时退回首选位置（宁可重叠也不跑到看不见的地方）。
+ */
+function dodge(state: ResolverState, nodeId: string, preferred: Rect): Rect {
+  const obstacles = obstaclesOf(state, nodeId);
+  const step = preferred.height + RELATION_CLEARANCE;
+  for (let column = 0; column < RELATION_DODGE_STEPS; column += 1) {
+    for (let index = 0; index <= RELATION_DODGE_STEPS * 2; index += 1) {
+      const offset = index === 0 ? 0 : Math.ceil(index / 2) * (index % 2 === 1 ? 1 : -1);
+      const candidate = { ...preferred, x: preferred.x + column * RELATION_DODGE_COLUMN, y: preferred.y + offset * step };
+      const padded = inflateRect(candidate, RELATION_CLEARANCE);
+      if (!obstacles.some((rect) => rectsOverlap(padded, rect))) return candidate;
+    }
+  }
+  return preferred;
+}
+
+/** 方框要躲开的东西：全部大白框（只看布局，不依赖关系方框），加上已经摆好的其它关系方框。 */
+function obstaclesOf(state: ResolverState, nodeId: string): readonly Rect[] {
+  const rects: Rect[] = [];
+  for (const node of state.nodes.values()) {
+    if (node.id === nodeId) continue;
+    if (!isRelationBoxKind(node.kind)) {
+      rects.push(nodeRectOf(state, node));
+      continue;
+    }
+    const placed = state.rects.get(node.id);
+    if (placed !== undefined) rects.push(placed);
+  }
+  return rects;
 }
