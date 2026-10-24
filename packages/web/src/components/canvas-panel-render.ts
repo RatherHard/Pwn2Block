@@ -1,7 +1,14 @@
 import { html, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
-import type { CanvasBox, CanvasLayoutView, CanvasRow, Point, Rect } from '../canvas/view-model';
+import type {
+  CanvasBox,
+  CanvasFlowPortView,
+  CanvasLayoutView,
+  CanvasRow,
+  Point,
+  Rect,
+} from '../canvas/view-model';
 import { orthogonalPath, relationToneOf, surfaceSizeOf } from './canvas-panel-geometry';
 
 /**
@@ -65,13 +72,13 @@ const ARROW_FILLS: Readonly<Record<'data' | 'flow', string>> = {
   flow: 'var(--p2b-stack)',
 };
 
-/** 整张画布：连线层 → 包络 → 盒子 → 端口 → 预览层。 */
+/** 整张画布：连线层 → 包络 → 盒子 → 端口（数据 + 流程）→ 预览层。 */
 export function renderStage(state: StageState, handlers: RowHandlers): TemplateResult {
   const size = surfaceSizeOf(state.view.boxes);
   return html`<div class="surface" style=${`width:${size.width}px;height:${size.height}px`}>
     ${renderEdges(state, size)}
     ${state.view.boxes.map((box) => renderBox(box, state, handlers))}
-    ${state.view.ports.map(renderPort)}
+    ${state.view.ports.map(renderPort)} ${state.view.flowPorts.filter(isFlowPortConnected).map(renderFlowPort)}
     ${renderSnap(state.snap)} ${renderMarquee(state.marquee)}
   </div>`;
 }
@@ -203,6 +210,29 @@ function renderPort(port: CanvasLayoutView['ports'][number]): TemplateResult {
     data-port=${port.name}
     style=${`left:${port.x}px;top:${port.y}px`}
     title=${`${port.label}：${state}（拖到另一个端口接线，拖到空白断开）`}
+  ></div>`;
+}
+
+/** 流程连接点只画已接线的那一端：序列首步没有入口、末步没有出口，画出来就是悬空的小方框。 */
+function isFlowPortConnected(port: CanvasFlowPortView): boolean {
+  return port.connected;
+}
+
+/**
+ * 流程连接点小方框（需求 §6.1「外置流程连接点」）。
+ *
+ * 它是**只读装饰**：不写 `data-port`，`canvas-panel-interaction` 的 `startWire` 就不会命中它，
+ * 用户改流程顺序只能靠拖动节点而不是拉线。坐标是方框中心，样式用 `translate(-50%, -50%)` 对齐，
+ * 所以流程连线正好落在方框中心。
+ */
+function renderFlowPort(port: CanvasFlowPortView): TemplateResult {
+  const label = port.direction === 'in' ? '流程入口' : '流程出口';
+  return html`<div
+    class="port flow-port"
+    data-node=${port.nodeId}
+    data-flow=${port.direction}
+    style=${`left:${port.x}px;top:${port.y}px`}
+    title=${`${label}：上/下一条流程语句的连线接在这里`}
   ></div>`;
 }
 

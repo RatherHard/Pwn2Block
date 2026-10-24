@@ -2,19 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { canvas } from '@pwn2block/shared';
 import { createNode } from '../src/canvas/catalog';
 import {
+  FLOW_PORT_GAP,
   layoutCanvas,
   nodeBoxSize,
   rectOfNode,
   relationBoxSize,
 } from '../src/canvas/view-model';
-import type { CanvasBox, CanvasLayoutView } from '../src/canvas/view-model';
+import type { CanvasBox, CanvasFlowPortView, CanvasLayoutView } from '../src/canvas/view-model';
 
 /**
  * 视图模型的验收（任务「几何规则必须可测、确定」）。
  *
  * 断言分三类：
  * - **盒子**：十八种节点各是「大白框」还是「关系方框」，标题与配色对不对；
- * - **几何**：端口在盒外、关系方框在中点、包络是并集 +12、流程边只连相邻两步——都写具体数字；
+ * - **几何**：端口在盒外、关系方框在中点、包络是并集 +12、流程边只连相邻两步且接在流程连接点——
+ *   都写具体数字；
  * - **语义与确定性**：预览、问题分组、`regionOf` 来自共享层，同一个输入两次调用完全相等。
  */
 
@@ -40,12 +42,27 @@ function sortedEntries<T>(map: ReadonlyMap<string, T>): [string, T][] {
   return [...map.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
+/** 某个节点的流程连接点（正常是 `in`、`out` 各一条）。 */
+function flowPortsOf(view: CanvasLayoutView, nodeId: string): readonly CanvasFlowPortView[] {
+  return view.flowPorts.filter((port) => port.nodeId === nodeId);
+}
+
+/** 某个节点某个方向的流程连接点是否接上了流程线；没有这个节点就返回 `undefined`。 */
+function flowConnectedOf(
+  view: CanvasLayoutView,
+  nodeId: string,
+  direction: 'in' | 'out',
+): boolean | undefined {
+  return flowPortsOf(view, nodeId).find((port) => port.direction === direction)?.connected;
+}
+
 /** 把视图（含 Map）压成可比较的字符串：两次布局必须逐字节相同。 */
 function snapshot(view: CanvasLayoutView): string {
   return JSON.stringify({
     boxes: view.boxes,
     rows: sortedEntries(view.rowsByNode),
     ports: view.ports,
+    flowPorts: view.flowPorts,
     edges: view.edges,
     previews: sortedEntries(view.previews),
     issues: sortedEntries(view.issuesByNode),
@@ -250,6 +267,70 @@ describe('流程', () => {
     expect(sortedEntries(view.regionOf)).toEqual(sortedEntries(canvas.analyzeFlow(flowDocument).regionOf));
     expect(view.regionOf.get('a1')).toEqual({ ownerId: 'if1', kind: 'then' });
     expect(view.regionOf.get('a2')).toEqual({ ownerId: 'lp', kind: 'body' });
+  });
+
+  /** 三步主线 + 显式坐标：几何断言要确定的盒子矩形。 */
+  const threeStep = documentWith(
+    [start, branch, assign('a1'), assign('a3'), decl],
+    { s: { x: 0, y: 0 }, if1: { x: 0, y: 200 }, a3: { x: 0, y: 400 } },
+    ['s', 'if1', 'a3'],
+  );
+
+  it('main 三步：首节点只有出口、末节点只有入口，中间节点进出都接上', () => {
+    const view = layoutCanvas({ document: threeStep });
+    expect(flowConnectedOf(view, 's', 'in')).toBe(false);
+    expect(flowConnectedOf(view, 's', 'out')).toBe(true);
+    expect(flowConnectedOf(view, 'if1', 'in')).toBe(true);
+    expect(flowConnectedOf(view, 'if1', 'out')).toBe(true);
+    expect(flowConnectedOf(view, 'a3', 'in')).toBe(true);
+    expect(flowConnectedOf(view, 'a3', 'out')).toBe(false);
+  });
+
+  it('流程连接点坐标在盒子外侧：出口在盒底下方 10、入口在盒顶上方 10', () => {
+    const view = layoutCanvas({ document: threeStep });
+    const box = boxOf(view, 'if1', 'node');
+    if (box === undefined) throw new Error('if1 没有大白框');
+    const out = flowPortsOf(view, 'if1').find((port) => port.direction === 'out');
+    const entry = flowPortsOf(view, 'if1').find((port) => port.direction === 'in');
+    expect(FLOW_PORT_GAP).toBe(10);
+    expect(out).toMatchObject({ x: box.x + box.width / 2, y: box.y + box.height + FLOW_PORT_GAP });
+    expect(entry).toMatchObject({ x: box.x + box.width / 2, y: box.y - FLOW_PORT_GAP });
+    // 与 `rectOf` 同口径比较：出口严格在盒底之下、入口严格在盒顶之上，不是裸边。
+    expect(out?.y).toBeGreaterThan(box.y + box.height);
+    expect(entry?.y).toBeLessThan(box.y);
+  });
+
+  it('流程边两端接在小方框中心（不是盒子裸边）', () => {
+    const view = layoutCanvas({ document: threeStep });
+    const box = boxOf(view, 'if1', 'node');
+    if (box === undefined) throw new Error('if1 没有大白框');
+    const flow = view.edges.filter((edge) => edge.kind === 'flow');
+    expect(flow).toHaveLength(2);
+    const sOut = flowPortsOf(view, 's').find((port) => port.direction === 'out');
+    const entry = flowPortsOf(view, 'if1').find((port) => port.direction === 'in');
+    expect(flow[0].from).toEqual({ nodeId: 's', x: sOut?.x, y: sOut?.y });
+    // 终点就是那个小方框的中心：比盒顶再高 `FLOW_PORT_GAP`。
+    expect(flow[0].to).toEqual({ nodeId: 'if1', x: box.x + box.width / 2, y: box.y - FLOW_PORT_GAP });
+    expect(entry?.y).toBe(flow[0].to.y);
+    expect(flow[1].from.y).toBe(box.y + box.height + FLOW_PORT_GAP);
+  });
+
+  it('loop.body 里的节点也有流程端口（区域序列同样算）', () => {
+    const view = layoutCanvas({ document: flowDocument });
+    const body = flowPortsOf(view, 'a2');
+    expect(body.map((port) => port.direction)).toEqual(['in', 'out']);
+    // a2 是 body 里唯一一步：既是第一个也是最后一个，所以两端都空。
+    expect(body.map((port) => port.connected)).toEqual([false, false]);
+  });
+
+  it('同一节点不会出现两条同方向端口，非流程节点不出流程端口', () => {
+    const view = layoutCanvas({ document: flowDocument });
+    for (const nodeId of ['s', 'if1', 'lp', 'a3', 'a1', 'a2']) {
+      expect(flowPortsOf(view, nodeId).map((port) => port.direction)).toEqual(['in', 'out']);
+    }
+    expect(view.flowPorts).toHaveLength(12);
+    expect(flowPortsOf(view, 'v1')).toHaveLength(0);
+    expect(flowPortsOf(view, 'd1')).toHaveLength(0);
   });
 });
 

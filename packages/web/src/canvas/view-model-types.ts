@@ -8,8 +8,8 @@ import type { canvas } from '@pwn2block/shared';
  *
  * 三个边界：
  * - 选中与悬停只影响高亮，不影响几何；`CanvasLayoutInput.selection` 只是把它带进来，渲染层自己用。
- * - `boxes` 里只有节点、关系方框与包络框；端口小方框在 `ports` 里单独给（`kind: 'port'` 留给
- *   渲染层统一绘制，视图模型不重复发）。
+ * - `boxes` 里只有节点、关系方框与包络框；端口小方框在 `ports`（数据输入）与 `flowPorts`
+ *   （流程进/出）里单独给（`kind: 'port'` 留给渲染层统一绘制，视图模型不重复发）。
  * - `previews` / `issuesByNode` 是给框里那几行文字用的**已算好的一行摘要**，不在这里重新求值。
  */
 
@@ -87,6 +87,28 @@ export interface CanvasPortView {
   readonly severity?: NodeSeverity;
 }
 
+/** 流程连接点的方向：`in` 在盒顶上方、`out` 在盒底下方（需求 §6.1「外置流程连接点」）。 */
+export type FlowPortDirection = 'in' | 'out';
+
+/**
+ * 一个流程连接点：流程进/出也画成盒子**外侧**的小方框，连线端点就是它的中心。
+ *
+ * 与数据端口分开建模的理由：数据端口来自 `inputRefsOf`（可拉线、可断线），流程连接点是
+ * **只读装饰**——它由节点在流程序列里的位置决定，用户不能拉线改顺序，只能拖动节点改流程。
+ */
+export interface CanvasFlowPortView {
+  readonly nodeId: string;
+  readonly direction: FlowPortDirection;
+  /** 小方框中心（也是连线端点）：`out` 在盒底下方、`in` 在盒顶上方，各 `FLOW_PORT_GAP`。 */
+  readonly x: number;
+  readonly y: number;
+  /**
+   * 这一端是否真的有流程线接上：`in` = 它在某条序列里且不是该序列的第一个，
+   * `out` = 它在某条序列里且不是该序列的最后一个。首/尾各有一端为 `false`，渲染层不画空端。
+   */
+  readonly connected: boolean;
+}
+
 /** 一条连线：数据依赖，或流程顺序。 */
 export interface CanvasEdgeView {
   readonly from: { readonly nodeId: string; readonly x: number; readonly y: number };
@@ -105,6 +127,8 @@ export interface CanvasLayoutView {
   readonly boxes: readonly CanvasBox[];
   readonly rowsByNode: ReadonlyMap<string, readonly CanvasRow[]>;
   readonly ports: readonly CanvasPortView[];
+  /** 流程连接点：出现在任何流程序列里的节点各一个 `in`、一个 `out`；未接线的那端由渲染层跳过。 */
+  readonly flowPorts: readonly CanvasFlowPortView[];
   readonly edges: readonly CanvasEdgeView[];
   /** nodeId → 一行摘要（值、「待执行」或「错误：…」）。 */
   readonly previews: ReadonlyMap<string, string>;

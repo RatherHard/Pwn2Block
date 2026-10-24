@@ -233,6 +233,33 @@ export const canvasPanelNodeStyles = css`
     background: var(--p2b-error);
   }
 
+  /*
+   * 流程连接点（需求 §6.1「外置流程连接点」）：盒子外侧的实心小方块，坐标同样是方框中心。
+   * 它只是装饰——没有 data-port，不参与拉线；只有已接线的那一端才画（由渲染层过滤）。
+   * 颜色沿用流程线的 --p2b-stack（与 .edge-flow 同源），不新造 token。
+   */
+  .flow-port {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--p2b-fg);
+    background: var(--p2b-fg);
+    cursor: default;
+    z-index: 3;
+  }
+
+  /* 入口：白块 + 流程线色描边（线从上边进来，描边把进来的那一端圈出来）。 */
+  .flow-port[data-flow='in'] {
+    border-color: var(--p2b-stack);
+  }
+
+  /* 出口：整块流程线色（线从这里出去，与它下方的流程边同色）。 */
+  .flow-port[data-flow='out'] {
+    background: var(--p2b-stack);
+    border-color: var(--p2b-stack);
+  }
+
   /* ---------------------------- 预览层 ----------------------------- */
 
   .snap-slot {

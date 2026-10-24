@@ -1,11 +1,12 @@
 import type { canvas } from '@pwn2block/shared';
-import type { CanvasRow, Point, Rect } from './view-model-types';
+import type { CanvasRow, FlowPortDirection, Point, Rect } from './view-model-types';
 
 /**
  * 视图模型的几何常量与尺寸估算（需求 §6.1「白框节点、彩色中关系小方框、外部连接点」）。
  *
- * 这一层只做**确定的算术**：同样的文档必然算出同样的坐标。三条约定：
+ * 这一层只做**确定的算术**：同样的文档必然算出同样的坐标。四条约定：
  * - 端口小方框（也就是连线端点）落在盒子边界**外侧** `PORT_GAP` 处，所以端口坐标一定比盒边更靠外；
+ * - 流程连接点小方框同样在盒子外侧（`FLOW_PORT_GAP`）：`out` 在盒底中点下方、`in` 在盒顶中点上方；
  * - 大白框的输入端口按行等距排：第 i 个在 `盒顶 + 24 + i×22`，输出端口在右边缘竖直居中；
  * - 关系方框更矮，输入端口在左侧竖直居中、相邻 10，输出在右侧竖直居中。
  *
@@ -14,6 +15,13 @@ import type { CanvasRow, Point, Rect } from './view-model-types';
 
 /** 端口小方框中心（也是连线端点）离盒子边缘的距离：正数表示落在盒子外侧。 */
 export const PORT_GAP = 6;
+/**
+ * 流程连接点小方框中心离盒子边缘的距离。
+ *
+ * 与 `PORT_GAP` 同一口径（坐标是**方框中心**、正数落在盒子外侧），只是比数据端口再远一点：
+ * 流程小方框画在盒顶/盒底的正中，留 10px 才不会和 1px 盒边与标题压在一起。
+ */
+export const FLOW_PORT_GAP = 10;
 /** 大白框第一个输入端口距盒顶的距离；之后每个端口 +`PORT_STEP`（与行文字大致对齐）。 */
 export const PORT_FIRST_Y = 24;
 /** 大白框相邻输入端口的竖直间距。 */
@@ -166,6 +174,21 @@ export function inputPointOf(rect: Rect, index: number, count: number, compact: 
   if (!compact) return { x, y: rect.y + PORT_FIRST_Y + index * PORT_STEP };
   const offset = (index - (count - 1) / 2) * RELATION_PORT_STEP;
   return { x, y: Math.round(rect.y + rect.height / 2 + offset) };
+}
+
+/**
+ * 流程连接点的位置（小方框中心，也就是流程连线端点）。
+ *
+ * - `out`：盒底中点再往下 `FLOW_PORT_GAP`；
+ * - `in`：盒顶中点再往上同样的距离。
+ *
+ * 两个方向都用**盒宽的一半**对齐中线，所以同一列的两步之间是一条竖直线。
+ */
+export function flowPortPointOf(rect: Rect, direction: FlowPortDirection): Point {
+  const x = rect.x + rect.width / 2;
+  return direction === 'out'
+    ? { x, y: rect.y + rect.height + FLOW_PORT_GAP }
+    : { x, y: rect.y - FLOW_PORT_GAP };
 }
 
 /** 两点中点；取整是为了让图坐标保持整数（渲染与测试都更好读）。 */

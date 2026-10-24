@@ -1,6 +1,6 @@
 import { canvas } from '@pwn2block/shared';
 import { type NodeDeck, resolveBoxLayout } from './view-model-boxes';
-import { buildDataEdges, buildFlowEdges, buildPorts } from './view-model-edges';
+import { buildDataEdges, buildFlowEdges, buildFlowPorts, buildPorts } from './view-model-edges';
 import { buildEnvelopeBoxes } from './view-model-envelope';
 import { buildIssueIndex, buildPreviewMap, buildPreviewSummaries } from './view-model-preview';
 import { rowsOfNode, subtitleOfNode, titleOfNode, withSeverity } from './view-model-rows';
@@ -18,7 +18,7 @@ import type { CanvasLayoutInput, CanvasLayoutView, CanvasRow } from './view-mode
  * - 大白框 / 关系方框的区分、标题、行、配色 → `view-model-rows.ts`；
  * - 盒子位置（含关系方框的递归中点） → `view-model-boxes.ts`；
  * - 包络（组合 +12、转换 +16） → `view-model-envelope.ts`；
- * - 端口、数据边、流程边 → `view-model-edges.ts`；
+ * - 端口、数据边、流程边、流程连接点 → `view-model-edges.ts`；
  * - 预览与问题分组 → `view-model-preview.ts`。
  *
  * 绘制顺序：包络在前（画在最底层），然后大白框，最后关系方框（压在连线上方）。
@@ -26,6 +26,7 @@ import type { CanvasLayoutInput, CanvasLayoutView, CanvasRow } from './view-mode
 export * from './view-model-types';
 export {
   ENVELOPE_PADDING,
+  FLOW_PORT_GAP,
   GROUP_PADDING,
   NODE_MIN_HEIGHT,
   NODE_MIN_WIDTH,
@@ -62,6 +63,7 @@ export function layoutCanvas(input: CanvasLayoutInput): CanvasLayoutView {
     boxes: [...envelopes, ...layout.nodeBoxes, ...layout.relationBoxes],
     rowsByNode,
     ports: buildPorts(nodes, layout, issues.severityOf),
+    flowPorts: buildFlowPorts(document, layout),
     edges: [...buildDataEdges(nodes, layout), ...buildFlowEdges(document, nodes, layout)],
     previews,
     issuesByNode: issues.issuesByNode,
