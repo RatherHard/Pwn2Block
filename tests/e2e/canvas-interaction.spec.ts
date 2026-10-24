@@ -7,6 +7,7 @@ import {
   nodeIdOf,
   openChallenge,
   panelOf,
+  placeInFlow,
   portOf,
   readDocument,
   selectNode,
@@ -149,13 +150,15 @@ test('拖动节点只改坐标，松手后写回文档，Ctrl+Z 撤回（§6.2�
 });
 
 test('从输入端口拉线接到别的节点，Delete 删节点可撤销（§6.3）', async ({ page }) => {
-  await openChallenge(page);
+  // 端口来自题目声明的公开方法：`gets(buf)` 只有 ret2win 有，别的题目上根本没有这个方法可选。
+  await openChallenge(page, 'ret2win');
   await addToolNode(page, 'method');
   const methodId = await nodeIdOf(page, 'method');
   await addToolNode(page, 'value');
   const valueId = await nodeIdOf(page, 'value');
 
-  // 方法节点先选题目声明的方法，才会长出该方法的参数端口。
+  // 方法节点先排进流程、再选题目声明的方法，才会长出该方法的参数端口。
+  await placeInFlow(page, methodId);
   await selectNode(page, methodId);
   await inspectorOf(page).locator('.field-block').selectOption('gets');
   const port = portOf(page, methodId, 'data');
@@ -181,10 +184,19 @@ test('空白处拖出选框，框到的节点一起选中（§6.2）', async ({ 
   const node = panelOf(page).locator(`.node-box[data-node="${id}"]`);
   const nodeBox = await node.boundingBox();
   const stageBox = await stageOf(page).boundingBox();
-  if (nodeBox === null || stageBox === null) throw new Error('节点或画布没有实际尺寸');
+  const viewport = page.viewportSize();
+  if (nodeBox === null || stageBox === null || viewport === null) throw new Error('节点或画布没有实际尺寸');
 
-  // 从画布右下角（空白处）往左上拖，选框覆盖到节点。
-  await page.mouse.move(stageBox.x + stageBox.width - 16, stageBox.y + stageBox.height - 16);
+  // 画布比视口高：鼠标坐标是视口坐标，所以起点要先夹进可见范围，否则指针事件落在屏幕外。
+  const clamp = (value: number, low: number, high: number): number => Math.min(Math.max(value, low), high);
+  const startX = clamp(nodeBox.x + nodeBox.width + 160, stageBox.x + 8, Math.min(stageBox.x + stageBox.width - 16, viewport.width - 16));
+  const startY = clamp(nodeBox.y + nodeBox.height + 120, stageBox.y + 8, viewport.height - 16);
+  if (startX <= nodeBox.x + nodeBox.width + 8 || startY <= nodeBox.y + nodeBox.height + 8) {
+    throw new Error('画布上没有足够的空白起点，改用滚动后重试');
+  }
+
+  // 从节点右下方的空白处往左上拖，选框覆盖到节点。
+  await page.mouse.move(startX, startY);
   await page.mouse.down();
   await page.mouse.move(nodeBox.x + 4, nodeBox.y + 4, { steps: 6 });
   await expect(panelOf(page).locator('.marquee')).toBeVisible();

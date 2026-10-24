@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { addToolNode, inspectorOf, nodeIdOf, openChallenge, panelOf, readDocument, selectNode, stageOf, toolboxOf } from './helpers';
+import { addToolNode, inspectorOf, nodeIdOf, openChallenge, panelOf, readDocument, selectNode, stageOf, toolboxOf, waitForSave } from './helpers';
 
 /**
  * 新版画布的桌面冒烟：六种 viewport 跑同一份断言，守住「窄高窗口也能用」的底线。
@@ -66,6 +66,8 @@ test('桌面冒烟：上下布局、方向键微调与刷新恢复', async ({ pa
 
   await test.step('刷新后画布从 v2 存档装回来', async () => {
     const before = (await readDocument(page)).nodes.map((node) => `${node.kind}:${node.id}`);
+    // 自动保存是 400ms 防抖：不等它落盘就刷新，读到的是上一版。
+    await waitForSave(page, 'callret');
     await page.reload();
     await expect(panel).toBeVisible();
     const after = (await readDocument(page)).nodes.map((node) => `${node.kind}:${node.id}`);

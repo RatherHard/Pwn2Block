@@ -6,10 +6,12 @@ import {
   nodeIdOf,
   openChallenge,
   panelOf,
+  placeInFlow,
   portOf,
   readDocument,
   selectNode,
   type CanvasDocumentJson,
+  waitForSave,
 } from './helpers';
 
 /**
@@ -91,7 +93,7 @@ test('画布闭环：建图、编译错误定位、判题结论与刷新恢复',
     if (message.type() === 'error') errors.push(message.text());
   });
 
-  await openChallenge(page);
+  await openChallenge(page, 'ret2win');
   const panel = panelOf(page);
 
   await test.step('首屏是一份空文档：只有一个开始节点，没有任何错误', async () => {
@@ -104,6 +106,7 @@ test('画布闭环：建图、编译错误定位、判题结论与刷新恢复',
   await test.step('方法节点选 gets(buf) 后才长出参数端口，未接线只提示不报错', async () => {
     await addToolNode(page, 'method');
     const methodId = await nodeIdOf(page, 'method');
+    await placeInFlow(page, methodId);
     await selectNode(page, methodId);
     await inspectorOf(page).locator('.field-block').selectOption('gets');
     await expect(portOf(page, methodId, 'data')).toHaveClass(/\bhollow\b/);
@@ -145,6 +148,7 @@ test('画布闭环：建图、编译错误定位、判题结论与刷新恢复',
 
   await test.step('刷新后新档把图装回来并重新编译一次', async () => {
     const before = (await readDocument(page)).nodes.map((node) => `${node.kind}:${node.id}`);
+    await waitForSave(page, 'ret2win');
     await page.reload();
     await expect(panel).toBeVisible();
     await expect(page.locator('pwn2block-app p.status')).toContainText('动作 0/1');

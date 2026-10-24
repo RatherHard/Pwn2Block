@@ -23,7 +23,7 @@ const OLD_WORKFLOW = JSON.stringify({
 });
 
 test('方法节点没选题目方法时编译失败，输出区能定位到出错的节点', async ({ page }) => {
-  await openChallenge(page);
+  await openChallenge(page, 'ret2win');
   const panel = panelOf(page);
 
   // 方法节点默认是「未选择方法」：一定编译失败，且错误挂在节点自己身上。
@@ -51,7 +51,7 @@ test('新档损坏时不回退到旧档，原文与旧键都原样保留', async
       [PACKED_KEY, OLD_WORKFLOW],
     ] as const,
   );
-  await openChallenge(page);
+  await openChallenge(page, 'ret2win');
 
   // 读不出新档 → 退回默认文档（只有一个开始节点），绝不擅自把旧档装进来。
   expect((await readDocument(page)).nodes.map((node) => node.kind)).toEqual(['start']);
@@ -65,7 +65,7 @@ test('新档损坏时不回退到旧档，原文与旧键都原样保留', async
 });
 
 test('画布键盘：Delete 删除、Ctrl+Z 撤销、方向键移动选中节点', async ({ page }) => {
-  await openChallenge(page);
+  await openChallenge(page, 'ret2win');
   const panel = panelOf(page);
   await addToolNode(page, 'var-decl');
   const id = await nodeIdOf(page, 'var-decl');
@@ -84,7 +84,7 @@ test('画布键盘：Delete 删除、Ctrl+Z 撤销、方向键移动选中节点
 });
 
 test('视图标签仍可用方向键切换，Home 回到第一个', async ({ page }) => {
-  await openChallenge(page);
+  await openChallenge(page, 'ret2win');
   const tablist = page.getByRole('tablist', { name: '视图' });
   const stack = tablist.getByRole('tab').first();
   await stack.focus();

@@ -54,12 +54,54 @@ export function stageOf(page: Page): Locator {
   return panelOf(page).locator('.stage');
 }
 
-/** 打开第一道题并等画布面板出现。 */
-export async function openChallenge(page: Page): Promise<void> {
+/**
+ * 打开题目并等画布面板出现。
+ *
+ * 不给 id 时点第一道（多数用例只关心「随便一道题」）；需要某题特有动作（`gets`、`capture`）时必须
+ * 指定 id，否则用例会在别的题目上找端口，最后以超时收场而不是给出可读的原因。
+ */
+export async function openChallenge(page: Page, challengeId?: string): Promise<void> {
   await page.goto('/');
   const picker = page.getByRole('region', { name: '选择题目' });
-  if (await picker.isVisible()) await picker.getByRole('button').first().click();
+  if (await picker.isVisible()) {
+    const item = challengeId === undefined ? picker.locator('li').first() : picker.locator('li').filter({ hasText: challengeId });
+    await item.getByRole('button').click();
+  }
   await expect(panelOf(page)).toBeVisible();
+}
+
+/**
+ * 等自动保存真的落盘：面板的保存是 400ms 防抖，编辑完立刻 `reload()` 会读到上一版。
+ *
+ * 判定读的是存档里的节点 id 序列与面板当前文档一致——不看时间、不 sleep，改一次就等一次。
+ */
+export async function waitForSave(page: Page, challengeId: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const current = (await readDocument(page)).nodes.map((node) => node.id);
+        const saved = await page.evaluate(
+          (key) => {
+            const raw = localStorage.getItem(key);
+            if (raw === null) return undefined;
+            return raw;
+          },
+          canvasKey(challengeId),
+        );
+        if (saved === undefined) return { saved: [], current };
+        const parsed: unknown = JSON.parse(saved);
+        const document = isRecord(parsed) ? asDocument(parsed['document']) : undefined;
+        return { saved: document === undefined ? [] : document.nodes.map((node) => node.id), current };
+      },
+      { timeout: 5000 },
+    )
+    .toEqual(await readIds(page));
+}
+
+/** `waitForSave` 的期望值：当前文档的节点 id（读两次省掉一个临时变量）。 */
+async function readIds(page: Page): Promise<{ readonly saved: readonly string[]; readonly current: readonly string[] }> {
+  const ids = (await readDocument(page)).nodes.map((node) => node.id);
+  return { saved: ids, current: ids };
 }
 
 /** 读面板当前的文档；面板还没装载文档时显式报错，不返回空文档糊弄断言。 */
@@ -115,6 +157,34 @@ export async function dragBy(page: Page, from: Locator, dx: number, dy: number, 
     await page.mouse.move(start.x + (dx * step) / steps, start.y + (dy * step) / steps);
   }
   await page.mouse.up();
+}
+
+/**
+ * 把一个游离节点拖进顶层序列（工具箱加出来的节点只是「放在画布上」，还没排进流程）。
+ *
+ * 落点是「开始节点正下方」：吸附按行带算，行带是序列里各节点盒子的并集，所以贴着开始节点往下拖
+ * 一定命中它所在的那一行，插入位置由横向位置决定（这里取同一列，于是排在开始节点之后）。
+ * 拖完断言它真的进了 `main`，否则后面的编译断言会以难读的方式失败。
+ */
+export async function placeInFlow(page: Page, nodeId: string, afterNodeId = 'start'): Promise<void> {
+  const node = panelOf(page).locator(`.node-box[data-node="${nodeId}"]`);
+  const anchor = panelOf(page).locator(`.node-box[data-node="${afterNodeId}"]`);
+  const nodeBox = await centerOf(node);
+  const anchorBox = await anchor.boundingBox();
+  const viewport = page.viewportSize();
+  if (anchorBox === null || viewport === null) throw new Error(`找不到 ${afterNodeId} 的盒子`);
+  const targetY = Math.min(anchorBox.y + anchorBox.height + 24, viewport.height - 24);
+  await page.mouse.move(nodeBox.x, nodeBox.y);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(
+      nodeBox.x + ((anchorBox.x + anchorBox.width / 2 - nodeBox.x) * step) / 8,
+      nodeBox.y + ((targetY - nodeBox.y) * step) / 8,
+    );
+  }
+  await page.mouse.up();
+  const main = (await readDocument(page)).main;
+  if (!main.includes(nodeId)) throw new Error(`${nodeId} 没有被拖进顶层序列：main = ${main.join(',')}`);
 }
 
 async function centerOf(locator: Locator): Promise<{ readonly x: number; readonly y: number }> {
