@@ -16,8 +16,11 @@
 所有用例都要求 `PWN2BLOCK_E2E=1`，否则显式跳过。没有自动重试，也没有用跳过冒充通过。
 
 选择器约定集中在 `helpers.ts`：面板是 `pwn2block-canvas-panel`，工具箱与检查器用
-`getByRole('complementary', { name: '工具箱' | '检查器' })`，画布是 `.stage`；节点用
-`.node-box[data-node="<id>"]`（关系方框是 `.relation-box`），端口用 `.port[data-node][data-port]`，
+`getByRole('complementary', { name: '工具箱' | '检查器' })`，工具箱条目是 `.tool[data-kind]`
+（本题方法是 `.tool-block[data-block]`，搜索框 `.library-query`，分类页 `.library-tab`；分页或搜索
+筛掉的条目只是带 `hidden`，仍在 DOM 里），画布是 `.stage`；节点用
+`.node-box[data-node="<id>"]`（关系方框是 `.relation-box`；`selectNode` 点的是 `.title`，因为已选中
+节点上单击可编辑行会直接开编辑框），端口用 `.port[data-node][data-port]`，
 行用 `.row[data-node][data-row]`，就地编辑的输入框用 `.row-input`，顶栏计数用
 `.status-error` / `.status-warn` / `.status-unconnected` / `.status-revision`。
 文档断言优先读面板公开属性 `document`（`helpers.readDocument()` 会在 Node 侧按形状复核一遍），
