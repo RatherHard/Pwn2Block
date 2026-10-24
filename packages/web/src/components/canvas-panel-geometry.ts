@@ -1,6 +1,7 @@
 import { canvas } from '@pwn2block/shared';
 import type { CanvasBox, CanvasEdgeView, CanvasLayoutView, CanvasPortView, Point, Rect } from '../canvas/view-model';
-import { inflateRect, unionRects } from '../canvas/view-model-geometry';
+import { containsPoint, inflateRect, unionRects } from '../canvas/view-model-geometry';
+import { flowBandAt, flowDropAt, type FlowDropTarget } from './canvas-panel-flow-drop';
 
 /**
  * 画布面板的几何判断（阶段三「视图模型 → 交互」）。
@@ -50,10 +51,8 @@ export function relationToneOf(node: canvas.CanvasNode): RelationTone {
   return BITWISE_OPS.has(node.op) ? 'bitwise' : 'arith';
 }
 
-/** 点是否落在矩形里（含边界，闭合判定更适合鼠标命中）。 */
-export function containsPoint(rect: Rect, point: Point): boolean {
-  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
-}
+/** 点是否落在矩形里（含边界，闭合判定更适合鼠标命中）。几何原语在 `canvas/view-model-geometry`，这里再导出。 */
+export { containsPoint };
 
 /** 两个矩形是否相交（框选用）。 */
 export function rectsIntersect(left: Rect, right: Rect): boolean {
@@ -139,7 +138,10 @@ export function rowBandsOf(
   return bands;
 }
 
-/** 吸附落位的结果：进哪一组、第几行第几列、是不是新开一行，以及指示条画在哪。 */
+/**
+ * 吸附落位的结果：进哪一组、第几行第几列、是不是新开一行，或者进哪条流程序列的第几步，
+ * 以及指示条画在哪。
+ */
 export type DropTarget =
   | {
       readonly kind: 'group';
@@ -150,7 +152,14 @@ export type DropTarget =
       readonly slot: Rect;
     }
   | { readonly kind: 'node'; readonly nodeId: string; readonly slot: Rect }
-  | { readonly kind: 'stage'; readonly slot: Rect };
+  | { readonly kind: 'stage'; readonly slot: Rect }
+  /** 落在流程带上、而且被拖的是流程节点：可以插进去（判定见 `canvas-panel-flow-drop`）。 */
+  | FlowDropTarget
+  /**
+   * 落在流程带上、但被拖的不是流程节点（数据节点、组合……）：文档不变，只给一句原因。
+   * 单独一种落位是为了让「这里为什么不能放」在松手前就能说清，而不是静默当成普通拖动。
+   */
+  | { readonly kind: 'flow-blocked'; readonly slot: Rect };
 
 /** `dropTargetOf` 的输入：全部来自当前视图模型，函数本身不再回查文档。 */
 export interface DropQuery {
@@ -163,12 +172,16 @@ export interface DropQuery {
   readonly dragged: readonly string[];
   /** 节点当前的归属组合（不属于任何组合时返回 `undefined`）。 */
   readonly ownerOf: (nodeId: string) => string | undefined;
+  /** 已经算好的流程落点（流程带要看文档，所以由 `dropTargetFor` 先算）：它排在自己组合之后、别的节点之前。 */
+  readonly flow?: DropTarget | undefined;
 }
 
 /**
  * 算出松手会落到哪里。
  *
- * 优先级：**自己所属组合的行带** → 普通节点（吸附成组）→ 空白（只移动）。
+ * 优先级：**自己所属组合的行带** → **流程带** → 普通节点（吸附成组）→ 空白（只移动）。
+ * 流程带排在普通节点之前，是因为语句之间的落点比「和它成组」更重要：流程节点根本进不了组合，
+ * 而数据节点落在流程带上要给原因（`flow-blocked`），不能悄悄拼成组。
  * 拖进「别人的组合」不算命中：组合成员只能靠 `createGroup` 整体建立，
  * 命令层没有「往已有组合里加一个成员」这条命令（见 `canvas-panel-commands` 的说明）。
  */
@@ -184,6 +197,7 @@ export function dropTargetOf(query: DropQuery): DropTarget {
       }
     }
   }
+  if (query.flow !== undefined) return query.flow;
   const box = boxAtPoint(query.boxes, query.point);
   if (box !== undefined && !query.dragged.includes(box.nodeId)) {
     return { kind: 'node', nodeId: box.nodeId, slot: rectOfBox(box) };
@@ -249,10 +263,10 @@ export function dropLabelOf(target: DropTarget): string | undefined {
 }
 
 /**
- * 从「文档 + 视图」直接算落位：把盒子矩形、组合行与归属先查好，再交给 `dropTargetOf`。
+ * 从「文档 + 视图」直接算落位：把盒子矩形、组合行、归属与流程带先查好，再交给 `dropTargetOf`。
  *
  * 之所以单独一层：`dropTargetOf` 只认已经摊平的输入（便于单测），而交互层手上只有文档与视图；
- * 中间这层四处查表就收在这里，交互层不必知道 `ownerMapOf`、包络盒子怎么找。
+ * 中间这层四处查表就收在这里，交互层不必知道 `ownerMapOf`、包络盒子、流程带怎么找。
  */
 export function dropTargetFor(
   document: canvas.CanvasDocument,
@@ -263,17 +277,37 @@ export function dropTargetFor(
   const rects = new Map<string, Rect>();
   for (const box of view.boxes) rects.set(box.nodeId, rectOfBox(box));
   const owners = canvas.ownerMapOf(document);
+  const rectOf = (nodeId: string): Rect | undefined => rects.get(nodeId);
   return dropTargetOf({
     point,
     boxes: view.boxes,
-    rectOf: (nodeId: string) => rects.get(nodeId),
+    rectOf,
     rowsOf: (groupId: string) => {
       const node = document.nodes.find((item) => item.id === groupId);
       return node === undefined || node.kind !== 'group' ? undefined : node.rows;
     },
     dragged,
     ownerOf: (nodeId: string) => owners.get(nodeId),
+    flow: flowTargetOf(document, rectOf, point, dragged),
   });
+}
+
+/**
+ * 流程带落点：被拖的是流程节点 → 可插的 `flow`；别的节点压在同一条带上 → `flow-blocked`（要给原因）。
+ *
+ * 优先级不在这里判：`dropTargetOf` 先看自己所属组合的行带，没命中才会读这个 `flow`。
+ */
+function flowTargetOf(
+  document: canvas.CanvasDocument,
+  rectOf: (nodeId: string) => Rect | undefined,
+  point: Point,
+  dragged: readonly string[],
+): DropTarget | undefined {
+  const input = { document, rectOf, point, dragged };
+  const flow = flowDropAt(input);
+  if (flow !== undefined) return flow;
+  const band = flowBandAt(input);
+  return band === undefined ? undefined : { kind: 'flow-blocked', slot: band.slot };
 }
 
 /** 数据边与流程边都画成正交折线；`viaRect` 决定从关系方框的哪一侧进出。 */

@@ -3,6 +3,7 @@ import { moveLayout } from '../canvas/editor';
 import type { CanvasLayoutView, Point, Rect } from '../canvas/view-model';
 import { canvasPositionsOf } from '../canvas/view-model-geometry';
 import { cycleOperator, dropEditOf, wireEditOf } from './canvas-panel-commands';
+import { FLOW_DATA_REFUSAL, flowDropLabelOf } from './canvas-panel-flow-drop';
 import {
   DRAG_THRESHOLD,
   dropLabelOf,
@@ -394,11 +395,22 @@ export class CanvasPanelInteraction {
   }
 }
 
-/** 吸附提示：指示条来自命中行带，文案来自落位种类，位置贴着鼠标。 */
+/**
+ * 吸附提示：指示条来自落位（行带 / 流程插位条 / 节点盒子），文案来自落位种类，位置贴着鼠标。
+ *
+ * 流程带要说清「排第几步、进哪条序列」（`flowDropLabelOf`），`dropLabelOf` 只认组合与节点；
+ * 数据节点压在流程带上时，提示直接就是那句原因，松手前就知道放不进去。
+ */
 function snapOf(target: DropTarget, point: Point): SnapState {
   return {
     slot: target.slot,
     hint: { x: point.x + 12, y: point.y - 10 },
-    label: dropLabelOf(target) ?? '释放',
+    label: snapLabelOf(target),
   };
+}
+
+function snapLabelOf(target: DropTarget): string {
+  if (target.kind === 'flow') return flowDropLabelOf(target);
+  if (target.kind === 'flow-blocked') return FLOW_DATA_REFUSAL;
+  return dropLabelOf(target) ?? '释放';
 }

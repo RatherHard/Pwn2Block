@@ -11,18 +11,23 @@ import {
   edited,
   insertStatement,
   moveMember,
+  moveStatementTo,
   newNodeId,
   nodeOf,
   refuse,
+  regionOfId,
+  regionSequenceOf,
   renameVariable,
   setRelationOp,
   setUnaryOp,
   setValue,
   type CanvasEdit,
+  type StatementSlot,
 } from '../canvas/editor';
 import { rectOfNode, NODE_MIN_HEIGHT, NODE_MIN_WIDTH } from '../canvas/view-model';
 import type { CanvasLayoutView, Point } from '../canvas/view-model';
 import { inflateRect } from '../canvas/view-model-geometry';
+import { FLOW_DATA_REFUSAL } from './canvas-panel-flow-drop';
 import { boxAtPoint, portAtPoint, rectsIntersect, type DropTarget } from './canvas-panel-geometry';
 
 /**
@@ -237,9 +242,12 @@ export interface DropOutcome {
  * 松手落位。
  *
  * - 落在自己所属组合的行带上 → `moveMember`（组内换行、换列）；
+ * - 落在流程序列的带上 → 已经排进序列就 `moveStatementTo`（换位、跨区域），还没排就 `insertStatement`；
  * - 落在另一个节点上 → `createGroup`（吸附成组）；
  * - 落在空白且自己属于组合 → 移出组合：两个成员时直接 `dissolveGroup`，
- *   更多成员时用「解除 + 按原行列重建」表达「只移出这一个」（仍是可撤销的一步）。
+ *   更多成员时用「解除 + 按原行列重建」表达「只移出这一个」（仍是可撤销的一步）；
+ * - 落在空白而自己是流程语句 → **只改坐标，仍在原序列里**：流程带很窄，松手偏一点就
+ *   悄悄掉出流程会毁掉整份程序；要换序列就拖到另一条序列的带上。
  * - 落在别人的组合里 → 明确拒绝：命令层没有「往已有组合加成员」这条命令。
  */
 export function dropEditOf(
@@ -249,6 +257,7 @@ export function dropEditOf(
 ): DropOutcome {
   if (target === undefined || dragged.length !== 1) return { edit: edited(document) };
   const memberId = dragged[0];
+  if (target.kind === 'flow' || target.kind === 'flow-blocked') return flowDropEditOf(document, target, memberId);
   const owner = canvas.ownerMapOf(document).get(memberId);
   if (target.kind === 'group') {
     if (owner === target.groupId) {
@@ -267,6 +276,51 @@ export function dropEditOf(
   }
   if (owner === undefined) return { edit: edited(document) };
   return detachMember(document, owner, memberId);
+}
+
+/**
+ * 流程带上松手：已经排进某条序列就换位（跨区域也行），还没排进去就插进去。
+ *
+ * - 开始节点固定在顶层第一，任何流程落位都拒绝——它一挪整份程序就编译不过；
+ * - 非流程节点（数据节点、组合、声明）给一句原因，文档不变；
+ * - `main` 的第一位永远留给开始节点：落点算出来是 0 就顺延到 1，
+ *   免得「往左偏一点」直接拼出一份开始节点不在第一步的文档。
+ */
+function flowDropEditOf(document: canvas.CanvasDocument, target: DropTarget, nodeId: string): DropOutcome {
+  const node = nodeOf(document, nodeId);
+  if (node === undefined) return { edit: edited(document) };
+  if (!canvas.isFlowNode(node)) return { edit: edited(document), message: flowRefusalOf(node) };
+  if (node.kind === 'start') {
+    return { edit: edited(document), message: '开始节点固定排在顶层第一位，不能挪进别的序列' };
+  }
+  // `flow-blocked` 只会被非流程节点命中，上面两句已经挡掉了；这里收窄类型。
+  if (target.kind !== 'flow') return { edit: edited(document) };
+  const index = startAwareIndex(document, target.region, target.index);
+  const at = statementSlotOf(document, nodeId);
+  if (at === undefined) return { edit: insertStatement(document, target.region, index, nodeId) };
+  return { edit: moveStatementTo(document, at, { region: target.region, index }) };
+}
+
+/** 进不了流程的节点该怎么说：数据节点是最常见的一种，说法与吸附提示共用同一句。 */
+function flowRefusalOf(node: canvas.CanvasNode): string {
+  if (canvas.isValueNode(node)) return FLOW_DATA_REFUSAL;
+  return `「${node.id}」是${canvas.CANVAS_NODE_KIND_LABELS[node.kind]}，不能排进流程序列`;
+}
+
+/** 这条语句现在在哪条序列的第几项；还没排进任何序列时返回 `undefined`。 */
+function statementSlotOf(document: canvas.CanvasDocument, nodeId: string): StatementSlot | undefined {
+  const region = regionOfId(document, nodeId);
+  if (region === undefined) return undefined;
+  const sequence = regionSequenceOf(document, region);
+  const index = sequence === undefined ? -1 : sequence.indexOf(nodeId);
+  return index < 0 ? undefined : { region, index };
+}
+
+/** `main` 的第一位留给开始节点：落到它前面就顺延到第二位。 */
+function startAwareIndex(document: canvas.CanvasDocument, region: canvas.FlowRegionRef, index: number): number {
+  if (region.kind !== 'main' || index > 0) return index;
+  const head = document.main[0] === undefined ? undefined : nodeOf(document, document.main[0]);
+  return head !== undefined && head.kind === 'start' ? 1 : index;
 }
 
 /** 把一个成员从组合里移出：两成员时整组解除，更多成员时解除后按原行列重建。 */

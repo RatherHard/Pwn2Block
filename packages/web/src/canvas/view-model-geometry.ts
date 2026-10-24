@@ -213,3 +213,13 @@ export function inflateRect(rect: Rect, padding: number): Rect {
     height: rect.height + padding * 2,
   };
 }
+
+/**
+ * 点是否落在矩形里（含边界，闭合判定更适合鼠标命中）。
+ *
+ * 命中测试有好几处（组合行带、流程带、端口），口径必须一致，所以放在这一层；
+ * 面板几何与流程落位都从这里取，不各写一份。
+ */
+export function containsPoint(rect: Rect, point: Point): boolean {
+  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+}
