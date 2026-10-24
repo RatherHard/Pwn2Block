@@ -1,13 +1,7 @@
 import type { canvas } from '@pwn2block/shared';
 import type { AuthorBlock } from '@pwn2block/shared';
-import { addNode, createGroup, dissolveGroup, newNodeId, type CanvasEdit } from '../canvas/editor';
-import {
-  addReference,
-  addVariable,
-  applyInspectorChange,
-  freeSlotOf,
-  type InspectorChange,
-} from './canvas-panel-commands';
+import { createGroup, dissolveGroup, newNodeId, type CanvasEdit } from '../canvas/editor';
+import { addReference, addVariable, applyInspectorChange, type InspectorChange } from './canvas-panel-commands';
 import { applyConvertChange } from './canvas-panel-convert';
 import { applyWrapSelection } from './canvas-panel-regions';
 
@@ -29,13 +23,6 @@ export interface PanelActionHost {
   report(message: string | undefined): void;
   authorBlocks(): readonly AuthorBlock[] | undefined;
   exportSave(): string;
-}
-
-/** 工具箱点一项：在空位加一个该种类的默认节点。 */
-export function addToolNode(host: PanelActionHost, kind: canvas.CanvasNodeKind): void {
-  const document = host.currentDocument();
-  if (document === undefined) return;
-  host.applyEdit(addNode(document, kind, newNodeId(document, kind), freeSlotOf(document)));
 }
 
 /** 「成组」：把选中的节点按选择顺序拼成一个组合。 */

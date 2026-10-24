@@ -13,7 +13,6 @@ import type { CanvasLayoutView } from '../canvas/view-model';
 import { sharedStyles, terminalTheme } from '../theme';
 import {
   addReferenceNode,
-  addToolNode,
   addVariableNode,
   applyInspectorField,
   copySave,
@@ -39,7 +38,12 @@ import { canvasPanelSideStyles } from './canvas-panel-styles-side';
 import { canvasPanelStepsStyles } from './canvas-panel-styles-steps';
 import { nodeTitlesOf, renderSteps } from './canvas-panel-steps';
 import type { StepsState } from './canvas-panel-steps';
-import { renderToolbox, renderTopBar, statusCountsOf } from './canvas-panel-toolbox';
+import { renderLibrary } from './canvas-panel-library';
+import { addLibraryItem, dropLibraryItem, type LibraryDropHost } from './canvas-panel-library-actions';
+import { INITIAL_LIBRARY_STATE, type LibraryItem, type LibraryState } from './canvas-panel-library-model';
+import { toGraphPoint } from './canvas-panel-pointer';
+import { canvasPanelLibraryStyles } from './canvas-panel-styles-library';
+import { renderTopBar, statusCountsOf } from './canvas-panel-toolbox';
 import type { StatusCounts } from './canvas-panel-toolbox';
 
 /**
@@ -75,6 +79,7 @@ export class CanvasPanelElement extends LitElement {
     canvasPanelNodeStyles,
     canvasPanelSideStyles,
     canvasPanelStepsStyles,
+    canvasPanelLibraryStyles,
   ];
 
   static override properties = {
@@ -100,7 +105,7 @@ export class CanvasPanelElement extends LitElement {
     challengeId: () => this.challenge?.id,
     document: () => this.document,
   });
-  private readonly host: PanelInteractionHost & PanelActionHost;
+  private readonly host: PanelInteractionHost & PanelActionHost & LibraryDropHost;
   private readonly inline: CanvasInlineEdit;
   private readonly interaction: CanvasPanelInteraction;
   private readonly rowHandlers: RowHandlers;
@@ -111,6 +116,10 @@ export class CanvasPanelElement extends LitElement {
   private steps: readonly canvas.CanvasStep[] = [];
   /** 「步骤与轮次」区是否折叠：折叠状态归面板，重渲染不会把它忘掉。 */
   private stepsCollapsed = false;
+  /** 节点库的标签页、页码、搜索词与预览：归面板持有，重渲染不丢。 */
+  private library: LibraryState = INITIAL_LIBRARY_STATE;
+  /** 正在从节点库拖出的条目；松手或拖到别处后清掉。 */
+  private dragging: LibraryItem | undefined;
   private loadedFor: string | undefined;
   /** 上一次「已经处理过」的文档引用：用来识别父组件直接换文档，避免重复广播。 */
   private handledDocument: canvas.CanvasDocument | undefined;
@@ -132,6 +141,7 @@ export class CanvasPanelElement extends LitElement {
       methods: () => this.methods(),
       authorBlocks: () => this.challenge?.authorBlocks,
       exportSave: () => this.exportSave(),
+      layoutOf: (document) => layoutCanvas({ document, methods: this.methods() }),
     };
     this.inline = new CanvasInlineEdit(this.host);
     this.interaction = new CanvasPanelInteraction(this.host, this.inline);
@@ -371,6 +381,42 @@ export class CanvasPanelElement extends LitElement {
     };
   }
 
+  private setLibrary(next: LibraryState): void {
+    this.library = next;
+    this.requestUpdate();
+  }
+
+  /** 节点库拖到画布上：`dragover` 必须取消默认行为，浏览器才会把 `drop` 交给画布。 */
+  private stageDragOver = (event: DragEvent): void => {
+    if (this.dragging === undefined) return;
+    event.preventDefault();
+    const transfer = event.dataTransfer ?? undefined;
+    if (transfer !== undefined) transfer.dropEffect = 'copy';
+  };
+
+  private stageDrop = (event: DragEvent): void => {
+    const item = this.dragging;
+    this.dragging = undefined;
+    if (item === undefined) return;
+    event.preventDefault();
+    dropLibraryItem(this.host, item, toGraphPoint(this.stageElement(), event));
+  };
+
+  private renderLibraryPane(): TemplateResult {
+    return renderLibrary({
+      state: this.library,
+      blocks: this.challenge?.authorBlocks,
+      methods: this.methods(),
+      onChange: (next) => this.setLibrary(next),
+      onAdd: (item) => addLibraryItem(this.host, item),
+      onDragStart: (item) => {
+        this.dragging = item;
+      },
+      onAddVariable: () => addVariableNode(this.host),
+      onAddReference: () => addReferenceNode(this.host),
+    });
+  }
+
   private toggleSteps(): void {
     this.stepsCollapsed = !this.stepsCollapsed;
     this.requestUpdate();
@@ -415,16 +461,14 @@ export class CanvasPanelElement extends LitElement {
         onRun: () => this.run(),
       })}
       <div class="body">
-        ${renderToolbox({
-          onAdd: (kind) => addToolNode(this.host, kind),
-          onAddVariable: () => addVariableNode(this.host),
-          onAddReference: () => addReferenceNode(this.host),
-        })}
+        ${this.renderLibraryPane()}
         <div
           class="stage"
           @pointerdown=${this.interaction.pointerDown}
           @click=${this.interaction.click}
           @dblclick=${this.interaction.doubleClick}
+          @dragover=${this.stageDragOver}
+          @drop=${this.stageDrop}
         >
           ${document === undefined || view === undefined
             ? html`<p class="hint">等待题目加载…</p>`

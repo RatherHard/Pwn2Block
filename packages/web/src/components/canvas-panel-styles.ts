@@ -95,7 +95,7 @@ export const canvasPanelStyles = css`
 
   .body {
     display: grid;
-    grid-template-columns: 11rem minmax(0, 1fr) 17rem;
+    grid-template-columns: 13rem minmax(0, 1fr) 17rem;
     min-height: 0;
   }
 
@@ -121,18 +121,7 @@ export const canvasPanelStyles = css`
   .toolbox-group {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
-  }
-
-  .toolbox-group h3 {
-    padding-bottom: 0.15rem;
-    border-bottom: 1px solid var(--p2b-line);
-  }
-
-  .tool {
-    width: 100%;
-    min-height: 1.7rem;
-    text-align: left;
+    gap: 0.25rem;
   }
 
   /* ------------------------------ 画布 ------------------------------ */

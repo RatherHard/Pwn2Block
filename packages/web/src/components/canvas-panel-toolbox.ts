@@ -1,39 +1,13 @@
 import { html, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
-import { CANVAS_CATALOG, CANVAS_CATEGORY_LABELS } from '../canvas/catalog';
-import type { CanvasNodeCategory, CanvasNodeSpec } from '../canvas/catalog';
 
 /**
- * 工具箱、顶栏与状态计数（需求 §6.2、§10 任务第 10 条）。
- *
- * 工具箱的顺序**就是目录顺序**：同一个分类连续排（`CANVAS_CATALOG` 的注释锁住了这一点），
- * 这里只按「分类第一次出现」分组，不重排、不筛选，所以界面顺序与 `catalog.ts` 不会漂移。
+ * 顶栏与状态计数（需求 §6.2）。左侧节点库在 `canvas-panel-library.ts`。
  *
  * 计数口径有一条容易搞错的地方：`unconnected`（未接线）是编辑期的正常状态，
  * **不算错误**，单独显示成「未接线 N 处」。否则刚拖出一个节点满屏飘红，用户会以为画布坏了。
  */
-
-/** 工具箱里的一组：分类 + 该分类的节点描述。 */
-export interface ToolboxGroup {
-  readonly category: CanvasNodeCategory;
-  readonly label: string;
-  readonly specs: readonly CanvasNodeSpec[];
-}
-
-/** 按目录顺序分组；分类只在第一次出现的位置建组，所以组顺序同样等于目录顺序。 */
-export function toolboxGroups(catalog: readonly CanvasNodeSpec[] = CANVAS_CATALOG): readonly ToolboxGroup[] {
-  const groups: { category: CanvasNodeCategory; label: string; specs: CanvasNodeSpec[] }[] = [];
-  for (const spec of catalog) {
-    const group = groups.find((item) => item.category === spec.category);
-    if (group === undefined) {
-      groups.push({ category: spec.category, label: CANVAS_CATEGORY_LABELS[spec.category], specs: [spec] });
-      continue;
-    }
-    group.specs.push(spec);
-  }
-  return groups;
-}
 
 /** 顶栏右侧的三个计数。 */
 export interface StatusCounts {
@@ -65,38 +39,6 @@ export function statusCountsOf(
     else warnings += 1;
   }
   return { errors, warnings, unconnected };
-}
-
-/** 工具箱的三种动作：加目录节点、加变量、引用变量（需求 §10 任务第 10 条）。 */
-export interface ToolboxHandlers {
-  readonly onAdd: (kind: canvas.CanvasNodeKind) => void;
-  readonly onAddVariable: () => void;
-  readonly onAddReference: () => void;
-}
-
-/** 分组工具箱；点一项 = 在空位加一个该种类的默认节点。 */
-export function renderToolbox(handlers: ToolboxHandlers): TemplateResult {
-  return html`<aside class="toolbox" aria-label="工具箱">
-    <div class="toolbox-actions">
-      <button class="btn-add-variable" @click=${handlers.onAddVariable}>加变量</button>
-      <button class="btn-add-reference" @click=${handlers.onAddReference}>引用变量</button>
-    </div>
-    ${toolboxGroups().map(
-      (group) => html`<div class="toolbox-group" data-category=${group.category}>
-        <h3>${group.label}</h3>
-        ${group.specs.map(
-          (spec) => html`<button
-            class="tool"
-            data-kind=${spec.kind}
-            title=${spec.description}
-            @click=${() => handlers.onAdd(spec.kind)}
-          >
-            ${spec.label}
-          </button>`,
-        )}
-      </div>`,
-    )}
-  </aside>`;
 }
 
 /** 顶栏按钮与计数。按钮顺序：撤销、重做、删除、成组、解除组合、导出、运行，最后是计数。 */
