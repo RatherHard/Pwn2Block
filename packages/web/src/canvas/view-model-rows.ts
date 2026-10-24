@@ -228,11 +228,24 @@ function varDeclRows(node: Extract<canvas.CanvasNode, { kind: 'var-decl' }>): re
   ];
 }
 
+/**
+ * 方法节点：方法名 + 每个参数一行。
+ *
+ * 参数是「简单内容」，所以就地可改——但只在**没接线**或**接的是字面值**时：前者提交时新建一个字面值
+ * 接上，后者直接改那个字面值。接的是变量或表达式时改它就等于改别处的结构，这一行只读，交给拉线。
+ */
 function methodRows(node: Extract<canvas.CanvasNode, { kind: 'method' }>, ctx: NodeContext): readonly CanvasRow[] {
   return [
     makeRow(node.id, '方法', methodLabelOf(ctx, node.block), false),
-    ...Object.entries(node.args).map(([name, id]) => makeRow(node.id, name, refText(id), true)),
+    ...Object.entries(node.args).map(([name, id]) => methodArgRow(node.id, name, id, ctx)),
   ];
+}
+
+function methodArgRow(nodeId: string, name: string, id: string, ctx: NodeContext): CanvasRow {
+  if (id === canvas.UNCONNECTED) return makeRow(nodeId, name, '未接线', true);
+  const source = ctx.nodes.get(id);
+  if (source?.kind === 'value') return makeRow(nodeId, name, `${literalText(source.value)} ← ${id}`, true);
+  return makeRow(nodeId, name, id, false);
 }
 
 /** 转换参数：编码、宽度、字节序、进制这类「复杂配置」只读展示，改去侧栏（需求 §6.1）。 */

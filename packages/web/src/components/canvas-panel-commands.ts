@@ -28,6 +28,7 @@ import { rectOfNode, NODE_MIN_HEIGHT, NODE_MIN_WIDTH } from '../canvas/view-mode
 import type { CanvasLayoutView, Point } from '../canvas/view-model';
 import { inflateRect } from '../canvas/view-model-geometry';
 import { FLOW_DATA_REFUSAL } from './canvas-panel-flow-drop';
+import { applyMethodArgEdit, methodArgTextOf } from './canvas-panel-method-args';
 import { boxAtPoint, portAtPoint, rectsIntersect, type DropTarget } from './canvas-panel-geometry';
 
 /**
@@ -67,15 +68,20 @@ export function editableTextOf(document: canvas.CanvasDocument, nodeId: string, 
   if (node === undefined) return undefined;
   if (node.kind === 'value' && rowLabel === VALUE_ROW_LABEL) return literalTextOf(node.value);
   if (node.kind === 'var-decl' && rowLabel === NAME_ROW_LABEL) return node.name;
-  return undefined;
+  return methodArgTextOf(document, node, rowLabel, literalTextOf);
 }
 
-/** 提交一次就地编辑；这一行不可编辑（例如方法参数）时返回 `undefined`。 */
+/**
+ * 提交一次就地编辑；这一行不可编辑时返回 `undefined`。
+ *
+ * 方法参数行要知道题目声明的参数类型（没接线时按它新建字面值），所以多收一份方法目录。
+ */
 export function applyRowEdit(
   document: canvas.CanvasDocument,
   nodeId: string,
   rowLabel: string,
   text: string,
+  methods: readonly canvas.CanvasMethodDecl[] = [],
 ): CanvasEdit | undefined {
   const node = nodeOf(document, nodeId);
   if (node === undefined) return undefined;
@@ -85,7 +91,7 @@ export function applyRowEdit(
   if (node.kind === 'var-decl' && rowLabel === NAME_ROW_LABEL) {
     return renameVariable(document, nodeId, text);
   }
-  return undefined;
+  return applyMethodArgEdit(document, node, rowLabel, text, methods, parseScalarValue);
 }
 
 /**
@@ -109,13 +115,18 @@ function literalTextOf(value: canvas.EncodedScalarValue): string {
   }
 }
 
-/** 把编辑框文本解析成字面值；格式非法由 `setValue` 的检查拒绝（不在这里静默纠正）。 */
+/**
+ * 把编辑框文本解析成字面值；格式非法由 `setValue` 的检查拒绝（不在这里静默纠正）。
+ *
+ * 两处顺手的宽容：字节串允许中间带空格（`41 41 41` 与 `414141` 等价，复制十六进制转储时常见），
+ * 整数允许 `0x` 前缀（地址几乎总是十六进制写的），换算成十进制再交给命令层校验。
+ */
 function parseScalarValue(kind: canvas.ScalarKind, text: string): canvas.EncodedScalarValue {
   switch (kind) {
     case 'byte':
-      return { kind: 'byte', hex: text.trim().toLowerCase() };
+      return { kind: 'byte', hex: text.replace(/\s+/g, '').toLowerCase() };
     case 'int':
-      return { kind: 'int', value: text.trim() };
+      return { kind: 'int', value: intTextOf(text.trim()) };
     case 'double':
       return { kind: 'double', value: Number(text.trim()) };
     case 'string':
@@ -127,17 +138,57 @@ function parseScalarValue(kind: canvas.ScalarKind, text: string): canvas.Encoded
   }
 }
 
+/** `0x` 开头的十六进制整数换成十进制文本；其余原样返回，交给命令层按十进制校验。 */
+function intTextOf(text: string): string {
+  const match = /^(-?)0x([0-9a-f]+)$/i.exec(text);
+  if (match === null) return text;
+  return `${match[1]}${BigInt(`0x${match[2]}`).toString(10)}`.replace(/^-0$/, '0');
+}
+
 // ---------------------------------------------------------------------------
 // 关系方框：点击切换运算
 // ---------------------------------------------------------------------------
 
-/** 点一次关系方框 = 切换成目录里的下一种运算；从后往前绕回。 */
+/**
+ * 点一次关系方框 = 切换成**同一操作数类型**里的下一种运算；到尾绕回。
+ *
+ * 只在左右类型相同的运算里转（整数加 → 减 → … → 大于等于 → 加），所以点击不会把已经接好的
+ * 整数输入换成浮点或布尔运算、凭空制造类型错误；要换类型就去侧栏下拉选。
+ * 一元操作同理：`length` 与 `bool.not` 接受的类型互不相交，所以已接线时只在接受当前输入类型的
+ * 操作里转——只有一个候选就原地不动并说明原因。
+ */
 export function cycleOperator(document: canvas.CanvasDocument, nodeId: string): CanvasEdit | undefined {
   const node = nodeOf(document, nodeId);
   if (node === undefined) return undefined;
-  if (node.kind === 'relation') return setRelationOp(document, nodeId, nextOf(canvas.BINARY_OPERATORS, node.op));
-  if (node.kind === 'unary') return setUnaryOp(document, nodeId, nextOf(canvas.UNARY_OPERATORS, node.op));
+  if (node.kind === 'relation') return setRelationOp(document, nodeId, nextOf(binaryCycleOf(node.op), node.op));
+  if (node.kind === 'unary') {
+    const cycle = unaryCycleOf(document, node);
+    if (cycle.length <= 1) {
+      return refuse(document, 'unknown_kind', nodeId, '当前输入类型只有这一种操作；换输入后再点，或去侧栏改');
+    }
+    return setUnaryOp(document, nodeId, nextOf(cycle, node.op));
+  }
   return undefined;
+}
+
+/** 与当前运算左右类型相同的全部二元运算（目录顺序）。 */
+export function binaryCycleOf(op: canvas.BinaryOperator): readonly canvas.BinaryOperator[] {
+  const current = canvas.binaryOperatorSpec(op);
+  return canvas.BINARY_OPERATORS.filter((candidate) => {
+    const spec = canvas.binaryOperatorSpec(candidate);
+    return spec.left === current.left && spec.right === current.right;
+  });
+}
+
+/** 接受当前输入类型的一元操作；没接线或类型未知时全部可选。 */
+function unaryCycleOf(
+  document: canvas.CanvasDocument,
+  node: Extract<canvas.CanvasNode, { kind: 'unary' }>,
+): readonly canvas.UnaryOperator[] {
+  const operand = node.operand === canvas.UNCONNECTED ? undefined : canvas.staticTypeOf(document, node.operand);
+  if (operand === undefined || operand === 'any') return canvas.UNARY_OPERATORS;
+  const fits = canvas.UNARY_OPERATORS.filter((op) => canvas.unaryOperatorSpec(op).accepts.includes(operand));
+  return fits.includes(node.op) ? fits : [node.op, ...fits];
 }
 
 function nextOf<T extends string>(list: readonly T[], current: T): T {

@@ -19,4 +19,6 @@ export interface PanelInteractionHost {
   stageElement(): HTMLElement | null;
   undo(): void;
   redo(): void;
+  /** 题目声明的方法目录：方法参数就地编辑时按它取参数类型。 */
+  methods(): readonly canvas.CanvasMethodDecl[];
 }

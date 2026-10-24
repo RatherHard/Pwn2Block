@@ -129,6 +129,7 @@ export class CanvasPanelElement extends LitElement {
       stageElement: () => this.stageElement(),
       undo: () => this.undo(),
       redo: () => this.redo(),
+      methods: () => this.methods(),
       authorBlocks: () => this.challenge?.authorBlocks,
       exportSave: () => this.exportSave(),
     };

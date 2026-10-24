@@ -62,7 +62,7 @@ export class CanvasInlineEdit {
       this.host.requestRender();
       return;
     }
-    const edit = applyRowEdit(document, inline.nodeId, row.label, text);
+    const edit = applyRowEdit(document, inline.nodeId, row.label, text, this.host.methods());
     if (edit !== undefined) this.host.applyEdit(edit);
     this.host.requestRender();
   }
