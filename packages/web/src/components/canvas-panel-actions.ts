@@ -8,6 +8,7 @@ import {
   freeSlotOf,
   type InspectorChange,
 } from './canvas-panel-commands';
+import { applyWrapSelection } from './canvas-panel-regions';
 
 /**
  * 顶栏与工具箱上那几个「一次性动作」（加节点、成组、解组、加变量、导出）。
@@ -21,6 +22,8 @@ import {
 export interface PanelActionHost {
   currentDocument(): canvas.CanvasDocument | undefined;
   selection(): readonly string[];
+  /** 包络后要把选区切到新容器，所以动作层也要能改选中集。 */
+  selectNodes(ids: readonly string[]): void;
   applyEdit(edit: CanvasEdit): void;
   report(message: string | undefined): void;
   authorBlocks(): readonly AuthorBlock[] | undefined;
@@ -75,15 +78,31 @@ export function addReferenceNode(host: PanelActionHost): void {
   host.applyEdit(addReference(document, declId));
 }
 
-/** 侧栏改了一个字段：交给命令映射，改不动就说明白为什么。 */
+/**
+ * 侧栏改了一个字段：交给命令映射，改不动就说明白为什么。
+ *
+ * 包络与其它字段不同：它作用在**整段选区**上，成功还要把选区切到新容器，所以那两条在这里
+ * 直接交给 `applyWrapSelection`；`applyInspectorChange` 里仍保留纯映射（同样按选区包），
+ * 供只想要「一份编辑」的调用方使用。
+ */
 export function applyInspectorField(host: PanelActionHost, change: InspectorChange): void {
   const document = host.currentDocument();
   const nodeId = host.selection()[0];
   if (document === undefined || nodeId === undefined) return;
+  if (change.kind === 'wrap-loop' || change.kind === 'wrap-branch') {
+    applyWrapSelection(host, change.kind === 'wrap-loop' ? 'loop' : 'branch');
+    return;
+  }
   const authorBlocks = host.authorBlocks();
-  const edit = applyInspectorChange(document, nodeId, change, {
-    ...(authorBlocks === undefined ? {} : { authorBlocks }),
-  });
+  const edit = applyInspectorChange(
+    document,
+    nodeId,
+    change,
+    {
+      ...(authorBlocks === undefined ? {} : { authorBlocks }),
+      selection: host.selection(),
+    },
+  );
   if (edit === undefined) {
     host.report('这个字段在当前节点上没有对应的编辑命令');
     return;

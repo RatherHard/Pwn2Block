@@ -53,9 +53,14 @@ export type InspectorChange =
   | { readonly kind: 'row-remove'; readonly index: number }
   | RegionChange;
 
-/** 侧栏应用变更时要读的题目上下文：出题人积木声明。 */
+/** 侧栏应用变更时要读的上下文：出题人积木声明，以及「包络要包哪一段」的选中集。 */
 export interface CommandContext {
   readonly authorBlocks?: readonly AuthorBlock[];
+  /**
+   * 当前选中集：包络按钮包的是**整段选区**（`canvas-panel-wrap-target.ts` 判定），不是单个节点。
+   * 缺省时退回 `[nodeId]`，让只有「当前节点」概念的调用方仍能包一条。
+   */
+  readonly selection?: readonly string[];
 }
 
 /** 应用一条侧栏变更；节点种类与字段对不上时返回 `undefined`（界面不该显示那个控件）。 */
@@ -97,9 +102,9 @@ export function applyInspectorChange(
     case 'row-remove':
       return node.kind === 'group' ? removeRow(document, nodeId, change.index) : undefined;
     case 'wrap-loop':
-      return wrapSelectionEdit(document, [nodeId], 'loop');
+      return wrapSelectionEdit(document, ctx.selection ?? [nodeId], 'loop');
     case 'wrap-branch':
-      return wrapSelectionEdit(document, [nodeId], 'branch');
+      return wrapSelectionEdit(document, ctx.selection ?? [nodeId], 'branch');
     case 'unwrap-region':
       return node.kind === 'loop' || node.kind === 'if' ? unwrapEditOf(document, nodeId) : undefined;
   }

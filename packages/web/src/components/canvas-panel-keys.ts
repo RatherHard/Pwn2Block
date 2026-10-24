@@ -2,12 +2,17 @@ import type { Point } from '../canvas/view-model';
 import { canvasPositionsOf } from '../canvas/view-model-geometry';
 import { moveLayout, removeNodes } from '../canvas/editor';
 import type { PanelInteractionHost } from './canvas-panel-host';
+import { applyWrapSelection, type WrapKind } from './canvas-panel-regions';
 
 /**
- * 键盘命令：撤销/重做、删除、方向键微调（需求 §10 任务第 11–12 条）。
+ * 键盘命令：撤销/重做、删除、方向键微调（需求 §10 任务第 11–12 条），以及流程包络。
  *
- * 与指针交互分开的理由：这四条命令只依赖「文档 + 选中集 + 宿主」，不需要拖动状态，
+ * 与指针交互分开的理由：这些命令只依赖「文档 + 选中集 + 宿主」，不需要拖动状态，
  * 也不读写渲染状态——放在同一个类里只会让那个状态机更难读。
+ *
+ * 包络快捷键：`Ctrl+G` 包进循环、`Ctrl+Shift+G` 包进条件。现有命令只占 `Ctrl+Z`、
+ * `Ctrl+Shift+Z`、`Delete` / `Backspace` 与方向键，全局快捷键（`viewmodel/keymap.ts`）
+ * 只占 `Ctrl+↑/↓`，所以 G 这一对没有冲突。
  */
 
 /** 方向键步长：8px；按住 Shift 32px。 */
@@ -30,6 +35,12 @@ export function handleCommandKey(host: PanelInteractionHost, event: KeyboardEven
   if (isUndoKey(event)) {
     event.preventDefault();
     host.undo();
+    return true;
+  }
+  const wrapKind = wrapKindOf(event);
+  if (wrapKind !== undefined) {
+    event.preventDefault();
+    applyWrapSelection(host, wrapKind);
     return true;
   }
   if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -77,6 +88,13 @@ function isUndoKey(event: KeyboardEvent): boolean {
 
 function isRedoKey(event: KeyboardEvent): boolean {
   return (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'z';
+}
+
+/** 包络键：`Ctrl+G` 循环、`Ctrl+Shift+G` 条件；别的修饰键组合不抢。 */
+function wrapKindOf(event: KeyboardEvent): WrapKind | undefined {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return undefined;
+  if (event.key.toLowerCase() !== 'g') return undefined;
+  return event.shiftKey ? 'branch' : 'loop';
 }
 
 function arrowDeltaOf(event: KeyboardEvent): Point | undefined {

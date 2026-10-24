@@ -46,6 +46,7 @@ export function renderInspector(input: InspectorInput): TemplateResult {
     return html`<aside class="inspector" aria-label="检查器">
       <h3>检查器</h3>
       <p class="hint">已选中 ${input.selection.length} 个节点：Delete 删除、方向键移动、点「成组」拼成一个组合。</p>
+      ${renderRegionActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     </aside>`;
   }
   const node = findNode(input.document, input.selection[0]);
@@ -65,7 +66,7 @@ export function renderInspector(input: InspectorInput): TemplateResult {
           ${issues.map((message) => html`<li>${message}</li>`)}
         </ul>`}
     ${specOf(node.kind).fields.map((field) => renderField(node, field, input))}
-    ${renderRegionActions(node, input.onChange)}
+    ${renderRegionActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     ${node.kind === 'dict' ? renderDictEntries(node, input) : nothing}
     ${node.kind === 'group' ? renderGroupRows(node, input) : nothing}
   </aside>`;
