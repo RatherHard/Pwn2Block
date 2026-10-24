@@ -49,6 +49,8 @@ interface MoveDrag {
   readonly pressedId: string;
   /** 按下时按着 Shift 且它**本来就在**选中集里：松手（没拖动）要把它移出选中。 */
   readonly togglesOff: boolean;
+  /** 按在**已选中**节点的哪一行上：松手没拖动就直接就地编辑（不必再双击）。 */
+  readonly editRow: number | undefined;
 }
 
 interface WireDrag {
@@ -131,7 +133,7 @@ export class CanvasPanelInteraction {
     }
     const node = closestData(elementOf(event.target), 'data-node');
     if (node !== null) {
-      this.startNodeDrag(node, point, event.shiftKey);
+      this.startNodeDrag(node, point, event.shiftKey, rowIndexOf(event.target));
       return;
     }
     this.startMarquee(point, event.shiftKey);
@@ -219,14 +221,16 @@ export class CanvasPanelInteraction {
    * 按下节点身体：没选中就先选中它（多选时保持整组，方便一起拖）。
    * Shift 的加选/减选留到松手时处理——按下就改选中会让「Shift 点一下又松手」变成两次修改。
    */
-  private startNodeDrag(element: HTMLElement, point: Point, shiftKey: boolean): void {
+  private startNodeDrag(element: HTMLElement, point: Point, shiftKey: boolean, row: number | undefined): void {
     const nodeId = element.dataset['node'];
     const document = this.host.currentDocument();
     if (nodeId === undefined || document === undefined) return;
     const selection = this.host.selection();
     const already = selection.includes(nodeId);
     if (!already) this.host.selectNodes(shiftKey ? [...selection, nodeId] : [nodeId]);
-    this.beginMove('node', this.host.selection(), nodeId, point, document, shiftKey && already);
+    // 第一次点只选中（避免点选时误开编辑框）；节点已是唯一选中时，再点一行就是要改它。
+    const editRow = !shiftKey && already && selection.length === 1 ? row : undefined;
+    this.beginMove('node', this.host.selection(), nodeId, point, document, shiftKey && already, editRow);
   }
 
   private startGroupDrag(element: HTMLElement, point: Point): void {
@@ -235,7 +239,7 @@ export class CanvasPanelInteraction {
     if (groupId === undefined || document === undefined) return;
     const group = document.nodes.find((node) => node.id === groupId);
     if (group === undefined || group.kind !== 'group') return;
-    this.beginMove('group', canvas.groupMembers(group), groupId, point, document, false);
+    this.beginMove('group', canvas.groupMembers(group), groupId, point, document, false, undefined);
   }
 
   private beginMove(
@@ -245,6 +249,7 @@ export class CanvasPanelInteraction {
     point: Point,
     document: canvas.CanvasDocument,
     togglesOff: boolean,
+    editRow: number | undefined,
   ): void {
     if (ids.length === 0) return;
     const positions = canvasPositionsOf(document);
@@ -260,6 +265,7 @@ export class CanvasPanelInteraction {
       origins,
       pressedId,
       togglesOff,
+      editRow,
       start: point,
       moved: false,
       preview: document,
@@ -293,6 +299,8 @@ export class CanvasPanelInteraction {
     this.snap = undefined;
     this.base = undefined;
     if (!drag.moved) {
+      // 单击已选中节点的可编辑行：直接开编辑框；不可编辑的行由 beginAt 退回成「只选中」。
+      if (drag.editRow !== undefined && this.inline.beginAt(drag.pressedId, drag.editRow)) return;
       this.applyClickSelection(drag, shiftKey);
       this.host.requestRender();
       return;
@@ -395,6 +403,13 @@ export class CanvasPanelInteraction {
   private detachWindow(): void {
     unlistenDrag(this.pointerMove, this.pointerUp);
   }
+}
+
+/** 按下点所在的行号；不在行上（标题、空白）返回 `undefined`。 */
+function rowIndexOf(target: EventTarget | null): number | undefined {
+  const row = closestData(elementOf(target), 'data-row');
+  const index = Number(row?.dataset['row']);
+  return row === null || !Number.isInteger(index) ? undefined : index;
 }
 
 /**

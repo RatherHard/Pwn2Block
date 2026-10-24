@@ -252,6 +252,35 @@ describe('画布面板：就地编辑', () => {
     expect(rootOf(panel).querySelector('.row-input')).toBeNull();
   });
 
+  it('第一次单击只选中；节点已选中时再单击可编辑行直接开框，且框已获得焦点', async () => {
+    const panel = await mount(editDoc());
+    const click = (): void => {
+      fire(rowEl(panel, 'v1', '值'), 'pointerdown', 0, 0);
+      fire(window, 'pointerup', 0, 0);
+    };
+    click();
+    await settle(panel);
+    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
+    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(1);
+    click();
+    await settle(panel);
+    const input = rootOf(panel).querySelector('.row-input');
+    if (!(input instanceof HTMLInputElement)) throw new Error('没有出现输入框');
+    expect(rootOf(panel).activeElement).toBe(input);
+    expect(input.value).toBe('0');
+  });
+
+  it('已选中节点上单击不可编辑的行（预览）不开框', async () => {
+    const panel = await mount(editDoc());
+    for (let index = 0; index < 2; index += 1) {
+      fire(rowEl(panel, 'v1', '预览'), 'pointerdown', 0, 0);
+      fire(window, 'pointerup', 0, 0);
+      await settle(panel);
+    }
+    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
+    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(1);
+  });
+
   it('双击不可就地编辑的行改为打开侧栏', async () => {
     const doc = documentOf({
       nodes: [START, { id: 'm1', kind: 'method', block: 'gets', args: { data: '' } }],

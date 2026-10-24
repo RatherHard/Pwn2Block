@@ -164,8 +164,17 @@ export class CanvasPanelElement extends LitElement {
 
   protected override updated(changed: PropertyValues<this>): void {
     super.updated(changed);
+    this.focusInlineInput();
     if (changed.has('challenge')) this.loadForChallenge();
     else if (changed.has('document')) this.adoptExternal();
+  }
+
+  /** 就地编辑框一出现就拿到焦点并全选：点开即可直接输入，不必再点一次。 */
+  private focusInlineInput(): void {
+    const input = this.renderRoot.querySelector('.row-input');
+    if (!(input instanceof HTMLInputElement) || this.shadowRoot?.activeElement === input) return;
+    input.focus();
+    input.select();
   }
 
   /** 父组件直接换了文档（没走 `setDocument`）：旧历史作废，其余按一次变化处理。 */
