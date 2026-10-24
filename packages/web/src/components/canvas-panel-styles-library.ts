@@ -46,11 +46,17 @@ export const canvasPanelLibraryStyles = css`
     color: var(--p2b-bg);
   }
 
+  /*
+   * 列表自己滚动：只写 min-height: 0 会让它缩到内容以下，溢出的条目压在预览底下点不到。
+   * 预览固定在底部（flex-shrink: 0），翻看长列表时一直看得见。
+   */
   .library-list {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     gap: 0.5rem;
     min-height: 0;
+    overflow-y: auto;
   }
 
   .group-head {
@@ -121,6 +127,7 @@ export const canvasPanelLibraryStyles = css`
   /* ------------------------------ 预览 ------------------------------ */
 
   .library-preview {
+    flex: 0 0 auto;
     margin-top: auto;
     padding: 0.35rem;
     border: 1px solid var(--p2b-line);

@@ -78,7 +78,7 @@ export function renderStage(state: StageState, handlers: RowHandlers): TemplateR
   return html`<div class="surface" style=${`width:${size.width}px;height:${size.height}px`}>
     ${renderEdges(state, size)}
     ${state.view.boxes.map((box) => renderBox(box, state, handlers))}
-    ${state.view.ports.map(renderPort)} ${state.view.flowPorts.filter(isFlowPortConnected).map(renderFlowPort)}
+    ${state.view.ports.map((port) => renderPort(port, state.selection))} ${state.view.flowPorts.filter(isFlowPortConnected).map(renderFlowPort)}
     ${renderSnap(state.snap)} ${renderMarquee(state.marquee)}
   </div>`;
 }
@@ -125,7 +125,19 @@ function renderBox(box: CanvasBox, state: StageState, handlers: RowHandlers): Te
   return renderNodeBox(box, state, handlers);
 }
 
-/** 白框节点：白底、灰边、圆角、轻阴影，左上角分类色条（需求 §6.1）。 */
+/**
+ * 标题栏左侧的分类标签：颜色之外再写出类别名，满足「不能只靠颜色区分」。
+ * 标签在 `.title` 之外，`.title` 的文本仍然只有节点名（单测与浏览器回归按它找）。
+ */
+const TONE_LABELS: Readonly<Record<CanvasBox['tone'], string>> = {
+  data: '数据',
+  variable: '变量',
+  flow: '流程',
+  convert: '转换',
+  method: '方法',
+};
+
+/** 白框节点：反显白底，标题栏带分类标签，行在下方（需求 §6.1）。 */
 function renderNodeBox(box: CanvasBox, state: StageState, handlers: RowHandlers): TemplateResult {
   const rows = state.view.rowsByNode.get(box.nodeId) ?? [];
   return html`<div
@@ -133,8 +145,10 @@ function renderNodeBox(box: CanvasBox, state: StageState, handlers: RowHandlers)
     data-node=${box.nodeId}
     style=${rectStyle(box)}
   >
-    <span class="tone-bar"></span>
-    <div class="title" title=${box.title}>${box.title}</div>
+    <div class="title-bar">
+      <span class="tone-tag">${TONE_LABELS[box.tone]}</span>
+      <div class="title" title=${box.title}>${box.title}</div>
+    </div>
     ${box.subtitle === undefined ? nothing : html`<div class="subtitle">${box.subtitle}</div>`}
     ${rows.map((row, index) => renderRow(box.nodeId, row, index, state, handlers))}
   </div>`;
@@ -196,12 +210,16 @@ function renderEnvelopeBox(box: CanvasBox): TemplateResult {
   </div>`;
 }
 
-/** 端口小方框：已接线实心、未接线空心（需求 §6.1「连接点在节点外部」）。 */
-function renderPort(port: CanvasLayoutView['ports'][number]): TemplateResult {
+/**
+ * 端口小方框：已接线实心、未接线空心（需求 §6.1「连接点在节点外部」）。
+ * 平时是低调的灰框，所在节点被选中时提亮（`active`）——要拉线的时候才需要看清它。
+ */
+function renderPort(port: CanvasLayoutView['ports'][number], selection: readonly string[]): TemplateResult {
   const portClasses = classesOf([
     'port',
     port.connected ? 'connected' : 'hollow',
     port.severity === 'error' ? 'port-error' : '',
+    selection.includes(port.nodeId) ? 'active' : '',
   ]);
   const state = port.connected ? '已接线' : '未接线';
   return html`<div

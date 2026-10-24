@@ -113,9 +113,17 @@ export const canvasPanelStyles = css`
     gap: 0.3rem;
   }
 
+  /* 13rem 宽放两个按钮：去掉「[ ]」装饰并禁止折行，否则括号会掉到第二行。 */
   .toolbox-actions button {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 1.7rem;
+    padding: 0 0.3rem;
+    white-space: nowrap;
+  }
+
+  .toolbox-actions button::before,
+  .toolbox-actions button::after {
+    content: none;
   }
 
   .toolbox-group {

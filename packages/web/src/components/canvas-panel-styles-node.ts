@@ -17,8 +17,7 @@ export const canvasPanelNodeStyles = css`
     position: absolute;
     display: flex;
     flex-direction: column;
-    padding-left: 0.35rem;
-    border: 1px solid var(--p2b-line);
+    border: 1px solid var(--p2b-fg);
     color: var(--p2b-bg);
     background: var(--p2b-fg);
     overflow: hidden;
@@ -35,35 +34,45 @@ export const canvasPanelNodeStyles = css`
     outline: 2px dashed var(--p2b-focus);
   }
 
-  /* 左上角分类色条：白的底子上只留一条 3px 竖条，颜色说明节点属于哪一类。 */
-  .tone-bar {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    background: var(--p2b-data);
+  /*
+   * 标题栏：左边是分类标签（色块 + 类别名，颜色不单独传达），右边是节点名。
+   * 高度与旧标题行一致，端口的纵向位置（盒顶 + 24 起）仍然对着第一行。
+   */
+  .title-bar {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    border-bottom: 2px solid var(--p2b-bg);
   }
 
-  .tone-variable .tone-bar {
+  .tone-tag {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.3rem;
+    color: var(--p2b-bg);
+    background: var(--p2b-data);
+    white-space: nowrap;
+  }
+
+  .tone-variable .tone-tag {
     background: var(--p2b-code);
   }
 
-  .tone-flow .tone-bar {
+  .tone-flow .tone-tag {
     background: var(--p2b-ip);
   }
 
-  .tone-convert .tone-bar {
+  .tone-convert .tone-tag {
     background: var(--p2b-stack);
   }
 
-  .tone-method .tone-bar {
+  .tone-method .tone-tag {
     background: var(--p2b-hidden);
   }
 
   .title {
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 0.1rem 0.35rem;
-    border-bottom: 1px solid var(--p2b-line);
     font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
@@ -105,6 +114,20 @@ export const canvasPanelNodeStyles = css`
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* 可就地改的值带虚下划线，悬停时整行反显：一看就知道「点这里能改」。 */
+  .row.editable {
+    cursor: text;
+  }
+
+  .row.editable .row-value {
+    text-decoration: underline dotted;
+  }
+
+  .node-box.selected .row.editable:hover {
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
   }
 
   .row-error .row-value {
@@ -165,6 +188,13 @@ export const canvasPanelNodeStyles = css`
     background: var(--p2b-changed);
   }
 
+  /* 悬停反显：方框是按钮式的「点一下换运算」，要有按下前的反馈。 */
+  .relation-box:hover {
+    border-color: var(--p2b-fg);
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
+  }
+
   .relation-box.selected {
     outline: 2px solid var(--p2b-focus);
   }
@@ -208,7 +238,11 @@ export const canvasPanelNodeStyles = css`
     white-space: nowrap;
   }
 
-  /* 端口坐标是端口中心：用 translate 把 10px 的小方框对到中心点上。 */
+  /*
+   * 端口坐标是端口中心：用 translate 把 10px 的小方框对到中心点上。
+   * 平时是不抢眼的灰框（不在节点上放突兀的连接点）；所在节点选中或指针悬停时提亮放大，
+   * 拉线时一眼就能找到。已接线的实心色与数据线同为 --p2b-addr。
+   */
   .port {
     position: absolute;
     width: ${PORT_SIZE}px;
@@ -221,11 +255,18 @@ export const canvasPanelNodeStyles = css`
   }
 
   .port.connected {
-    background: var(--p2b-fg);
+    border-color: var(--p2b-addr);
+    background: var(--p2b-addr);
   }
 
   .port.hollow {
     background: var(--p2b-bg);
+  }
+
+  .port.active:not(.flow-port),
+  .port:hover:not(.flow-port) {
+    border-color: var(--p2b-fg);
+    transform: translate(-50%, -50%) scale(1.3);
   }
 
   .port.port-error {
