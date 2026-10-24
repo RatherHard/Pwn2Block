@@ -5,6 +5,7 @@ import type { AuthorBlock } from '@pwn2block/shared';
 import { specOf } from '../canvas/catalog';
 import type { CanvasFieldSpec } from '../canvas/catalog';
 import { valueNodeCandidates, type InspectorChange } from './canvas-panel-commands';
+import { renderConvertActions } from './canvas-panel-convert';
 import { labelOf, onInput, onSelect, renderDictEntries, renderGroupRows } from './canvas-panel-inspector-blocks';
 import { renderRegionActions } from './canvas-panel-regions';
 
@@ -16,8 +17,9 @@ import { renderRegionActions } from './canvas-panel-regions';
  * 于是这个文件里没有一条编辑命令，也不碰文档。
  *
  * 几个补充块不来自目录字段，而是结构本身：字典条目、组合行（在 `canvas-panel-inspector-blocks.ts`）、
- * 变量绑定的来源节点、流程区域按钮（在 `canvas-panel-regions.ts`）。它们各自对应一条现成命令
- * （`setDictEntries` / `insertRowAfter`+`removeRow` / `setBinding`）。
+ * 变量绑定的来源节点、流程区域按钮（在 `canvas-panel-regions.ts`）与转换包络按钮
+ * （在 `canvas-panel-convert.ts`）。它们各自对应一条现成命令
+ * （`setDictEntries` / `insertRowAfter`+`removeRow` / `setBinding` / `wrapInLoop` 等 / `wrapInConversion`）。
  */
 
 /** 渲染检查器需要的输入。 */
@@ -47,6 +49,7 @@ export function renderInspector(input: InspectorInput): TemplateResult {
       <h3>检查器</h3>
       <p class="hint">已选中 ${input.selection.length} 个节点：Delete 删除、方向键移动、点「成组」拼成一个组合。</p>
       ${renderRegionActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
+      ${renderConvertActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     </aside>`;
   }
   const node = findNode(input.document, input.selection[0]);
@@ -67,6 +70,7 @@ export function renderInspector(input: InspectorInput): TemplateResult {
         </ul>`}
     ${specOf(node.kind).fields.map((field) => renderField(node, field, input))}
     ${renderRegionActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
+    ${renderConvertActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     ${node.kind === 'dict' ? renderDictEntries(node, input) : nothing}
     ${node.kind === 'group' ? renderGroupRows(node, input) : nothing}
   </aside>`;

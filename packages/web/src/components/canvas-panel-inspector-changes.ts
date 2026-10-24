@@ -18,9 +18,11 @@ import {
   setRelationOp,
   setUnaryOp,
   setValue,
+  unwrapConversion,
   type CanvasEdit,
 } from '../canvas/editor';
 import { defaultEncodedValue } from '../canvas/catalog';
+import { wrapConvertEdit, type ConvertChange } from './canvas-panel-convert';
 import { unwrapEditOf, wrapSelectionEdit, type RegionChange } from './canvas-panel-regions';
 
 /**
@@ -51,7 +53,8 @@ export type InspectorChange =
   | { readonly kind: 'dict-value'; readonly index: number; readonly value: string }
   | { readonly kind: 'row-insert'; readonly index: number }
   | { readonly kind: 'row-remove'; readonly index: number }
-  | RegionChange;
+  | RegionChange
+  | ConvertChange;
 
 /** 侧栏应用变更时要读的上下文：出题人积木声明，以及「包络要包哪一段」的选中集。 */
 export interface CommandContext {
@@ -107,6 +110,11 @@ export function applyInspectorChange(
       return wrapSelectionEdit(document, ctx.selection ?? [nodeId], 'branch');
     case 'unwrap-region':
       return node.kind === 'loop' || node.kind === 'if' ? unwrapEditOf(document, nodeId) : undefined;
+    case 'wrap-convert':
+      // 转换包络与流程包络一样作用在**整段选区**上，所以包的是 `selection` 而不是当前节点。
+      return wrapConvertEdit(document, ctx.selection ?? [nodeId]).edit;
+    case 'unwrap-convert':
+      return unwrapConversion(document, nodeId);
   }
 }
 

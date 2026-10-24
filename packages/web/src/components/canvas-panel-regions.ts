@@ -132,8 +132,11 @@ export function renderRegionActions(input: RegionActionsInput): TemplateResult |
   return renderWrapActions(input);
 }
 
-/** 单选时那一个节点；多选没有「当前节点」这个概念。 */
-function singleNodeOf(document: canvas.CanvasDocument, selection: readonly string[]): canvas.CanvasNode | undefined {
+/** 单选时那一个节点；多选没有「当前节点」这个概念（转换包络块也用这同一份判定）。 */
+export function singleNodeOf(
+  document: canvas.CanvasDocument,
+  selection: readonly string[],
+): canvas.CanvasNode | undefined {
   return selection.length === 1 ? nodeOf(document, selection[0]) : undefined;
 }
 

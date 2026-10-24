@@ -8,6 +8,7 @@ import {
   freeSlotOf,
   type InspectorChange,
 } from './canvas-panel-commands';
+import { applyConvertChange } from './canvas-panel-convert';
 import { applyWrapSelection } from './canvas-panel-regions';
 
 /**
@@ -91,6 +92,10 @@ export function applyInspectorField(host: PanelActionHost, change: InspectorChan
   if (document === undefined || nodeId === undefined) return;
   if (change.kind === 'wrap-loop' || change.kind === 'wrap-branch') {
     applyWrapSelection(host, change.kind === 'wrap-loop' ? 'loop' : 'branch');
+    return;
+  }
+  if (change.kind === 'wrap-convert' || change.kind === 'unwrap-convert') {
+    applyConvertChange(host, change);
     return;
   }
   const authorBlocks = host.authorBlocks();

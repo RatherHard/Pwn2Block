@@ -96,6 +96,67 @@ function regionOfTarget(target: WrapTarget): canvas.FlowRegionRef {
     : { ownerId: target.ownerId, kind: target.kind };
 }
 
+// ---------------------------------------------------------------------------
+// 转换包络（验收表 AT-14「包络为转换 / 解除转换」）
+// ---------------------------------------------------------------------------
+
+/** 「包络为转换」的请求：`memberIds` 的顺序就是选区顺序，多成员时组合按这个顺序成行。 */
+export interface ConvertWrapTarget {
+  readonly memberIds: readonly string[];
+}
+
+/** 不能包成转换时只给一句中文原因：按钮禁用与块底提示都照原样显示它。 */
+export type ConvertWrapTargetResult = ConvertWrapTarget | { readonly reason: string };
+
+/**
+ * 选中集 → 一次「包络为转换」的请求。
+ *
+ * 判定顺序与 `wrapTargetOf` 同一套写法（先报最根本的问题）：
+ * 1. 空选区；
+ * 2. 每个 id 都在文档里；
+ * 3. 选区里没有转换自己（转换不能包住自己）；
+ * 4. 每个 id 都是数据节点（流程节点、开始节点、变量声明都没有数据结果）。
+ *
+ * 这里只判「能不能包」这一层：外部引用内部中间结果、类型对不对由命令层与校验器说，
+ * 界面不抢它们的活（`wrapInConversion` 会带着点名的那句话拒绝）。
+ */
+export function convertWrapTargetOf(
+  document: canvas.CanvasDocument,
+  ids: readonly string[],
+): ConvertWrapTargetResult {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return { reason: '先选中要包成转换的数据节点' };
+  for (const id of unique) {
+    const node = nodeOf(document, id);
+    if (node === undefined) return { reason: `选中的「${id}」不在文档里` };
+    if (node.kind === 'convert') {
+      return { reason: `选区里已经有转换「${id}」：转换不能包住自己，先解除它再包` };
+    }
+    if (!canvas.isValueNode(node)) {
+      return {
+        reason: canvas.isFlowNode(node)
+          ? `「${id}」是流程语句，没有数据结果，不能包成转换`
+          : `「${id}」是「${canvas.CANVAS_NODE_KIND_LABELS[node.kind]}」，不是数据节点，不能包成转换`,
+      };
+    }
+  }
+  return { memberIds: unique };
+}
+
+/**
+ * 能不能包的那句话：单成员说「整体结果是它自己」，多成员说「先按选择顺序合成组合」。
+ *
+ * 超过三个成员只列前三个再接「等 N 个」，免得一行提示被 id 撑满。
+ */
+export function convertWrapCaptionOf(target: ConvertWrapTarget): string {
+  const names = target.memberIds.map((id) => `「${id}」`);
+  const first = names[0] ?? '';
+  if (names.length === 1) return `整体结果是${first}自己：转换包络接在它外面`;
+  const head = names.slice(0, 3).join('、');
+  const span = names.length > 3 ? `${head} 等 ${names.length} 个数据节点` : head;
+  return `选区里的${span}先按选择顺序合成一个组合，整体结果就是这个组合`;
+}
+
 /**
  * 选区在序列里的位置说明：`当前选区是第 2–4 项（共 6 项，位于顶层序列）`。
  *
