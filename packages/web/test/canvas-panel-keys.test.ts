@@ -179,6 +179,19 @@ describe('画布面板：选择与键盘', () => {
     await settle(panel);
     expect(positionOf(panel, 'v1')).toEqual({ x: 72, y: 48 });
   });
+
+  it('在侧栏输入框里按退格只删字，不删选中的节点', async () => {
+    const decl: canvas.CanvasNode = { id: 'd1', kind: 'var-decl', name: 'ab', type: 'int', binding: { mode: 'none' } };
+    const panel = await mount(documentOf({ nodes: [START, decl], layout: { d1: { x: 40, y: 200 } } }));
+    clickNode(panel, 'd1');
+    await settle(panel);
+    // 事件从影子根里的输入框冒出，到宿主时 target 已被重定向成宿主本身。
+    requireElement(panel, '.field-name').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, composed: true, cancelable: true }),
+    );
+    await settle(panel);
+    expect(panel.document?.nodes.map((node) => node.id)).toEqual(['start', 'd1']);
+  });
 });
 
 // ---------------------------------------------------------------------------

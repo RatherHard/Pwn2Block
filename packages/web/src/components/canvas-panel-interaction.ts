@@ -193,7 +193,9 @@ export class CanvasPanelInteraction {
 
   keyDown = (event: KeyboardEvent): void => {
     // 输入框自己处理 Escape/Enter（见 `canvas-panel-inline.ts`），画布不吃这些键。
-    if (isTextEntry(event.target)) return;
+    // 监听挂在宿主上，影子根里的输入框会被重定向成宿主本身，所以要看 `composedPath()` 的首项：
+    // 否则在框里或侧栏里按退格，会把选中的节点删掉。
+    if (isTextEntry(event.composedPath()[0] ?? event.target)) return;
     if (event.key === 'Escape') {
       this.cancelAll();
       return;
