@@ -1,3 +1,4 @@
+import { previewLogicGraph } from './logic-runtime';
 import { inputIdsOf, isValueNode, nodeMapOf, type CanvasDocument, type CanvasNode, type VarDeclNode } from './document';
 import { evaluateCanvasNode, type CanvasEvalScope } from './evaluate';
 import { fail, type CanvasResult } from './result';
@@ -59,6 +60,11 @@ export function previewCanvasNode(
 
 /** 整张文档的预览：每个数据节点一项，供画布批量渲染。 */
 export function previewCanvasDocument(document: CanvasDocument): CanvasDocumentPreview {
+  if (document.logic) {
+    const nodes = new Map<string, CanvasNodePreview>();
+    for (const [id, value] of previewLogicGraph(document.logic)) nodes.set(id, typeof value === 'string' ? { status: 'error', message: value } : { status: 'value', value });
+    return { nodes, pending: new Set() };
+  }
   const pendingDecls = pendingDeclarations(document);
   const pending = pendingNodesOf(document, pendingDecls);
   const scope = previewScope(document, pendingDecls);

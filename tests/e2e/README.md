@@ -1,87 +1,48 @@
-# 浏览器回归与证据
+﻿# 节点画布浏览器回归
 
-节点画布已经是默认且唯一的 payload 编辑器；本目录只保留**新版画布**（`pwn2block-canvas-panel`）的 E2E。
-旧画布（`pwn2block-graph-panel` / `pwn2block-graph-canvas` / 节点库 / Blockly 侧栏）及其交互用例已随
-阶段三的清理一并删除，历史记录见 git 历史与 `docs/archive/`，不再作为当前验收依据。
-
-## 用例
-
-| 文件 | project | 覆盖 |
-|---|---|---|
-| `canvas-interaction.spec.ts` | `chromium-desktop` | 新版画布交互：工具箱七个分类十八种节点、点一项在空位加节点、点选节点后检查器显示 id、侧栏改名同步到画布行并撤销、双击「值」行就地编辑（Enter 提交 / Esc 取消）、拖动节点只改坐标并 Ctrl+Z 撤回、从输入端口拉线接到提供者节点、Delete 删节点可撤销、空白处框选 |
-| `closed-loop.spec.ts` | `chromium-desktop` | 真实后端闭环：首屏只有开始节点、方法节点选 `gets(buf)` 后才长出参数端口、整数值接到 `bytes` 参数上编译失败并在输出区点「定位积木」高亮、装入合法 payload 后编译成功且动作数进状态栏、提交判题拿到服务端结论、刷新后从 `pwn2block.canvas.v2.*` 恢复并重新编译 |
-| `frontend-details.spec.ts` | `chromium-desktop` | 方法节点未选方法时编译失败的定位；新档损坏时不回退旧档、原文与旧键原样保留、提示条提供导出；画布 Delete / Ctrl+Z / 方向键；视图标签键盘切换 |
-| `desktop-smoke.spec.ts` | `chromium-desktop-1280x720`、`-1440x900`、`-1920x1080`、`-2560x1080`、`-900x1200`、`-768x1024` | 六种尺寸下上下布局（画布在视图之下）、无横向越界、页面可纵向滚动、工具箱/画布/检查器可见、加节点、方向键精确 +8px、刷新从 v2 存档恢复；每档保存一张 viewport 截图 |
-
-所有用例都要求 `PWN2BLOCK_E2E=1`，否则显式跳过。没有自动重试，也没有用跳过冒充通过。
-
-选择器约定集中在 `helpers.ts`：面板是 `pwn2block-canvas-panel`，工具箱与检查器用
-`getByRole('complementary', { name: '工具箱' | '检查器' })`，工具箱条目是 `.tool[data-kind]`
-（本题方法是 `.tool-block[data-block]`，搜索框 `.library-query`，分类页 `.library-tab`；分页或搜索
-筛掉的条目只是带 `hidden`，仍在 DOM 里），画布是 `.stage`；节点用
-`.node-box[data-node="<id>"]`（`selectNode` 点标题 `.title`，配置统一在侧栏编辑），关系用 `.relation-box[data-relation]`，流程外置连接点用 `.flow-port`，
-行用 `.row[data-node][data-row]`，侧栏值编辑用 `.field-value`，数据来源用 `.field-param-<name>`，顶栏计数用
-`.status-error` / `.status-warn` / `.status-unconnected` / `.status-revision`。
-文档断言优先读面板公开属性 `document`（`helpers.readDocument()` 会在 Node 侧按形状复核一遍），
-只有「看起来怎样」才查 DOM。
+当前用例以 `docs/节点功能逻辑重构.md` 为基准。运行真实后端和生产构建，不 mock API。此前 UI 方案的列表、分组序列、分页与“手填/接线”断言已替换为显式图行为。
 
 ## 运行
 
-先构建并启动真实后端（测试 flag 是公开哨兵值，不是真 flag）：
+在一个终端构建并启动后端，使用仓库公开的假 flag：
 
 ```powershell
 pnpm build
-$env:FLAG_RET2WIN='flag{e2e-graph}'
-$env:PORT='8787'
-pnpm start
+node --env-file=.env.example --import tsx packages/server/src/index.ts
 ```
 
-另开一个终端：
+另一个终端运行：
 
 ```powershell
 $env:PWN2BLOCK_E2E='1'
-$env:PWN2BLOCK_BASE_URL='http://127.0.0.1:8787'
-$env:PWN2BLOCK_E2E_OUTPUT_DIR='.tmp/e2e'
 pnpm e2e
 ```
 
-只跑某个 spec 或某个尺寸时加 `--project=...` 与文件路径；输出目录每轮换一个，避免 Playwright 清理上一轮现场。
+`PWN2BLOCK_BASE_URL` 可覆盖地址；`PWN2BLOCK_E2E_OUTPUT_DIR` 可指定截图、失败 trace 和 JSON 报告目录。默认产物保存在 `.tmp/playwright` 与 `.tmp/playwright.json`，不提交 Git。每个用例释放自己创建的会话；应使用独立测试服务，勿与真实学习会话共用。
 
-**同一个后端进程跑多轮会撞上会话上限。** 每个用例都会新建调试/判题会话，服务端默认同一来源最多 32 个存活会话（`packages/server/src/limits.ts`）。一个用例在不同题目/刷新之间还会再建会话，所以**一轮从干净后端开始也只能跑到大半套**：撞上后前端显示「同一来源的会话数已达上限」，此时失败与画布无关。推荐分两批跑，批间重启后端：
+## 覆盖
 
-```
-# 批一：画布交互、闭环、细节（11 例）
-pnpm exec playwright test --config tests/e2e/playwright.config.ts \
-  tests/e2e/canvas-interaction.spec.ts tests/e2e/closed-loop.spec.ts tests/e2e/frontend-details.spec.ts \
-  --project=chromium-desktop
+| 文件 | 内容 |
+|---|---|
+| `canvas-logic.spec.ts` | 五种标量、唯一开始、点阵、真实拖动吸附/远离/提交、间距、右侧关系、内部吸附、转换、跨图拖动取消 |
+| `canvas-interaction.spec.ts` | 新增与编辑、撤销、自由移动、空白框选、无重叠落位 |
+| `canvas-ui-reconstruction.spec.ts` | 新规则下的包络端口、循环附着/解除和跨包络引用（保留文件名，旧 UI 规则已移除） |
+| `closed-loop.spec.ts` | 全局定义 → 派生 payload → 循环内公开方法 → 真实判题 → 刷新恢复 |
+| `frontend-details.spec.ts` | 类型错误阻止执行并定位、损坏存档保留、键盘与视图标签 |
+| `desktop-smoke.spec.ts` | 六种窗口尺寸的布局可达性、键盘微调及刷新恢复 |
 
-# 重启后端后，批二：六个视口的桌面冒烟（6 例）
-pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/desktop-smoke.spec.ts
-```
+窗口覆盖：1280×720、1440×900、1920×1080、2560×1080、900×1200、768×1024。外壳采用上下布局；真实指针测试先将画布滚入视口，不能直接向视口外的节点坐标发送鼠标操作。
 
-两批合计 17 例，就是 `pnpm e2e` 的全集；CI 用干净后端一次跑，若撞上限就先重启再跑剩余项目。
+公开方法仍只生成 block 动作。闭环用例验证真实提交与服务端的“没有达成目标”结论；题目判胜完整性另外由全部参考解法回放验证，不将手工调试步骤冒充画布生成的 payload。
 
-## CI
+## 本轮验证
 
-`.github/workflows/ci.yml` 在构建后启动真实后端并跑完整 `pnpm e2e`，失败时上传 `.tmp/ci-e2e` 与服务端日志。
+2026-10-30（Asia/Shanghai），Windows / Chromium / 真实 Fastify 后端。
 
-## 已知缺口
+- `pnpm typecheck`、`pnpm lint`、`pnpm build`：通过。
+- `pnpm test`：140 个测试文件通过，2495 项通过，保留原有 5 项 TODO。
+- `PWN2BLOCK_E2E=1 pnpm e2e`：24 项全部通过，覆盖上述六种窗口尺寸。
+- 使用 `.env.example` 执行出题 CLI `check --all` 与 `solve --all`：7 个题目包校验与 7 个参考解法均通过。
+- 审查回归另覆盖嵌套循环及次数依赖、16 层共享派生依赖与更新、转换入口一致性、解除包络保留引用、动态选项同步、导入竞态和统一附着校验。
 
-- 画布只产出 `{ type: 'block' }`，不产出 `step` / `run`，所以 `ret2win` 这类「写内存再单步执行到 `ret`」
-  的题**暂时无法从界面拿到判胜与 flag**；`closed-loop` 因此断言服务端给出的
-  「payload 跑完了，但没有达成目标」，判胜分支等缺口补上后放回。
-- 尚未覆盖的多选拖动、人工视觉、真实读屏和其他浏览器验收见 [05-未完成工作](../../docs/05-未完成工作.md)。
-
-当前套件配置共 17 个用例（`canvas-interaction` 6、`closed-loop` 1、`frontend-details` 4、`desktop-smoke` 1×6 个尺寸）。
-
-每次运行应保存独立报告与截图，并注明环境、执行数、跳过项和失败原因。
-
-过去各轮结果与本地证据路径见 [浏览器回归记录](../../docs/archive/graph-interaction-2026-10-19/浏览器回归记录.md)，更早阶段见 [基础画布验收记录](../../docs/archive/graph-2026-10-19/浏览器验收记录.md)。历史报告不能替代当前运行；`.tmp` 中的文件不随仓库交付。
-
-## 2026-10-29 UI 重构回归
-
-`canvas-ui-reconstruction.spec.ts` 覆盖数据吸附、关系框间距及换运算、链中脱离、表达式框选后的右键包络、附着转换、解除与撤销重做，以及分类返回、常驻预览和分页。`canvas-interaction.spec.ts`、`closed-loop.spec.ts` 已改为通过侧栏配置值和方法参数，不再依赖已移除的数据端口或就地编辑框。截图由测试输出到配置的证据目录，构建产物和截图不提交。
-
-本轮验证使用真实本地后端与生产构建：14 个功能用例通过，6 种尺寸的布局/键盘/恢复用例均通过。768×1024 首次暴露侧栏挤压画布的问题，增加窄屏宽度规则后，与 900×1200、1280×720 一起复验通过。功能与大屏证据在 `.tmp/canvas-final-browser-clean`，响应式修复证据在 `.tmp/canvas-responsive-browser`。
-
-流程吸附补充回归：`canvas-ui-reconstruction.spec.ts` 直接拖动标题，检查接入开始节点后的坐标对齐、游离语句相互连接、48px 间距、实际流程连线、抽走中间语句后的补位与一次撤销恢复。新增用例在生产构建和真实后端通过，证据位于 `.tmp/flow-snap-browser-verified`；其余 14 个功能用例通过，证据位于 `.tmp/flow-snap-browser`。
+详细行为与语义边界见 [实现与验收](../../docs/节点功能逻辑重构-实现与验收.md)。

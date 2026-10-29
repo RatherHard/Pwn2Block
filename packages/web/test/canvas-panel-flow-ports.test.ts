@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 
 /**
  * 流程连接点的渲染断言（需求 §6.1「外置流程连接点」，AT-21 最后一条）。
@@ -27,7 +27,7 @@ function threeStepDocument(): canvas.CanvasDocument {
 }
 
 async function mount(doc: canvas.CanvasDocument): Promise<CanvasPanelElement> {
-  const panel = document.createElement('pwn2block-canvas-panel');
+  const panel = document.createElement('pwn2block-legacy-canvas-panel');
   if (!(panel instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   panel.challenge = CHALLENGE;
   panel.document = doc;

@@ -1,3 +1,4 @@
+import { generateLogicActions } from './logic-runtime';
 import type { AuthorBlock } from '../challenge';
 import { expandBlock, type Action, type BlockAction } from '../actions';
 import { MAX_UINT64, bytesToHex, formatHex } from '../hex';
@@ -123,6 +124,7 @@ export function generateCanvasActions(
   document: CanvasDocument,
   options?: CanvasGenerateOptions,
 ): CanvasGenerateResult {
+  if (document.logic) return generateLogicActions(document.logic, options);
   const methods = options?.methods ?? canvasMethodsOf(options?.challenge ?? {});
   const authorBlocks = options?.methods === undefined ? options?.challenge?.authorBlocks : undefined;
 

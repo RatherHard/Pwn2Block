@@ -1,3 +1,4 @@
+import type { LogicGraph } from './logic-model';
 import type { BinaryOperator, ConversionSpec, UnaryOperator } from './operators';
 import { type ValueKind } from './value';
 import type { EncodedDictKey, EncodedScalarValue } from './value-codec';
@@ -306,6 +307,7 @@ export interface CanvasNodeLayout {
 }
 
 export interface CanvasDocument {
+  readonly logic?: LogicGraph;
   readonly format: typeof CANVAS_FORMAT;
   readonly version: number;
   readonly nodes: readonly CanvasNode[];

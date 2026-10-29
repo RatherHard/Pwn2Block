@@ -1,0 +1,326 @@
+import { css } from 'lit';
+export const logicCanvasStyles = css`
+  :host {
+    display: block;
+    height: 100%;
+    min-height: 0;
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
+  }
+  * {
+    box-sizing: border-box;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+    background: var(--p2b-bg);
+    border: 1px solid var(--p2b-line);
+    border-radius: 0;
+    min-height: 28px;
+  }
+  button {
+    cursor: pointer;
+    padding: 3px 8px;
+  }
+  button:hover,
+  button:focus-visible {
+    border-color: var(--p2b-focus);
+  }
+  button:disabled {
+    color: var(--p2b-dim);
+    cursor: default;
+  }
+  .workspace {
+    height: 100%;
+    min-height: 400px;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px;
+    border-bottom: 1px solid var(--p2b-line);
+    align-items: center;
+  }
+  .toolbar .status {
+    margin-left: auto;
+    color: var(--p2b-dim);
+  }
+  .body {
+    display: grid;
+    grid-template-columns: 156px minmax(260px, 1fr) 246px;
+    min-height: 0;
+  }
+  aside {
+    overflow: auto;
+    padding: 10px;
+  }
+  .library {
+    border-right: 1px solid var(--p2b-line);
+  }
+  .inspector {
+    border-left: 1px solid var(--p2b-line);
+  }
+  h3 {
+    font-size: inherit;
+    margin: 6px 0 10px;
+    color: var(--p2b-dim);
+  }
+  .library button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-bottom: 6px;
+  }
+  .library p,
+  .hint {
+    color: var(--p2b-dim);
+    font-size: inherit;
+    line-height: 1.7;
+  }
+  .stage {
+    position: relative;
+    overflow: auto;
+    min-width: 0;
+    min-height: 0;
+    touch-action: none;
+    outline: none;
+  }
+  .surface {
+    position: relative;
+    min-width: 100%;
+    min-height: 100%;
+  }
+  .wires {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+  .flow-line {
+    stroke: var(--p2b-fg);
+    stroke-width: 1.5;
+    fill: none;
+  }
+  .reference-line {
+    stroke: var(--p2b-info, #55ffff);
+    stroke-width: 1;
+    fill: none;
+  }
+  .edge-hit {
+    pointer-events: stroke;
+    stroke: transparent;
+    stroke-width: 14;
+    fill: none;
+    cursor: pointer;
+  }
+  .edge-selected {
+    stroke: var(--p2b-focus);
+  }
+  .node {
+    position: absolute;
+    width: 180px;
+    height: 76px;
+    border: 1px solid var(--p2b-line);
+    background: var(--p2b-bg);
+    cursor: grab;
+    user-select: none;
+    padding: 9px 12px;
+    z-index: 2;
+  }
+  .node:focus-visible,
+  .node.selected {
+    outline: 1px solid var(--p2b-focus);
+    outline-offset: 3px;
+  }
+  .node-title {
+    font-weight: bold;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .node-summary {
+    display: block;
+    color: var(--p2b-dim);
+    margin-top: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: inherit;
+  }
+  .node[data-kind='variable'] {
+    border-color: var(--p2b-info, #55ffff);
+  }
+  .node[data-kind='start'] {
+    border-color: var(--p2b-ok, #55ff55);
+  }
+  .envelope {
+    position: absolute;
+    border: 1px dashed var(--p2b-dim);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .envelope.selected {
+    border-color: var(--p2b-focus);
+  }
+  .envelope-title {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    pointer-events: auto;
+    cursor: grab;
+    background: var(--p2b-bg);
+    padding: 2px 5px;
+    max-width: calc(100% - 16px);
+  }
+  .port {
+    pointer-events: auto;
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    min-height: 0;
+    padding: 0;
+    border: 1px solid var(--p2b-fg);
+    background: var(--p2b-bg);
+    z-index: 3;
+  }
+  .port-in {
+    left: -19px;
+    top: 32px;
+  }
+  .port-out {
+    right: -19px;
+    top: 32px;
+  }
+  .port-then {
+    right: -19px;
+    top: 18px;
+  }
+  .port-else {
+    right: -19px;
+    top: 50px;
+  }
+  .port-label {
+    position: absolute;
+    right: 4px;
+    font-size: inherit;
+    color: var(--p2b-dim);
+  }
+  .then-label {
+    top: 10px;
+  }
+  .else-label {
+    top: 43px;
+  }
+  .relation {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 4;
+    min-width: 38px;
+    min-height: 28px;
+    border: 1px solid var(--p2b-info, #55ffff);
+    padding: 2px 5px;
+  }
+  .relation.assignment {
+    border-color: var(--p2b-caution, #ffff55);
+  }
+  .relation.concat {
+    border-color: var(--p2b-ok, #55ff55);
+  }
+  .relation.selected {
+    outline: 1px solid var(--p2b-focus);
+    outline-offset: 2px;
+  }
+  .ghost {
+    opacity: 0.35;
+    pointer-events: none;
+  }
+  .snap-target {
+    outline: 1px dashed var(--p2b-focus);
+    outline-offset: 5px;
+  }
+  .attachment {
+    color: var(--p2b-caution, #ffff55);
+    font-size: inherit;
+  }
+  .marquee {
+    position: absolute;
+    border: 1px dashed var(--p2b-focus);
+    pointer-events: none;
+    z-index: 5;
+  }
+  label {
+    display: block;
+    margin: 10px 0;
+    font-size: inherit;
+    color: var(--p2b-dim);
+  }
+  label > input,
+  label > select,
+  label > textarea {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    color: var(--p2b-fg);
+    padding: 4px;
+  }
+  textarea {
+    resize: vertical;
+    min-height: 65px;
+  }
+  .inspector button {
+    margin: 4px 4px 4px 0;
+  }
+  .inspector p {
+    overflow-wrap: anywhere;
+  }
+  .feedback {
+    border-top: 1px solid var(--p2b-line);
+    max-height: 145px;
+    overflow: auto;
+    padding: 5px 10px;
+    font-size: inherit;
+  }
+  .error {
+    color: var(--p2b-error);
+  }
+  .feedback button {
+    text-align: left;
+    border: 0;
+  }
+  .steps {
+    margin-top: 6px;
+  }
+  .steps table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  .steps td {
+    border-top: 1px solid var(--p2b-line);
+    padding: 4px;
+  }
+  @media (max-width: 1050px) {
+    .body {
+      grid-template-columns: 118px minmax(220px, 1fr) 195px;
+    }
+    aside {
+      padding: 6px;
+    }
+  }
+  @media (max-width: 760px) {
+    .body {
+      grid-template-columns: 100px minmax(200px, 1fr);
+    }
+    .inspector {
+      grid-column: 1 / -1;
+      max-height: 180px;
+      border-top: 1px solid var(--p2b-line);
+    }
+  }
+`;

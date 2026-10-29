@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { render } from 'lit';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 import { pairsTextOf, renderSteps, roundsTextOf } from '../src/components/canvas-panel-steps';
 import type { StepsState } from '../src/components/canvas-panel-steps';
 import type { CanvasStore } from '../src/canvas/save';
@@ -337,7 +337,7 @@ function brokenDocument(): canvas.CanvasDocument {
 }
 
 async function mountPanel(doc: canvas.CanvasDocument): Promise<CanvasPanelElement> {
-  const element = window.document.createElement('pwn2block-canvas-panel');
+  const element = window.document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   element.challenge = CHALLENGE;
   element.document = doc;
@@ -399,7 +399,7 @@ describe('画布面板：步骤与轮次区', () => {
 
   it('步骤表不进 p2b-canvas-compiled 的 payload（产物契约不动）', async () => {
     const details: unknown[] = [];
-    const panel = window.document.createElement('pwn2block-canvas-panel');
+    const panel = window.document.createElement('pwn2block-legacy-canvas-panel');
     if (!(panel instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
     panel.addEventListener('p2b-canvas-compiled', (event) => {
       if (event instanceof CustomEvent) details.push(event.detail);

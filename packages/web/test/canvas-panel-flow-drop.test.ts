@@ -6,7 +6,7 @@ import type { CanvasLayoutView } from '../src/canvas/view-model';
 import type { Point, Rect } from '../src/canvas/view-model';
 import { compileCanvas } from '../src/canvas/compile';
 import { layoutCanvas } from '../src/canvas/view-model';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 import { dropEditOf } from '../src/components/canvas-panel-commands';
 import { FLOW_APPEND_GAP, FLOW_DATA_REFUSAL, flowBandAt, flowDropAt, flowDropLabelOf } from '../src/components/canvas-panel-flow-drop';
 import type { DropTarget } from '../src/components/canvas-panel-geometry';
@@ -306,7 +306,7 @@ describe('dropEditOf：流程带落位', () => {
 // ---------------------------------------------------------------------------
 
 function panelOf(document: canvas.CanvasDocument): CanvasPanelElement {
-  const element = window.document.createElement('pwn2block-canvas-panel');
+  const element = window.document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   element.challenge = CHALLENGE;
   element.document = document;

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 import { layoutCanvas } from '../src/canvas/view-model';
 
 /**
@@ -40,7 +40,7 @@ function groupNode(id: string, rows: readonly (readonly string[])[]): canvas.Gro
 }
 
 function createPanel(): CanvasPanelElement {
-  const element = document.createElement('pwn2block-canvas-panel');
+  const element = document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   return element;
 }

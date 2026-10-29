@@ -29,3 +29,6 @@ export * from './preview';
  * 所以留在同一个命名空间里，调用点仍写 `canvas.PortType`。
  */
 export * from './artifact';
+
+export * from './logic-model';
+export * from './logic-runtime';

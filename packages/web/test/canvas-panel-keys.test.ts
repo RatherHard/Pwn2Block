@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 
 /**
  * 画布面板的选择、键盘命令与侧栏（拖动与接线在 `canvas-panel-interaction.test.ts`）。
@@ -37,7 +37,7 @@ function groupNode(id: string, rows: readonly (readonly string[])[]): canvas.Gro
 }
 
 async function mount(doc: canvas.CanvasDocument): Promise<CanvasPanelElement> {
-  const element = document.createElement('pwn2block-canvas-panel');
+  const element = document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   element.challenge = CHALLENGE;
   element.document = doc;

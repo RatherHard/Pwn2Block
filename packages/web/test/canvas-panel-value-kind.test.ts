@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 import { compileCanvas } from '../src/canvas/compile';
 import { layoutCanvas } from '../src/canvas/view-model';
 import type { CanvasLayoutView } from '../src/canvas/view-model';
@@ -34,7 +34,7 @@ function documentWith(value: canvas.EncodedScalarValue): canvas.CanvasDocument {
 }
 
 async function mount(doc: canvas.CanvasDocument): Promise<CanvasPanelElement> {
-  const element = document.createElement('pwn2block-canvas-panel');
+  const element = document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   element.challenge = CHALLENGE;
   element.document = doc;

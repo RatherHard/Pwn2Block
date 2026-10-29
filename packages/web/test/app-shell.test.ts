@@ -137,15 +137,8 @@ function buttonLabels(element: Element | null | undefined): readonly string[] {
 
 /** 开始节点 + 一个值节点：能存档、能读回、编译也不失败（没有动作）。 */
 function savedDocument(): canvas.CanvasDocument {
-  return {
-    ...canvas.emptyCanvasDocument(),
-    nodes: [
-      { id: 'start', kind: 'start' },
-      { id: 'v1', kind: 'value', value: { kind: 'int', value: '7' } },
-    ],
-    main: ['start'],
-    layout: { v1: { x: 40, y: 40 } },
-  };
+  const document = canvas.newLogicDocument();
+  return { ...document, logic: { version: 1, nodes: [...document.logic!.nodes, { id: 'v1', kind: 'constant', value: { type: 'int', text: '7' }, x: 40, y: 220 }], edges: [] } };
 }
 
 /** 把一份文档写进新版存档键（`pwn2block.canvas.v2.<题目>`），模拟「上次留下的程序」。 */
@@ -228,7 +221,7 @@ describe('单页骨架：首屏与装配（05 §1）', () => {
     const panel = canvasPanelOf(app);
     expect(panel.challenge?.id).toBe('ret2win');
     // 面板自己从存档里读出的默认文档（只有开始节点），外壳不替它造文档。
-    expect(panel.document?.nodes.map((node) => node.kind)).toEqual(['start']);
+    expect(panel.document?.logic?.nodes.map((node) => node.kind)).toEqual(['start']);
   });
 
   it('第一相位（题面已到、会话还没建好）就渲染状态栏，播报区从首次渲染起常驻（09 §2）', async () => {
@@ -393,7 +386,7 @@ describe('单页骨架：画布事件 → 控制器（阶段三）', () => {
   it('面板上的「运行」按钮走同一条路径（真实点击，不伪造事件）', async () => {
     const api = createFakeApi();
     const { app } = await mountApp(api);
-    const runButton = shadowOf(canvasPanelOf(app))?.querySelector<HTMLButtonElement>('.btn-run');
+    const runButton = shadowOf(canvasPanelOf(app))?.querySelector('pwn2block-logic-canvas')?.shadowRoot?.querySelector<HTMLButtonElement>('.btn-run');
     if (runButton === null || runButton === undefined) throw new Error('画布面板没有「运行」按钮');
     runButton.click();
     await until(() => api.calls.some((call) => call.method === 'actions'), '运行请求发出');
@@ -529,7 +522,7 @@ describe('单页骨架：旧档提示条（《节点画布大型修改》§8）'
     seedCanvas('demo');
     const { app } = await mountApp(demoApi());
     await settle(app);
-    expect(canvasPanelOf(app).document?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
+    expect(canvasPanelOf(app).document?.logic?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
 
     buttonsOf(legacyBarOf(app))
       .find((button) => button.textContent?.trim() === '新建新版画布')
@@ -542,7 +535,7 @@ describe('单页骨架：旧档提示条（《节点画布大型修改》§8）'
 
     expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
     expect(localStorage.getItem(canvasV2StorageKey('demo'))).not.toBeNull();
-    expect(canvasPanelOf(app).document?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
+    expect(canvasPanelOf(app).document?.logic?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
   });
 });
 
@@ -772,7 +765,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（05 §3.1�
     const originalSessionState = api.client.sessionState;
     api.client.sessionState = (sessionId) => {
       const probe = app.renderRoot.querySelector<CanvasPanelElement>('pwn2block-canvas-panel');
-      nodesAtSessionFetch = probe?.document?.nodes.map((node) => node.id) ?? [];
+      nodesAtSessionFetch = probe?.document?.logic?.nodes.map((node) => node.id) ?? [];
       return originalSessionState(sessionId);
     };
     document.body.append(app);
@@ -784,7 +777,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（05 §3.1�
     expect(api.calls.map((call) => call.method)).toEqual(['listChallenges', 'getChallenge', 'sessionState']);
     expect(nodesAtSessionFetch).toEqual(['start', 'v1']);
     // 画布是恢复出来的内容，产物也编出来了（输出区没有编译错误，不是半恢复）。
-    expect(canvasPanelOf(app).document?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
+    expect(canvasPanelOf(app).document?.logic?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
     expect(textOf(outputOf(app))).not.toContain('编译失败');
     // 接回成功不说废话（没有 notice）。
     expect(app.renderRoot.querySelector('.notice')).toBeNull();
@@ -807,7 +800,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（05 §3.1�
       nodesAtCreate =
         app.renderRoot
           .querySelector<CanvasPanelElement>('pwn2block-canvas-panel')
-          ?.document?.nodes.map((node) => node.id) ?? [];
+          ?.document?.logic?.nodes.map((node) => node.id) ?? [];
       return originalCreate(challengeId);
     };
     document.body.append(app);
@@ -848,7 +841,7 @@ describe('单页骨架：刷新后装回本地程序并接回会话（05 §3.1�
     ]);
     const notice = app.renderRoot.querySelector('.notice');
     expect(notice?.textContent).toContain('本地保存的程序还在');
-    expect(canvasPanelOf(app).document?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
+    expect(canvasPanelOf(app).document?.logic?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
     expect(textOf(outputOf(app))).not.toContain('编译失败');
   });
 });
@@ -953,7 +946,7 @@ describe('启动失败的两种布局与重试（D5 观察）', () => {
     await until(() => app.renderRoot.querySelector('.notice button') !== null, '限流后的重试出口');
     await settle(app);
     const panel = canvasPanelOf(app);
-    expect(panel.document?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
+    expect(panel.document?.logic?.nodes.map((node) => node.id)).toEqual(['start', 'v1']);
     expect(app.renderRoot.querySelector('.boot')).toBeNull();
     expect(app.renderRoot.querySelector('.left')?.textContent).toContain('暂时开不了新会话');
     expect(app.renderRoot.querySelector('.notice')?.textContent).toContain('请求过于频繁');

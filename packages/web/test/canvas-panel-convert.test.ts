@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 
 /**
  * 侧栏的「转换包络」入口（验收表 AT-14「包络为转换 / 解除转换」）。
@@ -55,7 +55,7 @@ function wrappedDocument(): canvas.CanvasDocument {
 }
 
 async function mount(doc: canvas.CanvasDocument): Promise<CanvasPanelElement> {
-  const element = window.document.createElement('pwn2block-canvas-panel');
+  const element = window.document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   element.challenge = CHALLENGE;
   element.document = doc;

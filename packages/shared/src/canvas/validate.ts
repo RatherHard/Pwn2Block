@@ -1,3 +1,4 @@
+import { validateLogicGraph } from './logic-validate';
 import { CANVAS_MAX_NODES } from '../limits';
 import {
   CANVAS_NODE_ID_RE,
@@ -54,6 +55,7 @@ export function validateCanvasDocument(
   document: CanvasDocument,
   options?: CanvasValidationOptions,
 ): CanvasValidation {
+  if (document.logic) { const issues = validateLogicGraph(document.logic); return { ok: issues.length === 0, issues }; }
   const issues: CanvasIssue[] = [];
   const nodes = nodeMapOf(document);
   const table = variableTableOf(document);

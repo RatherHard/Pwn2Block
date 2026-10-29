@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { canvas, ret2winPublic } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
-import { CanvasPanelElement } from '../src/components/canvas-panel';
+import { CanvasPanelElement } from '../src/components/canvas-panel-legacy-view';
 import { CANVAS_CATALOG, CANVAS_CATEGORY_LABELS } from '../src/canvas/catalog';
 import { canvasV2StorageKey, makeCanvasSave, parseCanvasSave } from '../src/canvas/save';
 import type { CanvasStore } from '../src/canvas/save';
@@ -67,7 +67,7 @@ function relationNode(id: string, op: canvas.BinaryOperator): canvas.RelationNod
 }
 
 function createPanel(): CanvasPanelElement {
-  const element = document.createElement('pwn2block-canvas-panel');
+  const element = document.createElement('pwn2block-legacy-canvas-panel');
   if (!(element instanceof CanvasPanelElement)) throw new Error('自定义元素没有注册');
   return element;
 }

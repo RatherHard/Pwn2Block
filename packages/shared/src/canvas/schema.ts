@@ -1,3 +1,4 @@
+import { LogicGraphSchema } from './logic-model';
 import { z } from 'zod';
 import {
   CANVAS_MAX_BYTES,
@@ -331,6 +332,7 @@ export const CanvasNodeSchema = z.discriminatedUnion('kind', [
 // ---------------------------------------------------------------------------
 
 export const CanvasDocumentSchema = z.strictObject({
+  logic: LogicGraphSchema.optional(),
   format: z.literal(CANVAS_FORMAT),
   version: z.literal(CANVAS_VERSION),
   nodes: z.array(CanvasNodeSchema).max(CANVAS_MAX_NODES, `节点数不能超过 ${CANVAS_MAX_NODES}`),
