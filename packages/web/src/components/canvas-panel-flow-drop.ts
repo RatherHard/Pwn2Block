@@ -1,6 +1,6 @@
 import { structureIds } from '../canvas/structure';
 import { canvas } from '@pwn2block/shared';
-import { regionLabel, regionRefsOf, regionSequenceOf } from '../canvas/editor';
+import { regionLabel, regionRefsOf, regionSequenceOf, regionOfId } from '../canvas/editor';
 import type { Point, Rect } from '../canvas/view-model';
 import { containsPoint, inflateRect, unionRects } from '../canvas/view-model-geometry';
 
@@ -24,7 +24,8 @@ import { containsPoint, inflateRect, unionRects } from '../canvas/view-model-geo
  *    同一个容器有两条空区域（`if` 的两个分支都空）时，下半部分按左右平分，
  *    否则两条命中区完全重合，`else` 永远选不到。
  *
- * `index` 的口径与组合「第几列」一致：比第 k 个成员的**盒子中心**靠左就插在 k（0 基）。
+ * 未编排的普通流程节点另按节点邻域命中；拖动时同时检查鼠标与节点上下边缘。
+ * `index` 按序列的横向或纵向中心计算，落位后统一纵向排布。
  */
 
 /** 吸附光环：序列行带外扩这么多像素仍算命中（比组合的 `DROP_HALO` 小，流程带更窄）。 */
@@ -45,6 +46,8 @@ export const FLOW_DATA_REFUSAL = '数据节点不进流程；在侧栏配置需�
 /** 一次流程落位：进哪条序列、排第几步（0 基）、指示条画在哪。 */
 export interface FlowDropTarget {
   readonly kind: 'flow';
+  /** 未编排的目标语句；落位时先与被拖语句一起接入主流程。 */
+  readonly anchorId?: string;
   readonly region: canvas.FlowRegionRef;
   readonly index: number;
   readonly slot: Rect;
@@ -56,6 +59,7 @@ export interface FlowDropInput {
   readonly rectOf: (nodeId: string) => Rect | undefined;
   readonly point: Point;
   readonly dragged: readonly string[];
+  readonly draggedRect?: Rect | undefined;
 }
 
 /** 一条序列的命中结果；`centerY` 只用于「多条带取最近」，不参与指示条。 */
@@ -83,7 +87,16 @@ export function flowDropAt(input: FlowDropInput): FlowDropTarget | undefined {
   if (draggedId === undefined) return undefined;
   const node = input.document.nodes.find((item) => item.id === draggedId);
   if (node === undefined || !canvas.isFlowNode(node)) return undefined;
-  return flowBandAt(input);
+  const rect = input.draggedRect;
+  const points = rect === undefined ? [input.point] : [input.point,
+    { x: rect.x + rect.width / 2, y: rect.y },
+    { x: rect.x + rect.width / 2, y: rect.y + rect.height }];
+  for (const point of points) {
+    const query = { ...input, point };
+    const hit = looseFlowTarget(query) ?? flowBandAt(query);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
 }
 
 /**
@@ -263,4 +276,21 @@ function isVertical(rects: readonly Rect[]): boolean {
   const xs = rects.map((rect) => rect.x + rect.width / 2);
   const ys = rects.map((rect) => rect.y + rect.height / 2);
   return Math.max(...ys) - Math.min(...ys) > Math.max(...xs) - Math.min(...xs);
+}
+
+/** 未编排语句没有序列行带，直接以节点及其下缘检测吸附。 */
+function looseFlowTarget(input: FlowDropInput): FlowDropTarget | undefined {
+  const excluded = new Set(input.dragged.flatMap((id) => structureIds(input.document, id)));
+  const candidates = input.document.nodes.filter((node) => canvas.isFlowNode(node) && node.kind !== 'start'
+    && !excluded.has(node.id) && regionOfId(input.document, node.id) === undefined);
+  for (const node of candidates) {
+    // 空容器的内部区域仍由原有流程带负责，避免把「进入容器」当成「排在容器后」。
+    const rect = input.rectOf(node.id);
+    if (rect === undefined || node.kind === 'loop' || node.kind === 'if') continue;
+    const zone = { x: rect.x - FLOW_SNAP_HALO, y: rect.y - FLOW_SNAP_HALO,
+      width: rect.width + 2 * FLOW_SNAP_HALO, height: rect.height + FLOW_SNAP_HALO + FLOW_APPEND_GAP };
+    if (containsPoint(zone, input.point)) return { kind: 'flow', anchorId: node.id,
+      region: { ownerId: '', kind: 'main' }, index: input.document.main.length + (input.point.y < rect.y + rect.height / 2 ? 0 : 1), slot: appendSlotOf(rect, rect.y + rect.height) };
+  }
+  return undefined;
 }

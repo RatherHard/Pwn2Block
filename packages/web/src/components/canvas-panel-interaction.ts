@@ -225,13 +225,18 @@ export class CanvasPanelInteraction {
       x: drag.ids.length > 1 ? origin.x + snapCoordinate(delta.x, snapEnabled) : snapCoordinate(origin.x + delta.x, snapEnabled),
       y: drag.ids.length > 1 ? origin.y + snapCoordinate(delta.y, snapEnabled) : snapCoordinate(origin.y + delta.y, snapEnabled),
     }));
-    const drop = snapEnabled ? this.dropAt(base, point, drag.roots) : undefined;
+    const box = base.view.boxes.find((item) => item.nodeId === drag.roots[0] && (item.kind === 'node' || item.kind === 'relation'));
+    const moved = moves.find((item) => item.id === drag.roots[0]);
+    const origin = drag.origins.get(drag.roots[0]);
+    const draggedRect = box === undefined || moved === undefined || origin === undefined ? undefined
+      : { ...rectOfBox(box), x: box.x + moved.x - origin.x, y: box.y + moved.y - origin.y };
+    const drop = snapEnabled ? this.dropAt(base, point, drag.roots, draggedRect) : undefined;
     this.drag = { ...drag, moved: true, preview: moveLayout(base.document, moves), drop };
     this.host.requestRender();
   }
 
-  private dropAt(base: BaseState, point: Point, dragged: readonly string[]): DropTarget | undefined {
-    return dropTargetFor(base.document, base.view, point, dragged);
+  private dropAt(base: BaseState, point: Point, dragged: readonly string[], draggedRect?: Rect): DropTarget | undefined {
+    return dropTargetFor(base.document, base.view, point, dragged, draggedRect);
   }
 
   private finishMove(drag: MoveDrag, shiftKey: boolean): void {

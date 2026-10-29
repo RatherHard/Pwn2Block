@@ -43,3 +43,23 @@ export function compactGroupMembers(document: canvas.CanvasDocument, group: canv
   }
   return withLayout(document, entries);
 }
+
+/** 流程按上下顺序吸附，保留前链位置，后链与嵌套包络整体移动。 */
+export function compactFlowAfter(document: canvas.CanvasDocument, sequence: readonly string[], index: number): canvas.CanvasDocument {
+  let next = document;
+  for (let cursor = Math.max(1, index); cursor < sequence.length; cursor += 1) {
+    const view = layoutCanvas({ document: next });
+    const previous = structureIds(next, sequence[cursor - 1]);
+    const current = structureIds(next, sequence[cursor]);
+    const before = unionRects(view.boxes.filter((box) => previous.includes(box.nodeId)));
+    const after = unionRects(view.boxes.filter((box) => current.includes(box.nodeId)));
+    if (before === undefined || after === undefined) continue;
+    const positions = canvasPositionsOf(next);
+    const moves = current.flatMap((id) => {
+      const point = positions.get(id);
+      return point === undefined ? [] : [{ id, x: point.x + before.x - after.x, y: point.y + before.y + before.height + 48 - after.y }];
+    });
+    next = withLayout(next, moves);
+  }
+  return next;
+}

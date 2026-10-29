@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { openChallenge, panelOf, stageOf, toolboxOf, dragBy, dragBetween, readDocument } from './helpers';
 
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要真实后端');
@@ -105,3 +105,47 @@ test('节点库分类返回、每项常驻预览、分页与关系可读性', as
   await toolbox.locator('.library-tab[data-tab="flow"]').click();
   await page.screenshot({ path: info.outputPath('library.png') });
 });
+
+test('流程节点吸附对齐、游离节点连接、链中脱离与撤销', async ({ page }, info) => {
+  await openChallenge(page);
+  const method = (id: string) => ({ id, kind: 'method', block: '', args: {} });
+  const panel = panelOf(page);
+  const node = (id: string) => panel.locator(`.node-box[data-node="${id}"]`);
+  await install(page, [method('a')], { a: { x: 440, y: 280 } });
+  await stageOf(page).scrollIntoViewIfNeeded();
+  const start = await node('start').boundingBox();
+  if (start === null) throw new Error('缺少开始节点');
+  await dragToPoint(page, node('a').locator('.title'), { x: start.x + start.width / 2, y: start.y + start.height + 20 });
+  await expect.poll(async () => (await readDocument(page)).main).toEqual(['start', 'a']);
+  expect((await readDocument(page)).layout.a.x).toBe((await readDocument(page)).layout.start.x);
+
+  await install(page, [method('a'), method('b')], { a: { x: 400, y: 240 }, b: { x: 700, y: 400 } });
+  await stageOf(page).scrollIntoViewIfNeeded();
+  const target = await node('a').boundingBox();
+  if (target === null) throw new Error('缺少目标节点');
+  await dragToPoint(page, node('b').locator('.title'), { x: target.x + target.width / 2, y: target.y + target.height + 20 });
+  await expect.poll(async () => (await readDocument(page)).main).toEqual(['start', 'a', 'b']);
+  const before = await readDocument(page);
+  expect(before.layout.b.x).toBe(before.layout.a.x);
+  const a = await node('a').boundingBox();
+  const b = await node('b').boundingBox();
+  if (a === null || b === null) throw new Error('缺少流程节点');
+  expect(b.y - a.y - a.height).toBeGreaterThanOrEqual(32);
+  await expect(panel.locator('.edge-flow')).toHaveCount(2);
+  await page.screenshot({ path: info.outputPath('flow-snapping.png') });
+  await dragBy(page, node('a').locator('.title'), 420, 80);
+  await expect.poll(async () => (await readDocument(page)).main).toEqual(['start', 'b']);
+  expect((await readDocument(page)).layout.b.y).toBeLessThan(before.layout.b.y);
+  await panel.locator('.btn-undo').click();
+  await expect.poll(async () => (await readDocument(page)).main).toEqual(['start', 'a', 'b']);
+  expect((await readDocument(page)).layout).toEqual(before.layout);
+});
+
+async function dragToPoint(page: Page, source: Locator, target: { x: number; y: number }): Promise<void> {
+  const rect = await source.boundingBox();
+  if (rect === null) throw new Error('缺少拖动标题');
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 10 });
+  await page.mouse.up();
+}

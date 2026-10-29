@@ -1,3 +1,4 @@
+import { compactFlowAfter } from '../canvas/editor-compact';
 import { detachChainMember, snapData } from '../canvas/editor-chain';
 import { canvas } from '@pwn2block/shared';
 import {
@@ -321,10 +322,23 @@ function flowDropEditOf(document: canvas.CanvasDocument, target: DropTarget, nod
   }
   // `flow-blocked` 只会被非流程节点命中，上面两句已经挡掉了；这里收窄类型。
   if (target.kind !== 'flow') return { edit: edited(document) };
-  const index = startAwareIndex(document, target.region, target.index);
-  const at = statementSlotOf(document, nodeId);
-  if (at === undefined) return { edit: insertStatement(document, target.region, index, nodeId) };
-  return { edit: moveStatementTo(document, at, { region: target.region, index }) };
+  let base = document;
+  if (target.anchorId !== undefined) {
+    const anchored = insertStatement(base, target.region, document.main.length, target.anchorId);
+    if (anchored.issues.length > 0) return { edit: anchored };
+    base = anchored.document;
+  }
+  const index = startAwareIndex(base, target.region, target.index);
+  const at = statementSlotOf(base, nodeId);
+  const edit = at === undefined ? insertStatement(base, target.region, index, nodeId)
+    : moveStatementTo(base, at, { region: target.region, index });
+  if (edit.issues.length > 0) return { edit: { ...edit, document } };
+  let next = edit.document;
+  if (at !== undefined) next = compactFlowAfter(next, regionSequenceOf(next, at.region) ?? [], at.index);
+  const sequence = regionSequenceOf(next, target.region) ?? [];
+  const from = target.anchorId === undefined ? sequence.indexOf(nodeId) : Math.min(sequence.indexOf(nodeId), sequence.indexOf(target.anchorId));
+  next = compactFlowAfter(next, sequence, from);
+  return { edit: edited(next) };
 }
 
 /** 进不了流程的节点该怎么说：数据节点是最常见的一种，说法与吸附提示共用同一句。 */

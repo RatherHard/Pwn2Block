@@ -83,3 +83,5 @@ pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/desk
 `canvas-ui-reconstruction.spec.ts` 覆盖数据吸附、关系框间距及换运算、链中脱离、表达式框选后的右键包络、附着转换、解除与撤销重做，以及分类返回、常驻预览和分页。`canvas-interaction.spec.ts`、`closed-loop.spec.ts` 已改为通过侧栏配置值和方法参数，不再依赖已移除的数据端口或就地编辑框。截图由测试输出到配置的证据目录，构建产物和截图不提交。
 
 本轮验证使用真实本地后端与生产构建：14 个功能用例通过，6 种尺寸的布局/键盘/恢复用例均通过。768×1024 首次暴露侧栏挤压画布的问题，增加窄屏宽度规则后，与 900×1200、1280×720 一起复验通过。功能与大屏证据在 `.tmp/canvas-final-browser-clean`，响应式修复证据在 `.tmp/canvas-responsive-browser`。
+
+流程吸附补充回归：`canvas-ui-reconstruction.spec.ts` 直接拖动标题，检查接入开始节点后的坐标对齐、游离语句相互连接、48px 间距、实际流程连线、抽走中间语句后的补位与一次撤销恢复。新增用例在生产构建和真实后端通过，证据位于 `.tmp/flow-snap-browser-verified`；其余 14 个功能用例通过，证据位于 `.tmp/flow-snap-browser`。

@@ -369,7 +369,6 @@ function boxOf(view: CanvasLayoutView, nodeId: string): Rect {
   return box;
 }
 
-
 function viewOf(panel: CanvasPanelElement): CanvasLayoutView {
   const document = panel.document;
   if (document === undefined) throw new Error('面板没有文档');
@@ -491,4 +490,58 @@ describe('纵向流程的插位', () => {
     expect(result.edit.issues).toEqual([]);
     expect(result.edit.document.main).toEqual(['start', 'a', 'c', 'b']);
   });
+});
+
+describe('流程节点实际吸附', () => {
+  it('从标题拖到开始节点下方后自动对齐并留出流程连线间距', async () => {
+    const panel = panelOf({ ...canvas.emptyCanvasDocument(), nodes: [START, methodNode('m')],
+      main: ['start'], layout: { start: { x: 64, y: 64 }, m: { x: 430, y: 320 } } });
+    await settle(panel);
+    const start = boxOf(viewOf(panel), 'start');
+    const member = boxOf(viewOf(panel), 'm');
+    const drop = { x: start.x + start.width / 2, y: start.y + start.height + 20 };
+    startDrag(requireElement(panel, '.node-box[data-node="m"] .title'), { x: member.x + 25, y: member.y + 15 }, drop);
+    finishDrag(drop);
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start', 'm']);
+    const placed = boxOf(viewOf(panel), 'm');
+    expect(placed.x).toBe(start.x);
+    expect(placed.y).toBeGreaterThanOrEqual(start.y + start.height + 32);
+  });
+
+  it('流程节点可以吸附到尚未接入主流程的另一个流程节点', async () => {
+    const panel = panelOf({ ...canvas.emptyCanvasDocument(), nodes: [START, methodNode('a'), methodNode('b')],
+      main: ['start'], layout: { start: { x: 64, y: 64 }, a: { x: 400, y: 280 }, b: { x: 700, y: 500 } } });
+    await settle(panel);
+    const target = boxOf(viewOf(panel), 'a');
+    const source = boxOf(viewOf(panel), 'b');
+    const drop = { x: target.x + target.width / 2, y: target.y + target.height + 20 };
+    startDrag(requireElement(panel, '.node-box[data-node="b"] .title'), { x: source.x + 25, y: source.y + 15 }, drop);
+    finishDrag(drop);
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start', 'a', 'b']);
+    expect(boxOf(viewOf(panel), 'b').x).toBe(boxOf(viewOf(panel), 'a').x);
+  });
+
+  it('从标题拖动，节点下边缘靠近游离流程节点上方也能插到它前面', async () => {
+    const panel = panelOf({ ...canvas.emptyCanvasDocument(), nodes: [START, methodNode('a'), methodNode('b')],
+      main: ['start'], layout: { start: { x: 64, y: 64 }, a: { x: 400, y: 500 }, b: { x: 700, y: 700 } } });
+    await settle(panel);
+    const target = boxOf(viewOf(panel), 'a');
+    const source = boxOf(viewOf(panel), 'b');
+    const drop = { x: target.x + 25, y: target.y - 20 - source.height + 15 };
+    startDrag(requireElement(panel, '.node-box[data-node="b"] .title'), { x: source.x + 25, y: source.y + 15 }, drop);
+    finishDrag(drop);
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start', 'b', 'a']);
+    const b = boxOf(viewOf(panel), 'b');
+    const a = boxOf(viewOf(panel), 'a');
+    expect(a.x).toBe(b.x);
+    expect(a.y).toBeGreaterThanOrEqual(b.y + b.height + 32);
+    requireElement(panel, '.btn-undo').click();
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start']);
+    expect(panel.document?.layout.b).toEqual({ x: 700, y: 700 });
+  });
+
 });

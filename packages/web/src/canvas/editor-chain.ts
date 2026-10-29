@@ -3,7 +3,7 @@ import { addExistingNode, createGroup, edited, newNodeId, nodeOf, refuse, replac
 import { rewireInputs } from './editor-convert-wiring';
 import { layoutCanvas } from './view-model';
 import { structureIds } from './structure';
-import { compactGroupMembers } from './editor-compact';
+import { compactGroupMembers, compactFlowAfter } from './editor-compact';
 import { unionRects } from './view-model-geometry';
 
 /** 关系是表达式的连接；删除关系时把所有下游引用（含容器成员）接回剩下的一端。 */
@@ -131,23 +131,4 @@ function alignAfter(document: canvas.CanvasDocument, left: string, right: string
   const dx = leftRect.x + leftRect.width + 112 - rightRect.x;
   const dy = leftRect.y - rightRect.y;
   return withLayout(document, rightIds.map((id) => ({ id, x: (document.layout[id]?.x ?? rightRect.x) + dx, y: (document.layout[id]?.y ?? rightRect.y) + dy })));
-}
-
-/** 仅收拢被抽走成员之后的流程，前链保持原位。 */
-function compactFlowAfter(document: canvas.CanvasDocument, sequence: readonly string[], index: number): canvas.CanvasDocument {
-  let next = document;
-  for (let cursor = Math.max(1, index); cursor < sequence.length; cursor += 1) {
-    const view = layoutCanvas({ document: next });
-    const previous = structureIds(next, sequence[cursor - 1]);
-    const current = structureIds(next, sequence[cursor]);
-    const before = unionRects(view.boxes.filter((box) => previous.includes(box.nodeId)));
-    const after = unionRects(view.boxes.filter((box) => current.includes(box.nodeId)));
-    if (before === undefined || after === undefined) continue;
-    const moves = current.flatMap((id) => {
-      const point = next.layout[id];
-      return point === undefined ? [] : [{ id, x: point.x + before.x - after.x, y: point.y + before.y + before.height + 48 - after.y }];
-    });
-    next = withLayout(next, moves);
-  }
-  return next;
 }

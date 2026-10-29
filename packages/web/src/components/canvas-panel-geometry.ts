@@ -274,6 +274,7 @@ export function dropTargetFor(
   view: CanvasLayoutView,
   point: Point,
   dragged: readonly string[],
+  draggedRect?: Rect,
 ): DropTarget | undefined {
   const rects = new Map<string, Rect>();
   for (const box of view.boxes) {
@@ -298,7 +299,7 @@ export function dropTargetFor(
     },
     dragged,
     ownerOf: (nodeId: string) => owners.get(nodeId),
-    flow: flowTargetOf(document, rectOf, point, dragged),
+    flow: flowTargetOf(document, rectOf, point, dragged, draggedRect),
   });
 }
 
@@ -312,8 +313,9 @@ function flowTargetOf(
   rectOf: (nodeId: string) => Rect | undefined,
   point: Point,
   dragged: readonly string[],
+  draggedRect?: Rect,
 ): DropTarget | undefined {
-  const input = { document, rectOf, point, dragged };
+  const input = { document, rectOf, point, dragged, draggedRect };
   const flow = flowDropAt(input);
   if (flow !== undefined) return flow;
   const band = flowBandAt(input);
