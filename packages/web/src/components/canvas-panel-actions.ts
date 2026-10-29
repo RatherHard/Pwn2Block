@@ -1,7 +1,9 @@
+import { dissolveEnvelope } from '../canvas/editor-envelope';
+import { selectionRoots } from '../canvas/structure';
 import type { canvas } from '@pwn2block/shared';
 import type { AuthorBlock } from '@pwn2block/shared';
-import { createGroup, dissolveGroup, newNodeId, type CanvasEdit } from '../canvas/editor';
-import { addReference, addVariable, applyInspectorChange, type InspectorChange } from './canvas-panel-commands';
+import { createGroup, newNodeId, type CanvasEdit } from '../canvas/editor';
+import { addReference, addVariable, applyInspectorChange, applyRowEdit, type InspectorChange } from './canvas-panel-commands';
 import { applyConvertChange } from './canvas-panel-convert';
 import { applyWrapSelection } from './canvas-panel-regions';
 
@@ -30,25 +32,26 @@ export function groupSelection(host: PanelActionHost): void {
   const document = host.currentDocument();
   const ids = host.selection();
   if (document === undefined) return;
-  if (ids.length < 2) {
-    host.report('先选中两个以上节点再成组');
+  if (ids.length < 1) {
+    host.report('先选中数据结构再包络');
     return;
   }
-  host.applyEdit(createGroup(document, [...ids], newNodeId(document, 'group')));
+  const id = newNodeId(document, 'group');
+  const roots = selectionRoots(document, ids);
+  const edit = createGroup(document, roots, id);
+  host.applyEdit(edit);
+  if (edit.issues.length === 0) host.selectNodes([id]);
 }
 
 /** 「解除组合」：对选中的第一个组合包络生效。 */
 export function dissolveSelection(host: PanelActionHost): void {
   const document = host.currentDocument();
   if (document === undefined) return;
-  const groupId = host
-    .selection()
-    .find((id) => document.nodes.find((node) => node.id === id)?.kind === 'group');
-  if (groupId === undefined) {
-    host.report('先选中一个组合包络');
-    return;
-  }
-  host.applyEdit(dissolveGroup(document, groupId));
+  const selected = document.nodes.find((node) => host.selection().includes(node.id) && ['group', 'convert', 'loop', 'if'].includes(node.kind));
+  if (selected === undefined) { host.report('先选中一个包络'); return; }
+  const edit = dissolveEnvelope(document, selected.id);
+  host.applyEdit(edit);
+  if (edit.issues.length === 0) host.selectNodes([]);
 }
 
 /** 「加变量」：新建一个整数变量声明。 */
@@ -86,7 +89,7 @@ export function applyInspectorField(host: PanelActionHost, change: InspectorChan
     return;
   }
   const authorBlocks = host.authorBlocks();
-  const edit = applyInspectorChange(
+  const edit = change.kind === 'literal' ? applyRowEdit(document, nodeId, '值', change.value) : applyInspectorChange(
     document,
     nodeId,
     change,

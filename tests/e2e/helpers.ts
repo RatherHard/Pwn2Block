@@ -10,7 +10,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
  *   （本题方法是 `.tool-block[data-block]`；搜索 `.library-query`、分类页 `.library-tab`，
  *   不在当前页或不匹配搜索的条目带 `hidden`，计数仍然算得到）；
  * - 画布：`.stage > .surface` 里的 `.node-box[data-node]`、`.relation-box`、`.group-box`、
- *   `.port[data-node][data-port]`、`.marquee`；
+ *   `.flow-port`、`.marquee`；
  * - 检查器：`aside.inspector` 里按字段名生成的 `.field-<key>` 控件。
  *
  * 读文档一律走面板的公开属性 `document`（面板由父组件注入或自己读存档），不从 localStorage 猜结构；
@@ -124,23 +124,21 @@ export async function nodeIdOf(page: Page, kind: string): Promise<string> {
 
 /** 工具箱点一项：在空位加一个该种类的默认节点。 */
 export async function addToolNode(page: Page, kind: string): Promise<void> {
-  await toolboxOf(page).locator(`.tool[data-kind="${kind}"]`).click();
+  const toolbox = toolboxOf(page);
+  const back = toolbox.locator('.library-back');
+  if (await back.isVisible()) await back.click();
+  await toolbox.locator('.library-query').fill(kind);
+  await toolbox.locator(`.tool[data-kind="${kind}"]`).click();
 }
 
 /**
  * 点选一个节点，并等它带上选中样式。
  *
- * 点的是标题：节点已选中时单击可编辑行会直接开就地编辑框（工具箱加出来的节点本来就是选中的），
- * 点标题只改选中，后续按键才会落到画布上。
+ * 点标题选中节点，后续通过侧栏配置或画布快捷键操作。
  */
 export async function selectNode(page: Page, nodeId: string): Promise<void> {
   await panelOf(page).locator(`.node-box[data-node="${nodeId}"] .title`).click();
   await expect(panelOf(page).locator(`.node-box.selected[data-node="${nodeId}"]`)).toBeVisible();
-}
-
-/** 某个输入端口（新版画布只有输入端口：接线 = 把它拖到提供值的节点上）。 */
-export function portOf(page: Page, nodeId: string, port: string): Locator {
-  return panelOf(page).locator(`.port[data-node="${nodeId}"][data-port="${port}"]`);
 }
 
 /** 按住左键从 `from` 中心拖到 `to` 中心，分步移动以便先越过 4px 拖动阈值。 */

@@ -47,18 +47,18 @@ export const LIBRARY_DRAG_TYPE = 'application/x-p2b-library';
 export function renderLibrary(input: LibraryInput): TemplateResult {
   const items = libraryItems(input.blocks);
   const page = libraryPageOf(items, input.state);
-  const previewItem = items.find((item) => item.key === input.state.preview);
+  const home = input.state.tab === 'all' && input.state.query.trim() === '';
   return html`<aside class="toolbox" aria-label="工具箱">
     <div class="toolbox-actions">
       <button class="btn-add-variable" @click=${input.onAddVariable}>加变量</button>
       <button class="btn-add-reference" @click=${input.onAddReference}>引用变量</button>
     </div>
     ${renderSearch(input, items, page)} ${renderTabs(input, items)}
-    <div class="library-list">
+    <div class="library-list" ?hidden=${home}>
       ${groupsOf(items).map((group) => renderGroup(group.category, group.items, page, input))}
       ${page.empty ? html`<p class="hint library-empty">没有匹配「${input.state.query.trim()}」的节点</p>` : nothing}
     </div>
-    ${renderPager(input, page)} ${renderLibraryPreview(previewItem, input.blocks, input.methods)}
+    ${home ? nothing : renderPager(input, page)}
   </aside>`;
 }
 
@@ -95,18 +95,11 @@ function renderSearch(input: LibraryInput, items: readonly LibraryItem[], page: 
 
 function renderTabs(input: LibraryInput, items: readonly LibraryItem[]): TemplateResult {
   const select = (tab: LibraryTab): void => input.onChange({ ...input.state, tab, page: 0 });
+  if (input.state.tab !== 'all' || input.state.query.trim() !== '') {
+    return html`<button class="library-back" @click=${() => input.onChange({ ...input.state, tab: 'all', query: '', page: 0 })}>← 返回分类</button>`;
+  }
   return html`<div class="library-tabs" role="group" aria-label="节点分类">
-    ${libraryTabsOf(items).map(
-      (tab) => html`<button
-        class="library-tab"
-        data-tab=${tab.tab}
-        aria-pressed=${input.state.tab === tab.tab ? 'true' : 'false'}
-        title=${`${tab.label}：${tab.count} 项`}
-        @click=${() => select(tab.tab)}
-      >
-        ${tab.label}<span class="tab-count">${tab.count}</span>
-      </button>`,
-    )}
+    ${libraryTabsOf(items).filter((tab) => tab.tab !== 'all').map((tab) => html`<button class="library-tab" data-tab=${tab.tab} @click=${() => select(tab.tab)}>${tab.label}<span class="tab-count">${tab.count}</span><span>→</span></button>`)}
   </div>`;
 }
 
@@ -161,46 +154,35 @@ function renderGroup(
  * 两种选择器不重叠，「十八种节点各一个按钮」的口径不会被题目方法撑大。
  */
 function renderItem(item: LibraryItem, visible: boolean, input: LibraryInput): TemplateResult {
-  const preview = (): void => {
-    if (input.state.preview !== item.key) input.onChange({ ...input.state, preview: item.key });
-  };
   const dragStart = (event: DragEvent): void => {
     const transfer = event.dataTransfer ?? undefined;
     transfer?.setData(LIBRARY_DRAG_TYPE, item.key);
     if (transfer !== undefined) transfer.effectAllowed = 'copy';
     input.onDragStart(item, event);
   };
-  const common = {
-    hidden: !visible,
-    pressed: input.state.preview === item.key,
-  };
   if (item.blockId !== undefined) {
     return html`<button
-      class=${`tool-block${common.pressed ? ' previewing' : ''}`}
+      class="tool-block"
       data-block=${item.blockId}
       draggable="true"
-      ?hidden=${common.hidden}
+      ?hidden=${!visible}
       title=${item.description}
       @click=${() => input.onAdd(item)}
-      @mouseenter=${preview}
-      @focus=${preview}
       @dragstart=${dragStart}
     >
-      ${item.label}
+      ${item.label}${renderLibraryPreview(item, input.blocks, input.methods)}
     </button>`;
   }
   return html`<button
-    class=${`tool${common.pressed ? ' previewing' : ''}`}
+    class="tool"
     data-kind=${item.nodeKind}
     draggable="true"
-    ?hidden=${common.hidden}
+    ?hidden=${!visible}
     title=${item.description}
     @click=${() => input.onAdd(item)}
-    @mouseenter=${preview}
-    @focus=${preview}
     @dragstart=${dragStart}
   >
-    ${item.label}
+    ${item.label}${renderLibraryPreview(item, input.blocks, input.methods)}
   </button>`;
 }
 

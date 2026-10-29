@@ -90,7 +90,7 @@ const UN = canvas.UNCONNECTED;
 /** 十八种节点：种类、期望标题、期望配色、期望盒子种类（关系方框 vs 大白框）。 */
 const KIND_CASES = [
   ['value', '值', 'data', 'node'],
-  ['group', '组合', 'data', 'node'],
+  ['group', '组合', 'data', 'group'],
   ['dict', '字典', 'data', 'node'],
   ['index', '按索引取元素', 'data', 'node'],
   ['lookup', '按键取值', 'data', 'node'],
@@ -157,7 +157,7 @@ describe('连线', () => {
 });
 
 describe('关系方框', () => {
-  it('两个已接线输入时落在最右来源右侧 32 处，竖直对齐来源中心', () => {
+  it('两个已接线输入时关系位于两节点间，并留出间距', () => {
     const view = layoutCanvas({
       document: documentWith([intValue('v1'), intValue('v2'), relationNode('r', 'v1', 'v2')], {
         v1: { x: 0, y: 0 },
@@ -167,7 +167,7 @@ describe('关系方框', () => {
     });
     const box = boxOf(view, 'r', 'relation');
     // 白框 180×94（值 + 预览两行），最右来源右边缘 480，再 +32；中心 47 − 方框半高 14。
-    expect(box).toMatchObject({ x: 512, y: 33, width: 58, height: 28 });
+    expect(box).toMatchObject({ x: 218, y: 33, width: 44, height: 28 });
   });
 
   it('来源上下排时方框不压在两个白框之间', () => {
@@ -179,7 +179,7 @@ describe('关系方框', () => {
       }),
     });
     // 两个中心 47 与 167 的平均 107，方框顶 93；x 在来源右侧 212。
-    expect(boxOf(view, 'r', 'relation')).toMatchObject({ x: 212, y: 93, width: 58, height: 28 });
+    expect(boxOf(view, 'r', 'relation')).toMatchObject({ x: 212, y: 93, width: 44, height: 28 });
   });
 
   it('首选位置被白框占住时按固定顺序避让，并留出 12 的空隙', () => {
@@ -199,7 +199,7 @@ describe('关系方框', () => {
 
   it('输入都没接线时放在自己锚点上方 40 处', () => {
     const view = layoutCanvas({ document: documentWith([relationNode('r', UN, UN)], { r: { x: 100, y: 100 } }) });
-    expect(boxOf(view, 'r', 'relation')).toMatchObject({ x: 100, y: 32, width: 58, height: 28 });
+    expect(boxOf(view, 'r', 'relation')).toMatchObject({ x: 100, y: 32, width: 44, height: 28 });
   });
 
   it('进出的边都带上关系方框矩形，端口在其外 6px', () => {
@@ -213,10 +213,9 @@ describe('关系方框', () => {
     const rect = boxOf(view, 'r', 'relation');
     const incoming = view.edges.find((edge) => edge.from.nodeId === 'v1');
     const outgoing = view.edges.find((edge) => edge.from.nodeId === 'r');
-    expect(incoming?.to).toEqual({ nodeId: 'r', x: 206, y: 42 });
-    expect(incoming?.viaRect).toMatchObject({ x: rect?.x, y: rect?.y, width: 58, height: 28 });
-    expect(outgoing?.from).toEqual({ nodeId: 'r', x: 276, y: 47 });
-    expect(outgoing?.viaRect).toMatchObject({ x: rect?.x, y: rect?.y, width: 58, height: 28 });
+    expect(incoming).toBeUndefined();
+    expect(outgoing?.from).toEqual({ nodeId: 'r', x: 262, y: 47 });
+    expect(outgoing?.viaRect).toMatchObject({ x: rect?.x, y: rect?.y, width: 44, height: 28 });
   });
 });
 
@@ -254,7 +253,7 @@ describe('包络', () => {
     expect(boxOf(view, 'go', 'group')).toMatchObject({ x: 76, y: 76, width: 228, height: 142 });
   });
 
-  it('转换包络是输入结构各边 +16', () => {
+  it('转换属性附着在输入结构侧边，并共同包含在包络内', () => {
     const convert: canvas.CanvasNode = {
       id: 'c1',
       kind: 'convert',
@@ -264,7 +263,13 @@ describe('包络', () => {
     const view = layoutCanvas({
       document: documentWith([intValue('v1'), convert], { v1: { x: 100, y: 100 }, c1: { x: 500, y: 300 } }),
     });
-    expect(boxOf(view, 'c1', 'envelope')).toMatchObject({ x: 84, y: 84, width: 212, height: 126 });
+    const frame = boxOf(view, 'c1', 'envelope')!;
+    const control = boxOf(view, 'c1', 'relation')!;
+    expect(frame.x).toBeLessThan(100);
+    expect(frame.y).toBeLessThan(100);
+    expect(control.x).toBeGreaterThan(280);
+    expect(frame.x + frame.width).toBeGreaterThan(control.x + control.width);
+    expect(frame.y + frame.height).toBeGreaterThan(194);
     expect(boxOf(view, 'c1', 'relation')?.title).toBe('整数转字节串');
   });
 });

@@ -136,9 +136,10 @@ describe('创建包络', () => {
     );
   });
 
-  it('成员不足两个被拒绝', () => {
+  it('空包络被拒绝，单个表达式允许包络', () => {
     const document = docOf([intLit('a', 1)]);
-    const result = createGroup(document, ['a'], 'g1');
+    expect(createGroup(document, ['a'], 'single').issues).toEqual([]);
+    const result = createGroup(document, [], 'g1');
 
     expect(codesOf(result)).toEqual(['ownership_conflict']);
     expect(result.issues[0].nodeId).toBe('g1');

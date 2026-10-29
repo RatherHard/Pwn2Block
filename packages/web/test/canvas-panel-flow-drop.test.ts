@@ -292,11 +292,11 @@ describe('dropEditOf：流程带落位', () => {
     expect(outcome.edit.issues[0]?.message).toContain('不能把「if1」放进');
   });
 
-  it('落在空白处只改坐标：语句仍留在原序列（流程带很窄，不能悄悄掉出流程）', () => {
+  it('落在空白处脱离流程，保留独立节点', () => {
     const document = looseDocument([START, methodNode('a')], ['start', 'a']);
     const stage: DropTarget = { kind: 'stage', slot: { x: 0, y: 600, width: 48, height: 16 } };
     const outcome = dropEditOf(document, stage, ['a']);
-    expect(outcome.edit.document.main).toEqual(['start', 'a']);
+    expect(outcome.edit.document.main).toEqual(['start']);
     expect(outcome.edit.issues).toEqual([]);
   });
 });
@@ -369,11 +369,6 @@ function boxOf(view: CanvasLayoutView, nodeId: string): Rect {
   return box;
 }
 
-function portPointOf(view: CanvasLayoutView, nodeId: string, name: string): Point {
-  const port = view.ports.find((item) => item.nodeId === nodeId && item.name === name);
-  if (port === undefined) throw new Error(`没有端口 ${nodeId}.${name}`);
-  return { x: port.x, y: port.y };
-}
 
 function viewOf(panel: CanvasPanelElement): CanvasLayoutView {
   const document = panel.document;
@@ -420,7 +415,7 @@ describe('画布面板：从工具箱加出来的语句能排进 main', () => {
     startDrag(requireElement(panel, '.node-box[data-node="method1"]'), { x: 0, y: 0 }, drop);
     await settle(panel);
 
-    expect(requireElement(panel, '.snap-hint').textContent?.trim()).toBe('插入第 2 步');
+    expect(panel.shadowRoot?.querySelector('.snap-hint')).toBeNull();
     finishDrag(drop);
     await settle(panel);
     expect(panel.document?.main).toEqual(['start', 'method1']);
@@ -450,13 +445,11 @@ describe('画布面板：从工具箱加出来的语句能排进 main', () => {
     await settle(panel);
     expect(nodeOf(panel, 'method1')).toMatchObject({ block: 'gets' });
 
-    // 2. 接上字节参数：从 data 端口拖到那个字节串节点上。
-    const view = viewOf(panel);
-    const value = boxOf(view, 'v1');
-    const dataPort = requireElement(panel, '.port[data-node="method1"][data-port="data"]');
-    const port = portPointOf(view, 'method1', 'data');
-    startDrag(dataPort, port, { x: value.x + 20, y: value.y + 20 });
-    finishDrag({ x: value.x + 20, y: value.y + 20 });
+    // 2. 在侧栏连接字节参数。
+    const param = requireElement(panel, '.field-param-data');
+    if (!(param instanceof HTMLSelectElement)) throw new Error('没有参数选项');
+    param.value = 'v1';
+    param.dispatchEvent(new Event('change', { bubbles: true }));
     await settle(panel);
     expect(nodeOf(panel, 'method1')).toMatchObject({ args: { data: 'v1' } });
 
@@ -471,7 +464,7 @@ describe('画布面板：从工具箱加出来的语句能排进 main', () => {
     expect(compileMessagesOf(document)).toEqual([]);
   });
 
-  it('再拖回空白处：坐标变了，但 main 不变（空白处释放不改流程结构）', async () => {
+  it('再拖回空白处：节点脱离流程，坐标跟随拖动', async () => {
     const panel = panelOf(looseDocument([START, methodNode('a')], ['start', 'a']));
     await settle(panel);
     const before = panel.document?.layout['a'];
@@ -479,7 +472,23 @@ describe('画布面板：从工具箱加出来的语句能排进 main', () => {
     dragNode(panel, 'a', { x: from.x + 20, y: from.y + 20 }, { x: 900, y: 700 });
     await settle(panel);
 
-    expect(panel.document?.main).toEqual(['start', 'a']);
+    expect(panel.document?.main).toEqual(['start']);
     expect(panel.document?.layout['a']).not.toEqual(before);
+  });
+});
+
+describe('纵向流程的插位', () => {
+  it('C 放在 A、B 之间时按纵坐标插入，得到 start→A→C→B', () => {
+    const fixture = fixtureOf([START, methodNode('a'), methodNode('b'), methodNode('c')], ['start', 'a', 'b'], {
+      start: { x: 100, y: 40, width: 180, height: 72 },
+      a: { x: 100, y: 180, width: 180, height: 72 },
+      b: { x: 100, y: 320, width: 180, height: 72 },
+      c: { x: 500, y: 200, width: 180, height: 72 },
+    });
+    const target = dropAt(fixture, { x: 190, y: 285 }, ['c']);
+    expect(target).toMatchObject({ kind: 'flow', region: MAIN, index: 2 });
+    const result = dropEditOf(fixture.document, target, ['c']);
+    expect(result.edit.issues).toEqual([]);
+    expect(result.edit.document.main).toEqual(['start', 'a', 'c', 'b']);
   });
 });

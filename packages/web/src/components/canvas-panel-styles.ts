@@ -1,18 +1,14 @@
 import { css } from 'lit';
 
-/**
- * 画布面板的 TUI 样式（设计 §1、需求 §6.1）。
- *
- * 与仓库其他组件同一套口径：**只引用主题 token，不用渐变、阴影、圆角和半透明色**，
- * 层级靠边框、粗细与反显区分，字号统一继承 `--p2b-size`（`tui-style.test.ts` 会逐条断言）。
- *
- * 需求里「白底、圆角、轻阴影的白方框」在这里落成**反显**：`背景 = --p2b-fg`、`文字 = --p2b-bg`，
- * 和顶栏 `.modes button.on` 是同一个手法——深色画布上一块白色仍然是最醒目的「节点」，
- * 而圆角与阴影被终端风格换成了 1px 灰边与虚线选中框。关系方框的「配色区分」也改成用
- * 语义 token（运算=code、比较=stack、逻辑=hidden…），并且框里始终有标号，不靠颜色单独传达。
- */
+/** 三栏 TUI 画布：白边节点、彩边关系、常驻侧栏与右键菜单。颜色沿用主题变量。 */
 
 export const canvasPanelStyles = css`
+  .canvas-context-menu { position: absolute; z-index: 20; width: 210px; border: 1px solid var(--p2b-fg); background: var(--p2b-bg); padding: 0.25rem; }
+  .canvas-context-menu button { display: flex; justify-content: space-between; width: 100%; min-height: 1.9rem; text-align: left; border-color: transparent; }
+  .canvas-context-menu hr { border: 0; border-top: 1px solid var(--p2b-line); margin: 0.25rem 0; }
+
+  button::before, button::after { content: none; }
+
   :host {
     display: block;
     height: 100%;
@@ -95,8 +91,13 @@ export const canvasPanelStyles = css`
 
   .body {
     display: grid;
-    grid-template-columns: 13rem minmax(0, 1fr) 17rem;
+    grid-template-columns: 20rem minmax(0, 1fr) 18rem;
     min-height: 0;
+  }
+
+  /* 窄窗口收紧侧栏，为画布保留可操作宽度；宽屏保持加宽的节点库。 */
+  @media (max-width: 1000px) {
+    .body { grid-template-columns: 15rem minmax(0, 1fr) 13rem; }
   }
 
   .toolbox {
@@ -113,7 +114,7 @@ export const canvasPanelStyles = css`
     gap: 0.3rem;
   }
 
-  /* 13rem 宽放两个按钮：去掉「[ ]」装饰并禁止折行，否则括号会掉到第二行。 */
+  /* 操作按钮并排，文字保持单行。 */
   .toolbox-actions button {
     flex: 1 1 0;
     min-height: 1.7rem;
@@ -136,6 +137,7 @@ export const canvasPanelStyles = css`
 
   .stage {
     position: relative;
+    touch-action: none;
     min-height: 0;
     overflow: auto;
     background: var(--p2b-bg);
@@ -173,9 +175,5 @@ export const canvasPanelStyles = css`
     stroke: var(--p2b-stack);
   }
 
-  .edge-wire {
-    stroke: var(--p2b-focus);
-    stroke-dasharray: 4 4;
-  }
 
 `;

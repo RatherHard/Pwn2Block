@@ -19,9 +19,8 @@
 `getByRole('complementary', { name: '工具箱' | '检查器' })`，工具箱条目是 `.tool[data-kind]`
 （本题方法是 `.tool-block[data-block]`，搜索框 `.library-query`，分类页 `.library-tab`；分页或搜索
 筛掉的条目只是带 `hidden`，仍在 DOM 里），画布是 `.stage`；节点用
-`.node-box[data-node="<id>"]`（关系方框是 `.relation-box`；`selectNode` 点的是 `.title`，因为已选中
-节点上单击可编辑行会直接开编辑框），端口用 `.port[data-node][data-port]`，
-行用 `.row[data-node][data-row]`，就地编辑的输入框用 `.row-input`，顶栏计数用
+`.node-box[data-node="<id>"]`（`selectNode` 点标题 `.title`，配置统一在侧栏编辑），关系用 `.relation-box[data-relation]`，流程外置连接点用 `.flow-port`，
+行用 `.row[data-node][data-row]`，侧栏值编辑用 `.field-value`，数据来源用 `.field-param-<name>`，顶栏计数用
 `.status-error` / `.status-warn` / `.status-unconnected` / `.status-revision`。
 文档断言优先读面板公开属性 `document`（`helpers.readDocument()` 会在 Node 侧按形状复核一遍），
 只有「看起来怎样」才查 DOM。
@@ -78,3 +77,9 @@ pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/desk
 每次运行应保存独立报告与截图，并注明环境、执行数、跳过项和失败原因。
 
 过去各轮结果与本地证据路径见 [浏览器回归记录](../../docs/archive/graph-interaction-2026-10-19/浏览器回归记录.md)，更早阶段见 [基础画布验收记录](../../docs/archive/graph-2026-10-19/浏览器验收记录.md)。历史报告不能替代当前运行；`.tmp` 中的文件不随仓库交付。
+
+## 2026-10-29 UI 重构回归
+
+`canvas-ui-reconstruction.spec.ts` 覆盖数据吸附、关系框间距及换运算、链中脱离、表达式框选后的右键包络、附着转换、解除与撤销重做，以及分类返回、常驻预览和分页。`canvas-interaction.spec.ts`、`closed-loop.spec.ts` 已改为通过侧栏配置值和方法参数，不再依赖已移除的数据端口或就地编辑框。截图由测试输出到配置的证据目录，构建产物和截图不提交。
+
+本轮验证使用真实本地后端与生产构建：14 个功能用例通过，6 种尺寸的布局/键盘/恢复用例均通过。768×1024 首次暴露侧栏挤压画布的问题，增加窄屏宽度规则后，与 900×1200、1280×720 一起复验通过。功能与大屏证据在 `.tmp/canvas-final-browser-clean`，响应式修复证据在 `.tmp/canvas-responsive-browser`。

@@ -1,12 +1,11 @@
-import { canvas } from '@pwn2block/shared';
+import { structureIds, selectionRoots } from '../canvas/structure';
+import type { canvas } from '@pwn2block/shared';
 import { moveLayout } from '../canvas/editor';
 import type { CanvasLayoutView, Point, Rect } from '../canvas/view-model';
 import { canvasPositionsOf } from '../canvas/view-model-geometry';
-import { cycleOperator, dropEditOf, wireEditOf } from './canvas-panel-commands';
-import { FLOW_DATA_REFUSAL, flowDropLabelOf } from './canvas-panel-flow-drop';
+import { cycleOperator, dropEditOf } from './canvas-panel-commands';
 import {
   DRAG_THRESHOLD,
-  dropLabelOf,
   dropTargetFor,
   rectBetween,
   rectOfBox,
@@ -15,30 +14,17 @@ import {
   type DropTarget,
 } from './canvas-panel-geometry';
 import type { PanelInteractionHost } from './canvas-panel-host';
-import type { CanvasInlineEdit } from './canvas-panel-inline';
 import { handleCommandKey, isTextEntry } from './canvas-panel-keys';
 import { closestData, elementOf, listenDrag, toGraphPoint, unlistenDrag } from './canvas-panel-pointer';
-import type { InlineEditState, SnapState, WireState } from './canvas-panel-render';
 
-/**
- * 画布上的指针交互（需求 §6.1–§6.3、§10 任务第 5–12 条）。
- *
- * 状态机只有五态：**拖节点 / 拖组合标题 / 拉线 / 框选 / 就地编辑**（就地编辑的状态在
- * `canvas-panel-inline.ts`，这里只转发）。拖动过程中的位置只写进 `preview`（一份
- * `moveLayout` 出来的预览文档），松手才通过 `applyEdit` 落成**一次**可撤销的编辑；
- * 所以「拖动中随时按 Esc 撤销」是天然的——预览一扔，文档根本没动过。
- *
- * 两条与命中有关的口径：
- * - 吸附只认**拖动起点**那一份视图（`base`）。否则被拖的盒子跟着鼠标走、组合包络跟着它扩，
- *   「拖出组」就永远判不出来。
- * - 阈值 `DRAG_THRESHOLD`（4px）：小于它按点击处理，避免点选时把节点挪掉一像素。
- */
+/** 拖动只更新预览，松手提交一次可撤销编辑；Escape 丢弃预览。 */
 
 /** 移动类拖动：节点（可多选）或整组（拖组合标题）。 */
 interface MoveDrag {
   readonly kind: 'node' | 'group';
   /** 被拖动的节点；整组拖动时是组合的全部成员。 */
   readonly ids: readonly string[];
+  readonly roots: readonly string[];
   /** 拖动起点时的位置：每一步都用「起点 + 位移」算，误差不会累积。 */
   readonly origins: ReadonlyMap<string, canvas.CanvasNodeLayout>;
   readonly start: Point;
@@ -49,16 +35,6 @@ interface MoveDrag {
   readonly pressedId: string;
   /** 按下时按着 Shift 且它**本来就在**选中集里：松手（没拖动）要把它移出选中。 */
   readonly togglesOff: boolean;
-  /** 按在**已选中**节点的哪一行上：松手没拖动就直接就地编辑（不必再双击）。 */
-  readonly editRow: number | undefined;
-}
-
-interface WireDrag {
-  readonly kind: 'wire';
-  readonly nodeId: string;
-  readonly name: string;
-  readonly from: Point;
-  readonly to: Point;
 }
 
 interface MarqueeDrag {
@@ -68,7 +44,7 @@ interface MarqueeDrag {
   readonly additive: boolean;
 }
 
-type Drag = MoveDrag | WireDrag | MarqueeDrag;
+type Drag = MoveDrag | MarqueeDrag;
 
 /** 拖动开始时冻结的视图与文档：吸附命中与「拖出组」都以它为准。 */
 interface BaseState {
@@ -79,31 +55,14 @@ interface BaseState {
 export class CanvasPanelInteraction {
   private drag: Drag | undefined;
   private base: BaseState | undefined;
-  private snap: SnapState | undefined;
 
-  constructor(
-    private readonly host: PanelInteractionHost,
-    private readonly inline: CanvasInlineEdit,
-  ) {}
+  constructor(private readonly host: PanelInteractionHost) {}
 
   /** 渲染用的文档：拖动中给预览，否则给真文档。 */
   displayDocument(): canvas.CanvasDocument | undefined {
     const drag = this.drag;
     if (drag !== undefined && (drag.kind === 'node' || drag.kind === 'group') && drag.moved) return drag.preview;
     return this.host.currentDocument();
-  }
-
-  inlineEdit(): InlineEditState | undefined {
-    return this.inline.current();
-  }
-
-  snapPreview(): SnapState | undefined {
-    return this.snap;
-  }
-
-  wirePreview(): WireState | undefined {
-    const drag = this.drag;
-    return drag !== undefined && drag.kind === 'wire' ? { from: drag.from, to: drag.to } : undefined;
   }
 
   marqueeRect(): Rect | undefined {
@@ -119,21 +78,16 @@ export class CanvasPanelInteraction {
     if (event.button !== 0 || isTextEntry(event.target)) return;
     if (this.host.currentDocument() === undefined) return;
     const point = this.toGraph(event);
-    const port = closestData(elementOf(event.target), 'data-port');
-    if (port !== null) {
-      this.startWire(port, point);
-      return;
-    }
     // 关系方框只响应点击（切换运算），不参与拖动。
-    if (closestData(elementOf(event.target), 'data-relation') !== null) return;
     const title = closestData(elementOf(event.target), 'data-group-title');
     if (title !== null) {
       this.startGroupDrag(title, point);
       return;
     }
+    if (closestData(elementOf(event.target), 'data-relation') !== null) return;
     const node = closestData(elementOf(event.target), 'data-node');
     if (node !== null) {
-      this.startNodeDrag(node, point, event.shiftKey, rowIndexOf(event.target));
+      this.startNodeDrag(node, point, event.shiftKey);
       return;
     }
     this.startMarquee(point, event.shiftKey);
@@ -143,25 +97,20 @@ export class CanvasPanelInteraction {
     const drag = this.drag;
     if (drag === undefined) return;
     const point = this.toGraph(event);
-    if (drag.kind === 'marquee' || drag.kind === 'wire') {
+    if (drag.kind === 'marquee') {
       this.drag = { ...drag, to: point };
       this.host.requestRender();
       return;
     }
-    this.moveDragged(drag, point, !event.shiftKey && drag.kind === 'node');
+    this.moveDragged(drag, point, !event.shiftKey);
   };
 
   pointerUp = (event: MouseEvent): void => {
     const drag = this.drag;
     this.detachWindow();
     if (drag === undefined) return;
-    const point = this.toGraph(event);
     if (drag.kind === 'marquee') {
       this.finishMarquee(drag);
-      return;
-    }
-    if (drag.kind === 'wire') {
-      this.finishWire(drag, point);
       return;
     }
     this.finishMove(drag, event.shiftKey);
@@ -171,7 +120,7 @@ export class CanvasPanelInteraction {
   click = (event: MouseEvent): void => {
     const target = closestData(elementOf(event.target), 'data-relation');
     if (target === null) return;
-    const nodeId = target.dataset['node'];
+    const nodeId = target.dataset['relation'];
     const document = this.host.currentDocument();
     if (nodeId === undefined || document === undefined) return;
     this.host.selectNodes([nodeId]);
@@ -179,22 +128,14 @@ export class CanvasPanelInteraction {
     if (edit !== undefined) this.host.applyEdit(edit);
   };
 
-  /** 双击行：可编辑就地改，不可编辑（复杂配置、方法参数）打开侧栏。 */
-  doubleClick = (event: MouseEvent): void => {
-    const rowEl = closestData(elementOf(event.target), 'data-row');
-    if (rowEl === null || this.host.currentDocument() === undefined) return;
-    const nodeId = rowEl.dataset['node'];
-    const index = Number(rowEl.dataset['row']);
-    if (nodeId === undefined || !Number.isInteger(index)) return;
-    this.inline.beginAt(nodeId, index);
-  };
+  /** 节点配置统一由侧栏编辑。 */
 
   // -------------------------------------------------------------------------
   // 键盘
   // -------------------------------------------------------------------------
 
   keyDown = (event: KeyboardEvent): void => {
-    // 输入框自己处理 Escape/Enter（见 `canvas-panel-inline.ts`），画布不吃这些键。
+    // 侧栏输入框自己处理编辑按键，画布不吃这些键。
     // 监听挂在宿主上，影子根里的输入框会被重定向成宿主本身，所以要看 `composedPath()` 的首项：
     // 否则在框里或侧栏里按退格，会把选中的节点删掉。
     if (isTextEntry(event.composedPath()[0] ?? event.target)) return;
@@ -210,7 +151,6 @@ export class CanvasPanelInteraction {
     this.detachWindow();
     this.drag = undefined;
     this.base = undefined;
-    this.snap = undefined;
   }
 
   // -------------------------------------------------------------------------
@@ -221,16 +161,18 @@ export class CanvasPanelInteraction {
    * 按下节点身体：没选中就先选中它（多选时保持整组，方便一起拖）。
    * Shift 的加选/减选留到松手时处理——按下就改选中会让「Shift 点一下又松手」变成两次修改。
    */
-  private startNodeDrag(element: HTMLElement, point: Point, shiftKey: boolean, row: number | undefined): void {
+  private startNodeDrag(element: HTMLElement, point: Point, shiftKey: boolean): void {
     const nodeId = element.dataset['node'];
     const document = this.host.currentDocument();
     if (nodeId === undefined || document === undefined) return;
     const selection = this.host.selection();
     const already = selection.includes(nodeId);
     if (!already) this.host.selectNodes(shiftKey ? [...selection, nodeId] : [nodeId]);
-    // 第一次点只选中（避免点选时误开编辑框）；节点已是唯一选中时，再点一行就是要改它。
-    const editRow = !shiftKey && already && selection.length === 1 ? row : undefined;
-    this.beginMove('node', this.host.selection(), nodeId, point, document, shiftKey && already, editRow);
+    const ids = this.host.selection().flatMap((id) => {
+      const node = document.nodes.find((item) => item.id === id);
+      return node?.kind === 'loop' || node?.kind === 'if' || node?.kind === 'convert' ? structureIds(document, id) : [id];
+    });
+    this.beginMove('node', [...new Set(ids)], nodeId, point, document, shiftKey && already);
   }
 
   private startGroupDrag(element: HTMLElement, point: Point): void {
@@ -238,8 +180,8 @@ export class CanvasPanelInteraction {
     const document = this.host.currentDocument();
     if (groupId === undefined || document === undefined) return;
     const group = document.nodes.find((node) => node.id === groupId);
-    if (group === undefined || group.kind !== 'group') return;
-    this.beginMove('group', canvas.groupMembers(group), groupId, point, document, false, undefined);
+    if (group === undefined) return;
+    this.beginMove('group', structureIds(document, groupId), groupId, point, document, false);
   }
 
   private beginMove(
@@ -249,7 +191,6 @@ export class CanvasPanelInteraction {
     point: Point,
     document: canvas.CanvasDocument,
     togglesOff: boolean,
-    editRow: number | undefined,
   ): void {
     if (ids.length === 0) return;
     const positions = canvasPositionsOf(document);
@@ -262,10 +203,10 @@ export class CanvasPanelInteraction {
     this.drag = {
       kind,
       ids: [...origins.keys()],
+      roots: kind === 'group' ? [pressedId] : [...this.host.selection()],
       origins,
       pressedId,
       togglesOff,
-      editRow,
       start: point,
       moved: false,
       preview: document,
@@ -281,11 +222,10 @@ export class CanvasPanelInteraction {
     if (!drag.moved && Math.abs(delta.x) + Math.abs(delta.y) < DRAG_THRESHOLD) return;
     const moves = [...drag.origins].map(([id, origin]) => ({
       id,
-      x: snapCoordinate(origin.x + delta.x, snapEnabled),
-      y: snapCoordinate(origin.y + delta.y, snapEnabled),
+      x: drag.ids.length > 1 ? origin.x + snapCoordinate(delta.x, snapEnabled) : snapCoordinate(origin.x + delta.x, snapEnabled),
+      y: drag.ids.length > 1 ? origin.y + snapCoordinate(delta.y, snapEnabled) : snapCoordinate(origin.y + delta.y, snapEnabled),
     }));
-    const drop = drag.kind === 'node' && snapEnabled ? this.dropAt(base, point, drag.ids) : undefined;
-    this.snap = drop === undefined ? undefined : snapOf(drop, point);
+    const drop = snapEnabled ? this.dropAt(base, point, drag.roots) : undefined;
     this.drag = { ...drag, moved: true, preview: moveLayout(base.document, moves), drop };
     this.host.requestRender();
   }
@@ -296,19 +236,13 @@ export class CanvasPanelInteraction {
 
   private finishMove(drag: MoveDrag, shiftKey: boolean): void {
     this.drag = undefined;
-    this.snap = undefined;
     this.base = undefined;
     if (!drag.moved) {
-      // 单击已选中节点的可编辑行：直接开编辑框；不可编辑的行由 beginAt 退回成「只选中」。
-      if (drag.editRow !== undefined && this.inline.beginAt(drag.pressedId, drag.editRow)) return;
       this.applyClickSelection(drag, shiftKey);
       this.host.requestRender();
       return;
     }
-    const outcome =
-      drag.kind === 'node'
-        ? dropEditOf(drag.preview, drag.drop, drag.ids)
-        : { edit: { document: drag.preview, issues: [] } };
+    const outcome = dropEditOf(drag.preview, drag.drop, drag.roots);
     this.host.applyEdit(outcome.edit);
     if (outcome.message !== undefined) this.host.report(outcome.message);
     this.host.requestRender();
@@ -325,31 +259,8 @@ export class CanvasPanelInteraction {
   }
 
   // -------------------------------------------------------------------------
-  // 拉线 / 框选
+  // 框选
   // -------------------------------------------------------------------------
-
-  private startWire(element: HTMLElement, point: Point): void {
-    const nodeId = element.dataset['node'];
-    const name = element.dataset['port'];
-    const document = this.host.currentDocument();
-    if (nodeId === undefined || name === undefined || document === undefined) return;
-    this.base = { document, view: this.host.currentLayout() };
-    this.drag = { kind: 'wire', nodeId, name, from: point, to: point };
-    this.attachWindow();
-  }
-
-  /** 松手：落在别的端口上就接过去，落在盒子上接那个节点，落在空白就断开。 */
-  private finishWire(drag: WireDrag, point: Point): void {
-    const base = this.base;
-    const document = this.host.currentDocument();
-    this.drag = undefined;
-    this.base = undefined;
-    if (base === undefined || document === undefined) {
-      this.host.requestRender();
-      return;
-    }
-    this.host.applyEdit(wireEditOf(document, base.view, drag, point));
-  }
 
   private startMarquee(point: Point, additive: boolean): void {
     const document = this.host.currentDocument();
@@ -371,20 +282,18 @@ export class CanvasPanelInteraction {
     }
     if (base === undefined) return;
     const hits = base.view.boxes
-      .filter((box) => box.kind === 'node' || box.kind === 'relation')
+      .filter((box) => box.kind === 'node')
       .filter((box) => rectsIntersect(rectOfBox(box), rect))
       .map((box) => box.nodeId);
-    this.host.selectNodes(drag.additive ? [...new Set([...this.host.selection(), ...hits])] : hits);
+    this.host.selectNodes(selectionRoots(base.document, drag.additive ? [...new Set([...this.host.selection(), ...hits])] : hits));
     this.host.requestRender();
   }
 
   private cancelAll(): void {
     this.detachWindow();
-    const wasActive = this.drag !== undefined || this.inline.current() !== undefined;
+    const wasActive = this.drag !== undefined;
     this.drag = undefined;
     this.base = undefined;
-    this.snap = undefined;
-    this.inline.cancel();
     if (wasActive) this.host.requestRender();
   }
 
@@ -403,31 +312,4 @@ export class CanvasPanelInteraction {
   private detachWindow(): void {
     unlistenDrag(this.pointerMove, this.pointerUp);
   }
-}
-
-/** 按下点所在的行号；不在行上（标题、空白）返回 `undefined`。 */
-function rowIndexOf(target: EventTarget | null): number | undefined {
-  const row = closestData(elementOf(target), 'data-row');
-  const index = Number(row?.dataset['row']);
-  return row === null || !Number.isInteger(index) ? undefined : index;
-}
-
-/**
- * 吸附提示：指示条来自落位（行带 / 流程插位条 / 节点盒子），文案来自落位种类，位置贴着鼠标。
- *
- * 流程带要说清「排第几步、进哪条序列」（`flowDropLabelOf`），`dropLabelOf` 只认组合与节点；
- * 数据节点压在流程带上时，提示直接就是那句原因，松手前就知道放不进去。
- */
-function snapOf(target: DropTarget, point: Point): SnapState {
-  return {
-    slot: target.slot,
-    hint: { x: point.x + 12, y: point.y - 10 },
-    label: snapLabelOf(target),
-  };
-}
-
-function snapLabelOf(target: DropTarget): string {
-  if (target.kind === 'flow') return flowDropLabelOf(target);
-  if (target.kind === 'flow-blocked') return FLOW_DATA_REFUSAL;
-  return dropLabelOf(target) ?? '释放';
 }

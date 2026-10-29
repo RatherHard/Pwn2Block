@@ -1,4 +1,6 @@
-import { LitElement, html } from 'lit';
+import { structureIds } from '../canvas/structure';
+import { renderCanvasMenu, type CanvasMenuState } from './canvas-panel-context-menu';
+import { LitElement, html, nothing } from 'lit';
 import type { PropertyValues, TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
 import type { PublicChallenge } from '@pwn2block/shared';
@@ -22,14 +24,12 @@ import {
 } from './canvas-panel-actions';
 import { defaultDocument, type InspectorChange } from './canvas-panel-commands';
 import { CanvasHistory } from './canvas-panel-history';
-import { CanvasHighlight } from './canvas-panel-highlight';
 import type { PanelInteractionHost } from './canvas-panel-host';
-import { CanvasInlineEdit } from './canvas-panel-inline';
 import { CanvasPanelInteraction } from './canvas-panel-interaction';
 import { renderInspector } from './canvas-panel-inspector';
 import { deleteSelection } from './canvas-panel-keys';
 import { legacyDetailOf } from './canvas-panel-legacy';
-import type { RowHandlers, StageState } from './canvas-panel-render';
+import type { StageState } from './canvas-panel-render';
 import { renderStage } from './canvas-panel-render';
 import { CanvasAutosave } from './canvas-panel-save';
 import { canvasPanelStyles } from './canvas-panel-styles';
@@ -99,18 +99,16 @@ export class CanvasPanelElement extends LitElement {
   declare store: CanvasStore | undefined;
 
   private readonly history = new CanvasHistory();
-  private readonly highlight = new CanvasHighlight(() => this.requestUpdate());
   private readonly autosave = new CanvasAutosave({
     store: () => this.store,
     challengeId: () => this.challenge?.id,
     document: () => this.document,
   });
   private readonly host: PanelInteractionHost & PanelActionHost & LibraryDropHost;
-  private readonly inline: CanvasInlineEdit;
   private readonly interaction: CanvasPanelInteraction;
-  private readonly rowHandlers: RowHandlers;
   private selection: string[] = [];
   private message: string | undefined;
+  private contextMenu: CanvasMenuState | undefined;
   private compileIssues: readonly WorkflowIssue[] = [];
   /** 上一次编译成功给出的步骤快照；编译失败时清空（失败不发布部分动作，也不留上一轮的步骤）。 */
   private steps: readonly canvas.CanvasStep[] = [];
@@ -143,45 +141,38 @@ export class CanvasPanelElement extends LitElement {
       exportSave: () => this.exportSave(),
       layoutOf: (document) => layoutCanvas({ document, methods: this.methods() }),
     };
-    this.inline = new CanvasInlineEdit(this.host);
-    this.interaction = new CanvasPanelInteraction(this.host, this.inline);
-    this.rowHandlers = { rowKeyDown: this.inline.rowKeyDown, rowBlur: this.inline.rowBlur };
+    this.interaction = new CanvasPanelInteraction(this.host);
   }
 
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener('keydown', this.interaction.keyDown);
+    window.addEventListener('pointerdown', this.dismissMenu);
+    this.addEventListener('keydown', this.menuKeyDown);
     this.loadForChallenge();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.removeEventListener('keydown', this.interaction.keyDown);
+    window.removeEventListener('pointerdown', this.dismissMenu);
+    this.removeEventListener('keydown', this.menuKeyDown);
     this.interaction.destroy();
     this.autosave.flush();
-    this.highlight.clear();
   }
 
   protected override updated(changed: PropertyValues<this>): void {
     super.updated(changed);
-    this.focusInlineInput();
+
     if (changed.has('challenge')) this.loadForChallenge();
     else if (changed.has('document')) this.adoptExternal();
   }
 
-  /** 就地编辑框一出现就拿到焦点并全选：点开即可直接输入，不必再点一次。 */
-  private focusInlineInput(): void {
-    const input = this.renderRoot.querySelector('.row-input');
-    if (!(input instanceof HTMLInputElement) || this.shadowRoot?.activeElement === input) return;
-    input.focus();
-    input.select();
-  }
-
-  /** 父组件直接换了文档（没走 `setDocument`）：旧历史作废，其余按一次变化处理。 */
   private adoptExternal(): void {
     const document = this.document;
     if (document === undefined || document === this.handledDocument) return;
     this.history.reset();
+    this.contextMenu = undefined;
     this.selection = [];
     this.afterChange();
   }
@@ -199,7 +190,7 @@ export class CanvasPanelElement extends LitElement {
       stage.scrollLeft = Math.max(0, box.x - stage.clientWidth / 2);
       stage.scrollTop = Math.max(0, box.y - stage.clientHeight / 2);
     }
-    this.highlight.show(nodeId);
+    this.selectNodes([nodeId]);
   }
 
   /** 跳到第一条匹配的问题；`code` 省略时取第一条有节点的问题。返回是否找到。 */
@@ -219,6 +210,7 @@ export class CanvasPanelElement extends LitElement {
   /** 外部替换文档（导入存档、放弃旧档）：重置历史并立即落盘。 */
   setDocument(next: canvas.CanvasDocument): void {
     this.history.reset();
+    this.contextMenu = undefined;
     this.selection = [];
     this.document = next;
     this.afterChange();
@@ -382,11 +374,7 @@ export class CanvasPanelElement extends LitElement {
       document,
       view,
       selection: this.selection,
-      editing: interaction.inlineEdit(),
-      snap: interaction.snapPreview(),
       marquee: interaction.marqueeRect(),
-      wire: interaction.wirePreview(),
-      highlight: this.highlight.current(),
     };
   }
 
@@ -409,6 +397,24 @@ export class CanvasPanelElement extends LitElement {
     if (item === undefined) return;
     event.preventDefault();
     dropLibraryItem(this.host, item, toGraphPoint(this.stageElement(), event));
+  };
+
+  private closeMenu = (): void => { this.contextMenu = undefined; this.requestUpdate(); };
+  private dismissMenu = (event: Event): void => {
+    if (!event.composedPath().some((target) => target instanceof HTMLElement && target.classList.contains('canvas-context-menu'))) this.closeMenu();
+  };
+  private menuKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') this.closeMenu(); };
+  private openMenu = (event: MouseEvent): void => {
+    event.preventDefault();
+    const stage = this.stageElement();
+    if (stage === null) return;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-relation], [data-group-title], [data-node], [data-group], [data-envelope]') : null;
+    const id = target?.dataset['relation'] ?? target?.dataset['groupTitle'] ?? target?.dataset['node'] ?? target?.dataset['group'] ?? target?.dataset['envelope'];
+    if (id !== undefined && !this.selection.some((root) => this.document !== undefined && structureIds(this.document, root).includes(id))) this.selectNodes([id]);
+    const rect = stage.getBoundingClientRect();
+    this.contextMenu = { x: stage.scrollLeft + Math.max(0, Math.min(event.clientX - rect.left, stage.clientWidth - 218)), y: stage.scrollTop + Math.max(0, Math.min(event.clientY - rect.top, stage.clientHeight - 252)) };
+    this.requestUpdate();
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLButtonElement>('.canvas-context-menu button:not(:disabled)')?.focus());
   };
 
   private renderLibraryPane(): TemplateResult {
@@ -475,13 +481,14 @@ export class CanvasPanelElement extends LitElement {
           class="stage"
           @pointerdown=${this.interaction.pointerDown}
           @click=${this.interaction.click}
-          @dblclick=${this.interaction.doubleClick}
+          @contextmenu=${this.openMenu}
           @dragover=${this.stageDragOver}
           @drop=${this.stageDrop}
         >
           ${document === undefined || view === undefined
             ? html`<p class="hint">等待题目加载…</p>`
-            : renderStage(this.stageState(document, view), this.rowHandlers)}
+            : renderStage(this.stageState(document, view))}
+          ${this.contextMenu === undefined ? nothing : renderCanvasMenu({ position: this.contextMenu, host: this.host, canUndo: this.history.canUndo(), canRedo: this.history.canRedo(), undo: () => this.undo(), redo: () => this.redo(), close: this.closeMenu })}
         </div>
         ${document === undefined || view === undefined
           ? html`<aside class="inspector"><p class="hint">等待题目加载…</p></aside>`

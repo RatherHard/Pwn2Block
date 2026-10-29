@@ -351,14 +351,14 @@ describe('画布面板：公开方法', () => {
     const panel = await mount();
     panel.locate('start');
     await settle(panel);
-    expect(rootOf(panel).querySelectorAll('.node-box.highlight')).toHaveLength(1);
+    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(1);
   });
 
   it('locate 找不到节点就静默返回', async () => {
     const panel = await mount();
     expect(() => panel.locate('没有这个节点')).not.toThrow();
     await settle(panel);
-    expect(rootOf(panel).querySelectorAll('.highlight')).toHaveLength(0);
+    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(0);
   });
 
   it('focusIssue 命中时跳到问题节点并高亮，未命中返回 false', async () => {
@@ -367,7 +367,7 @@ describe('画布面板：公开方法', () => {
     });
     expect(panel.focusIssue('missing_input')).toBe(true);
     await settle(panel);
-    expect(rootOf(panel).querySelector('[data-relation="r1"]')?.classList.contains('highlight')).toBe(true);
+    expect(rootOf(panel).querySelector('[data-relation="r1"]')?.classList.contains('selected')).toBe(true);
     expect(panel.focusIssue('duplicate_id')).toBe(false);
   });
 

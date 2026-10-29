@@ -9,6 +9,13 @@ import { css } from 'lit';
  */
 
 export const canvasPanelLibraryStyles = css`
+  .library-tabs { flex-direction: column; }
+  .library-tab { display: flex; justify-content: space-between; padding: 0.5rem; }
+  .library-back { text-align: left; }
+  .tool, .tool-block { display: block; width: 100%; text-align: left; padding: 0.5rem; white-space: normal; }
+  .library-preview { display: block; text-align: left; }
+  .preview-desc, .preview-usage { margin: 0.3rem 0 0; white-space: normal; }
+
   /* 分组本身是 flex：不显式写 hidden，浏览器默认的 display: none 会被盖掉。 */
   .toolbox [hidden] {
     display: none !important;
@@ -48,7 +55,7 @@ export const canvasPanelLibraryStyles = css`
 
   /*
    * 列表自己滚动：只写 min-height: 0 会让它缩到内容以下，溢出的条目压在预览底下点不到。
-   * 预览固定在底部（flex-shrink: 0），翻看长列表时一直看得见。
+   * 预览位于各自选项内部，与选项一起滚动。
    */
   .library-list {
     display: flex;
@@ -98,10 +105,6 @@ export const canvasPanelLibraryStyles = css`
     border-style: dashed;
   }
 
-  .tool.previewing,
-  .tool-block.previewing {
-    border-color: var(--p2b-focus);
-  }
 
   .library-empty {
     padding: 0.3rem 0;
@@ -148,33 +151,12 @@ export const canvasPanelLibraryStyles = css`
     margin-top: 0.3rem;
   }
 
-  .preview-ports {
-    margin: 0;
-    padding: 0.2rem 0 0;
-    list-style: none;
-    color: var(--p2b-dim);
-  }
-
-  .preview-ports li {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    white-space: nowrap;
-  }
-
-  .preview-port {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border: 1px solid var(--p2b-line);
-  }
-
   .preview-node {
     flex: 1 1 auto;
     min-width: 0;
-    border: 1px solid var(--p2b-line);
-    color: var(--p2b-bg);
-    background: var(--p2b-fg);
+    border: 1px solid var(--p2b-fg);
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
   }
 
   .preview-title {
@@ -213,7 +195,7 @@ export const canvasPanelLibraryStyles = css`
     min-width: 3rem;
     padding: 0.1rem 0.4rem;
     border: 1px solid var(--p2b-line);
-    color: var(--p2b-bg);
+    color: var(--p2b-fg);
     font-weight: 700;
     text-align: center;
   }

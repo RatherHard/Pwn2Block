@@ -106,22 +106,14 @@ async function switchKind(panel: CanvasPanelElement, kind: canvas.ScalarKind): P
   await settle(panel);
 }
 
-/** 一行的元素（就地编辑要双击它）。 */
-function rowElement(panel: CanvasPanelElement, label: string): HTMLElement {
-  const rows = [...rootOf(panel).querySelectorAll(`.row[data-node="${NODE_ID}"]`)];
-  const found = rows.find((row) => row.querySelector('.row-label')?.textContent?.trim() === label);
-  if (!(found instanceof HTMLElement)) throw new Error(`找不到「${label}」行`);
-  return found;
-}
-
-/** 双击一行、输入文本、回车提交：与用户操作同一条路径（`applyRowEdit` → `setValue`）。 */
-async function editRow(panel: CanvasPanelElement, label: string, text: string): Promise<void> {
-  rowElement(panel, label).dispatchEvent(new MouseEvent('dblclick', { clientX: 0, clientY: 0, bubbles: true }));
+/** 通过侧栏编辑字面值。 */
+async function editRow(panel: CanvasPanelElement, _label: string, text: string): Promise<void> {
+  clickNode(panel);
   await settle(panel);
-  const input = rootOf(panel).querySelector('.row-input');
-  if (!(input instanceof HTMLInputElement)) throw new Error('没有出现输入框');
+  const input = rootOf(panel).querySelector('.field-value');
+  if (!(input instanceof HTMLInputElement)) throw new Error('侧栏没有值输入框');
   input.value = text;
-  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
   await settle(panel);
 }
 
@@ -153,31 +145,6 @@ function methodDocument(): canvas.CanvasDocument {
   };
 }
 
-function portPoint(doc: canvas.CanvasDocument, nodeId: string, name: string): canvas.CanvasNodeLayout {
-  const port = layoutCanvas({ document: doc }).ports.find((item) => item.nodeId === nodeId && item.name === name);
-  if (port === undefined) throw new Error(`没有端口 ${nodeId}.${name}`);
-  return { x: port.x, y: port.y };
-}
-
-/** 盒子中心：拉线松手落在这里，`wireEditOf` 就把它当成「这个输入由这个节点来喂」。 */
-function boxCenterOf(doc: canvas.CanvasDocument, nodeId: string): canvas.CanvasNodeLayout {
-  const box = layoutCanvas({ document: doc }).boxes.find((item) => item.nodeId === nodeId);
-  if (box === undefined) throw new Error(`没有盒子 ${nodeId}`);
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-}
-
-/** 拉线：从端口按下、在别处松手。jsdom 里矩形全为 0，所以客户端坐标 = 画布坐标。 */
-function dragTo(target: EventTarget, from: canvas.CanvasNodeLayout, to: canvas.CanvasNodeLayout): void {
-  const fire = (current: EventTarget, type: string, x: number, y: number): void => {
-    current.dispatchEvent(
-      new MouseEvent(type, { clientX: Math.round(x), clientY: Math.round(y), bubbles: true, cancelable: true, button: 0 }),
-    );
-  };
-  fire(target, 'pointerdown', from.x, from.y);
-  fire(window, 'pointermove', (from.x + to.x) / 2, (from.y + to.y) / 2);
-  fire(window, 'pointermove', to.x, to.y);
-  fire(window, 'pointerup', to.x, to.y);
-}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -292,7 +259,7 @@ describe('画布面板：字面值切换种类', () => {
     expect(literalOf(panel).value).toEqual({ kind: 'byte', hex: '' });
   });
 
-  it('两个入口落到同一处：切到字节串后就地编辑写 hex，再切回整数被重置', async () => {
+  it('两个入口落到同一处：切到字节串后侧栏编辑写 hex，再切回整数被重置', async () => {
     const panel = await mount(documentWith({ kind: 'int', value: '0' }));
     clickNode(panel);
     await settle(panel);
@@ -307,7 +274,7 @@ describe('画布面板：字面值切换种类', () => {
 });
 
 describe('画布面板：整数字面值 → 字节串字面值 → 接到方法参数', () => {
-  it('换种类、写 hex、拉线接到 gets(data)，编译出的动作参数就是这段 hex', async () => {
+  it('换种类、写 hex、侧栏接到 gets(data)，编译出的动作参数就是这段 hex', async () => {
     const panel = await mount(methodDocument());
 
     // 1. 侧栏把字面值换成字节串（覆盖式重建，值变成空字节串）。
@@ -316,15 +283,20 @@ describe('画布面板：整数字面值 → 字节串字面值 → 接到方法
     await switchKind(panel, 'byte');
     expect(literalOf(panel).value).toEqual({ kind: 'byte', hex: '' });
 
-    // 2. 在框里写 hex：就地编辑走的是同一个 `setValue`。
+    // 2. 在框里写 hex：侧栏编辑走的是同一个 `setValue`。
     await editRow(panel, '值', '4141');
     expect(literalOf(panel).value).toEqual({ kind: 'byte', hex: '4141' });
 
-    // 3. 从方法参数端口拉到字面值节点上：这个输入由它来喂。
-    const port = rootOf(panel).querySelector(`.port[data-node="${CALL_ID}"][data-port="data"]`);
-    if (!(port instanceof HTMLElement)) throw new Error('找不到 gets 的 data 端口');
-    const beforeWire = currentDocument(panel);
-    dragTo(port, portPoint(beforeWire, CALL_ID, 'data'), boxCenterOf(beforeWire, NODE_ID));
+    // 3. 在侧栏选择方法参数的数据来源。
+    const method = rootOf(panel).querySelector(`.node-box[data-node="${CALL_ID}"]`);
+    if (!(method instanceof HTMLElement)) throw new Error('没有方法节点');
+    method.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+    await settle(panel);
+    const param = rootOf(panel).querySelector('.field-param-data');
+    if (!(param instanceof HTMLSelectElement)) throw new Error('没有参数选项');
+    param.value = NODE_ID;
+    param.dispatchEvent(new Event('change', { bubbles: true }));
     await settle(panel);
 
     const call = currentDocument(panel).nodes.find((node) => node.id === CALL_ID);

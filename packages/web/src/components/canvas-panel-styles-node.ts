@@ -1,14 +1,7 @@
 import { css } from 'lit';
 import { NODE_ROW_HEIGHT } from '../canvas/view-model';
-import { PORT_SIZE } from './canvas-panel-geometry';
 
-/**
- * 画布上的「方块」：白框节点、关系方框、组合与转换包络、端口、吸附预览。
- *
- * 与 `canvas-panel-styles.ts`（面板骨架与连线）拆开的理由：这半边改的是「一个节点长什么样」，
- * 那半边改的是「面板怎么分区」。反显（白底深字）沿用顶栏选中态的手法，不用圆角与阴影，
- * 所以「白方框」在深色画布上仍然最醒目。
- */
+/** 白框节点、彩色关系框、包络与外置流程连接点。 */
 
 export const canvasPanelNodeStyles = css`
 /* ---------------------------- 白框节点 ---------------------------- */
@@ -18,8 +11,8 @@ export const canvasPanelNodeStyles = css`
     display: flex;
     flex-direction: column;
     border: 1px solid var(--p2b-fg);
-    color: var(--p2b-bg);
-    background: var(--p2b-fg);
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
     overflow: hidden;
     cursor: grab;
     -webkit-user-select: none;
@@ -30,9 +23,6 @@ export const canvasPanelNodeStyles = css`
     outline: 2px solid var(--p2b-changed);
   }
 
-  .node-box.highlight {
-    outline: 2px dashed var(--p2b-focus);
-  }
 
   /*
    * 标题栏：左边是分类标签（色块 + 类别名，颜色不单独传达），右边是节点名。
@@ -48,25 +38,25 @@ export const canvasPanelNodeStyles = css`
   .tone-tag {
     flex: 0 0 auto;
     padding: 0.1rem 0.3rem;
-    color: var(--p2b-bg);
-    background: var(--p2b-data);
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
     white-space: nowrap;
   }
 
   .tone-variable .tone-tag {
-    background: var(--p2b-code);
+    color: var(--p2b-code);
   }
 
   .tone-flow .tone-tag {
-    background: var(--p2b-ip);
+    color: var(--p2b-ip);
   }
 
   .tone-convert .tone-tag {
-    background: var(--p2b-stack);
+    color: var(--p2b-stack);
   }
 
   .tone-method .tone-tag {
-    background: var(--p2b-hidden);
+    color: var(--p2b-hidden);
   }
 
   .title {
@@ -81,7 +71,7 @@ export const canvasPanelNodeStyles = css`
 
   .subtitle {
     padding: 0 0.35rem;
-    opacity: 0.72;
+    color: var(--p2b-dim);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -102,7 +92,7 @@ export const canvasPanelNodeStyles = css`
   .row-label {
     flex: 1 1 auto;
     min-width: 0;
-    opacity: 0.72;
+    color: var(--p2b-dim);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -116,37 +106,7 @@ export const canvasPanelNodeStyles = css`
     text-overflow: ellipsis;
   }
 
-  /* 可就地改的值带虚下划线，悬停时整行反显：一看就知道「点这里能改」。 */
-  .row.editable {
-    cursor: text;
-  }
-
-  .row.editable .row-value {
-    text-decoration: underline dotted;
-  }
-
-  .node-box.selected .row.editable:hover {
-    color: var(--p2b-fg);
-    background: var(--p2b-bg);
-  }
-
-  .row-error .row-value {
-    color: var(--p2b-error);
-    text-decoration: underline dotted;
-  }
-
-  /* 就地编辑：输入框也走反显，避免白框里突然出现一块深色。 */
-  .row-input {
-    flex: 1 1 auto;
-    min-width: 0;
-    min-height: 1.2rem;
-    padding: 0 0.2rem;
-    border: 1px solid var(--p2b-bg);
-    color: var(--p2b-bg);
-    background: var(--p2b-fg);
-    font: inherit;
-    outline: none;
-  }
+  .row-error .row-value { color: var(--p2b-error); }
 
   /* ---------------------------- 关系方框 ---------------------------- */
 
@@ -156,8 +116,8 @@ export const canvasPanelNodeStyles = css`
     align-items: center;
     justify-content: center;
     border: 1px solid var(--p2b-line);
-    color: var(--p2b-bg);
-    background: var(--p2b-data);
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
     font-weight: 700;
     cursor: pointer;
     -webkit-user-select: none;
@@ -165,49 +125,39 @@ export const canvasPanelNodeStyles = css`
   }
 
   .cat-arith {
-    background: var(--p2b-code);
+    border-color: var(--p2b-code);
   }
 
   .cat-compare {
-    background: var(--p2b-stack);
+    border-color: var(--p2b-stack);
   }
 
   .cat-logic {
-    background: var(--p2b-hidden);
+    border-color: var(--p2b-hidden);
   }
 
   .cat-bitwise {
-    background: var(--p2b-ip);
+    border-color: var(--p2b-ip);
   }
 
   .cat-unary {
-    background: var(--p2b-addr);
+    border-color: var(--p2b-addr);
   }
 
   .cat-convert {
-    background: var(--p2b-changed);
-  }
-
-  /* 悬停反显：方框是按钮式的「点一下换运算」，要有按下前的反馈。 */
-  .relation-box:hover {
-    border-color: var(--p2b-fg);
-    color: var(--p2b-fg);
-    background: var(--p2b-bg);
+    border-color: var(--p2b-changed);
   }
 
   .relation-box.selected {
     outline: 2px solid var(--p2b-focus);
   }
 
-  .relation-box.highlight {
-    outline: 2px dashed var(--p2b-changed);
-  }
 
   /* --------------------------- 包络与端口 --------------------------- */
 
   .group-box {
     position: absolute;
-    border: 1px dashed var(--p2b-line);
+    border: 1px solid var(--p2b-line);
   }
 
   .group-title {
@@ -225,7 +175,7 @@ export const canvasPanelNodeStyles = css`
 
   .envelope-box {
     position: absolute;
-    border: 1px dotted var(--p2b-line);
+    border: 1px solid var(--p2b-line);
   }
 
   .envelope-title {
@@ -236,42 +186,6 @@ export const canvasPanelNodeStyles = css`
     color: var(--p2b-addr);
     background: var(--p2b-bg);
     white-space: nowrap;
-  }
-
-  /*
-   * 端口坐标是端口中心：用 translate 把 10px 的小方框对到中心点上。
-   * 平时是不抢眼的灰框（不在节点上放突兀的连接点）；所在节点选中或指针悬停时提亮放大，
-   * 拉线时一眼就能找到。已接线的实心色与数据线同为 --p2b-addr。
-   */
-  .port {
-    position: absolute;
-    width: ${PORT_SIZE}px;
-    height: ${PORT_SIZE}px;
-    transform: translate(-50%, -50%);
-    border: 1px solid var(--p2b-line);
-    background: var(--p2b-bg);
-    cursor: crosshair;
-    z-index: 3;
-  }
-
-  .port.connected {
-    border-color: var(--p2b-addr);
-    background: var(--p2b-addr);
-  }
-
-  .port.hollow {
-    background: var(--p2b-bg);
-  }
-
-  .port.active:not(.flow-port),
-  .port:hover:not(.flow-port) {
-    border-color: var(--p2b-fg);
-    transform: translate(-50%, -50%) scale(1.3);
-  }
-
-  .port.port-error {
-    border-color: var(--p2b-error);
-    background: var(--p2b-error);
   }
 
   /*
@@ -301,24 +215,6 @@ export const canvasPanelNodeStyles = css`
     border-color: var(--p2b-stack);
   }
 
-  /* ---------------------------- 预览层 ----------------------------- */
-
-  .snap-slot {
-    position: absolute;
-    border: 2px dashed var(--p2b-changed);
-    pointer-events: none;
-  }
-
-  .snap-hint {
-    position: absolute;
-    padding: 0.1rem 0.3rem;
-    color: var(--p2b-bg);
-    background: var(--p2b-changed);
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 6;
-  }
-
   .marquee {
     position: absolute;
     border: 1px dashed var(--p2b-focus);
@@ -326,4 +222,3 @@ export const canvasPanelNodeStyles = css`
     pointer-events: none;
   }
 `;
-

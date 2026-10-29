@@ -7,6 +7,7 @@ import {
   nodeBoxSize,
   rectsOverlap,
   relationBoxSize,
+  unionRects,
   RELATION_ABOVE_GAP,
   RELATION_CLEARANCE,
   RELATION_DODGE_COLUMN,
@@ -150,12 +151,17 @@ function nodeRectOf(state: ResolverState, node: canvas.CanvasNode): Rect {
  * 避让只按「上下交替、再往右挪一列」的固定顺序试，同一份文档永远落在同一个位置。
  */
 function relationRectOf(state: ResolverState, node: canvas.CanvasNode): Rect {
-  const size = relationBoxSize(state.decks.get(node.id)?.title ?? '');
+  const size = relationBoxSize(node.kind === 'relation' ? canvas.binaryOperatorSpec(node.op).symbol : state.decks.get(node.id)?.title ?? '');
   const sources = sourceRectsOf(state, node);
   if (sources.length === 0) {
     const anchor = anchorRectOf(state.positions.get(node.id) ?? { x: 0, y: 0 });
     const above = { x: anchor.x, y: anchor.y - RELATION_ABOVE_GAP - size.height, ...size };
     return dodge(state, node.id, above);
+  }
+  if (node.kind === 'relation' && sources.length === 2) {
+    const [left, right] = sources;
+    const gap = right.x - (left.x + left.width);
+    if (gap >= size.width + 16) return { x: left.x + left.width + (gap - size.width) / 2, y: (left.y + left.height / 2 + right.y + right.height / 2 - size.height) / 2, ...size };
   }
   const right = Math.max(...sources.map((rect) => rect.x + rect.width));
   const middle = sources.reduce((sum, rect) => sum + centerOf(rect).y, 0) / sources.length;
@@ -168,7 +174,7 @@ function sourceRectsOf(state: ResolverState, node: canvas.CanvasNode): readonly 
   const rects: Rect[] = [];
   for (const ref of canvas.inputRefsOf(node)) {
     if (ref.id === undefined) continue;
-    const source = rectOf(state, ref.id);
+    const source = node.kind === 'relation' ? structureRectOf(state, ref.id, new Set()) : rectOf(state, ref.id);
     if (source !== undefined) rects.push(source);
   }
   return rects;
@@ -178,6 +184,14 @@ function sourceRectsOf(state: ResolverState, node: canvas.CanvasNode): readonly 
  * 避让：从首选位置起，竖直方向按 0、+1、−1、+2、−2… 档（每档一个方框高 + 空隙）试，
  * 一整列都撞上就往右挪一列再试；全部撞上时退回首选位置（宁可重叠也不跑到看不见的地方）。
  */
+function structureRectOf(state: ResolverState, id: string, seen: Set<string>): Rect | undefined {
+  if (seen.has(id)) return undefined;
+  seen.add(id);
+  const node = state.nodes.get(id);
+  if (node?.kind !== 'relation' && node?.kind !== 'group') return rectOf(state, id);
+  return unionRects(canvas.inputRefsOf(node).flatMap((ref) => ref.id === undefined ? [] : structureRectOf(state, ref.id, seen) ?? [])) ?? rectOf(state, id);
+}
+
 function dodge(state: ResolverState, nodeId: string, preferred: Rect): Rect {
   const obstacles = obstaclesOf(state, nodeId);
   const step = preferred.height + RELATION_CLEARANCE;

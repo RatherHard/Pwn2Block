@@ -27,15 +27,15 @@ import { removeNodes } from './editor-graph';
 // 包络（组合）
 // ---------------------------------------------------------------------------
 
-/** 包络的成员规则：至少两个、不能是流程节点、不能在别的包络里、不能重复出现。 */
+/** 包络的成员规则：至少一个、不能是流程节点、不能在别的包络里、不能重复出现。 */
 function groupMemberIssues(
   document: canvas.CanvasDocument,
   groupId: string,
   memberIds: readonly string[],
 ): readonly canvas.CanvasIssue[] {
   const issues: canvas.CanvasIssue[] = [];
-  if (memberIds.length < 2) {
-    issues.push(canvas.errorIssue('ownership_conflict', groupId, `包络至少要 2 个成员，收到 ${memberIds.length} 个`));
+  if (memberIds.length < 1) {
+    issues.push(canvas.errorIssue('ownership_conflict', groupId, `包络至少要 1 个成员，收到 ${memberIds.length} 个`));
   }
   const owners = canvas.ownerMapOf(document);
   const seen = new Set<string>();

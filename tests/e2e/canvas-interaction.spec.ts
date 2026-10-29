@@ -2,13 +2,11 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   addToolNode,
   dragBy,
-  dragBetween,
   inspectorOf,
   nodeIdOf,
   openChallenge,
   panelOf,
   placeInFlow,
-  portOf,
   readDocument,
   selectNode,
   stageOf,
@@ -16,21 +14,7 @@ import {
   type CanvasDocumentJson,
 } from './helpers';
 
-/**
- * 新版画布的交互回归（《节点画布大型修改》§6.1–§6.3；《改版计划》阶段三）。
- *
- * 覆盖的是「编辑一张图」的六条基本动作：
- * 1. 工具箱按目录分组，点一项就在空位加一个节点；
- * 2. 点选节点 → 检查器显示它的 id，侧栏改名同步到画布行，撤销恢复原值；
- * 3. 双击「值」行就地编辑：Enter 提交、Esc 取消；
- * 4. 拖动节点只改坐标、不改结构，Ctrl+Z 撤回；
- * 5. 从输入端口拉线接到别的节点上，Delete 删节点也能撤销；
- * 6. 空白处拖出选框，命中范围内的节点一起选中。
- *
- * 旧画布独有的交互（Blockly 节点库两级目录与搜索、拖入落点、缩放与适应窗口、
- * 点击—点击双模式接线、连线命中与端点改接）已随旧画布删除，这里不再保留用例。
- * 断言读数一律走面板公开的 `document`（见 `helpers.ts`），只有「看起来怎样」才查 DOM。
- */
+/** 按《节点画布UI与交互重构》验证节点库、侧栏配置、拖动、框选与撤销。 */
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要 PWN2BLOCK_E2E=1 和已启动的真实后端');
 
 /** 面板顶栏的修订号：每次文档变化 +1，用来确认编辑真的落进了文档。 */
@@ -101,27 +85,18 @@ test('点选节点后检查器显示 id，侧栏改名同步到画布行，撤�
   await expect(panelOf(page).locator(`.node-box[data-node="${id}"]`)).not.toContainText('count');
 });
 
-test('双击「值」行就地编辑：Enter 提交、Esc 取消（§6.1）', async ({ page }) => {
+test('节点只读展示，值在侧栏编辑并可撤销', async ({ page }) => {
   await openChallenge(page);
   await addToolNode(page, 'value');
   const id = await nodeIdOf(page, 'value');
-  const row = panelOf(page).locator(`.row.editable[data-node="${id}"]`).first();
-  const input = panelOf(page).locator('.row-input');
-
-  await row.dblclick();
-  await expect(input).toBeVisible();
-  await input.fill('7');
-  await input.press('Enter');
+  await selectNode(page, id);
+  const field = inspectorOf(page).locator('.field-value');
+  await field.fill('7');
+  await field.press('Tab');
   await expect.poll(async () => valueOf(await readDocument(page), id)).toBe('7');
-  await expect(input).toHaveCount(0);
-
-  // Esc 取消：输入框关掉，文档保持上一次提交的值。
-  await row.dblclick();
-  await expect(input).toBeVisible();
-  await input.fill('9');
-  await input.press('Escape');
-  await expect(input).toHaveCount(0);
-  expect(valueOf(await readDocument(page), id)).toBe('7');
+  await expect(panelOf(page).locator('.surface input, .surface select, [data-port]')).toHaveCount(0);
+  await panelOf(page).locator('.btn-undo').click();
+  await expect.poll(async () => valueOf(await readDocument(page), id)).toBe('0');
 });
 
 test('拖动节点只改坐标，松手后写回文档，Ctrl+Z 撤回（§6.2）', async ({ page }) => {
@@ -149,7 +124,7 @@ test('拖动节点只改坐标，松手后写回文档，Ctrl+Z 撤回（§6.2�
   await expect.poll(async () => (await readDocument(page)).layout[id]?.x).toBe(before.x);
 });
 
-test('从输入端口拉线接到别的节点，Delete 删节点可撤销（§6.3）', async ({ page }) => {
+test('侧栏配置方法数据来源，Delete 删节点可撤销', async ({ page }) => {
   // 端口来自题目声明的公开方法：`gets(buf)` 只有 ret2win 有，别的题目上根本没有这个方法可选。
   await openChallenge(page, 'ret2win');
   await addToolNode(page, 'method');
@@ -161,13 +136,10 @@ test('从输入端口拉线接到别的节点，Delete 删节点可撤销（§6.
   await placeInFlow(page, methodId);
   await selectNode(page, methodId);
   await inspectorOf(page).locator('.field-block').selectOption('gets');
-  const port = portOf(page, methodId, 'data');
-  await expect(port).toHaveClass(/\bhollow\b/);
-
-  // 新版画布只有输入端口：接线 = 把端口拖到提供值的节点身上。
-  await dragBetween(page, port, panelOf(page).locator(`.node-box[data-node="${valueId}"]`));
+  await expect(inspectorOf(page).locator('.field-param-data')).toHaveValue('');
+  await inspectorOf(page).locator('.field-param-data').selectOption(valueId);
   await expect.poll(async () => argsOf(await readDocument(page), methodId)?.['data']).toBe(valueId);
-  await expect(portOf(page, methodId, 'data')).toHaveClass(/\bconnected\b/);
+  await expect(panelOf(page).locator('[data-port]')).toHaveCount(0);
 
   // Delete 删掉选中的方法节点；撤销把它连同那条接线一起装回来。
   await selectNode(page, methodId);

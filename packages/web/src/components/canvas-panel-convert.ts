@@ -1,9 +1,9 @@
+import { dissolveEnvelope } from '../canvas/editor-envelope';
 import { html, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
 import {
   newNodeId,
-  unwrapConversion,
   wrapInConversion,
   type CanvasEdit,
   type WrapConversionResult,
@@ -15,7 +15,7 @@ import { convertWrapCaptionOf, convertWrapTargetOf } from './canvas-panel-wrap-t
  * 侧栏的「转换包络」入口（需求 §4.1、§6.3，验收表 AT-14）。
  *
  * 三件事：把选中集交给 `convertWrapTargetOf` 判定（`canvas-panel-wrap-target.ts`）、
- * 把结果落到命令层（`wrapInConversion` / `unwrapConversion`）、把按钮画出来（`renderConvertActions`）。
+ * 把结果落到命令层（`wrapInConversion` / `dissolveEnvelope`）、把按钮画出来（`renderConvertActions`）。
  * 界面**不自己拼文档**：能不能包、包完连接接到哪，全由 `canvas/editor-convert` 判断，
  * 拒绝原因照原样报到顶栏，不静默失败。
  *
@@ -87,7 +87,7 @@ function unwrapSelected(host: ConvertHost, document: canvas.CanvasDocument): voi
     host.report('先选中一个转换包络再解除');
     return;
   }
-  host.applyEdit(unwrapConversion(document, convertId));
+  host.applyEdit(dissolveEnvelope(document, convertId));
 }
 
 // ---------------------------------------------------------------------------

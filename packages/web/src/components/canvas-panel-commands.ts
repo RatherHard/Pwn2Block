@@ -1,13 +1,11 @@
+import { detachChainMember, snapData } from '../canvas/editor-chain';
 import { canvas } from '@pwn2block/shared';
 import {
-  addExistingNode,
   addNode,
   connect,
-  createGroup,
   createReference,
   createVariable,
   disconnect,
-  dissolveGroup,
   edited,
   insertStatement,
   moveMember,
@@ -19,6 +17,8 @@ import {
   regionSequenceOf,
   renameVariable,
   setRelationOp,
+  setGroupMode,
+  setBinding,
   setUnaryOp,
   setValue,
   type CanvasEdit,
@@ -31,20 +31,7 @@ import { FLOW_DATA_REFUSAL } from './canvas-panel-flow-drop';
 import { applyMethodArgEdit, methodArgTextOf } from './canvas-panel-method-args';
 import { boxAtPoint, portAtPoint, rectsIntersect, type DropTarget } from './canvas-panel-geometry';
 
-/**
- * 面板对编辑命令的**适配层**（阶段三「界面事件 → `canvas/editor` 命令」）。
- *
- * 为什么单独一层：面板里每个控件都知道「用户改了什么字段」，但只有这里知道「该调哪条命令」。
- * 把映射集中起来，界面就不再直接改文档，所有写入都经过命令层的检查（类型、成环、上限）。
- *
- * 这个文件管**画布上的动作**：就地编辑、点方框换运算、加节点、拖动落位。
- * 侧栏字段那一半在 `canvas-panel-inspector-changes.ts`，两边一起从这里再导出，
- * 调用方只认一个入口。
- *
- * 一条硬边界：**命令层没有的能力不在这里手写**。组合成员只能整体建立（`createGroup`），
- * 没有「往已有组合里加一个成员」的命令，所以拖进别人的组合会被明确拒绝并给出替代路径，
- * 而不是绕开命令去改 `rows`。
- */
+/** 界面动作到画布编辑命令的适配：侧栏编辑、关系切换、加节点与吸附落位。 */
 
 export * from './canvas-panel-inspector-changes';
 
@@ -59,10 +46,10 @@ export function defaultDocument(): canvas.CanvasDocument {
 }
 
 // ---------------------------------------------------------------------------
-// 就地编辑
+// 侧栏值编辑
 // ---------------------------------------------------------------------------
 
-/** 就地编辑框里的初始文本：字面值按种类给「能再解析回来」的写法。 */
+/** 侧栏值编辑框里的初始文本：字面值按种类给「能再解析回来」的写法。 */
 export function editableTextOf(document: canvas.CanvasDocument, nodeId: string, rowLabel: string): string | undefined {
   const node = nodeOf(document, nodeId);
   if (node === undefined) return undefined;
@@ -72,7 +59,7 @@ export function editableTextOf(document: canvas.CanvasDocument, nodeId: string, 
 }
 
 /**
- * 提交一次就地编辑；这一行不可编辑时返回 `undefined`。
+ * 提交一次侧栏值编辑；这一行不可编辑时返回 `undefined`。
  *
  * 方法参数行要知道题目声明的参数类型（没接线时按它新建字面值），所以多收一份方法目录。
  */
@@ -98,7 +85,7 @@ export function applyRowEdit(
  * 字面值的编辑文本。
  *
  * 字节串与整数原样给（`4141`、`-3`），文本不去动引号，布尔给「真/假」——
- * 提交时反向解析同一套写法，所以「双击看到什么就改什么」。
+ * 提交时反向解析同一套写法，所以「显示什么就编辑什么」。
  */
 function literalTextOf(value: canvas.EncodedScalarValue): string {
   switch (value.kind) {
@@ -160,6 +147,13 @@ function intTextOf(text: string): string {
 export function cycleOperator(document: canvas.CanvasDocument, nodeId: string): CanvasEdit | undefined {
   const node = nodeOf(document, nodeId);
   if (node === undefined) return undefined;
+  if (node.kind === 'var-decl' && node.binding.mode !== 'none') return setBinding(document, nodeId, { mode: node.binding.mode === 'initial' ? 'derived' : 'initial', input: node.binding.input });
+  if (node.kind === 'group') {
+    const types = canvas.groupMembers(node).map((id) => canvas.staticTypeOf(document, id));
+    const canMerge = types.length > 0 && (types[0] === 'byte' || types[0] === 'string') && types.every((type) => type === types[0]);
+    if (node.mode === 'list' && !canMerge) return refuse(document, 'unknown_kind', nodeId, '只有同类文本或字节串可以切换为连接串');
+    return setGroupMode(document, nodeId, node.mode === 'merge' ? 'list' : 'merge');
+  }
   if (node.kind === 'relation') return setRelationOp(document, nodeId, nextOf(binaryCycleOf(node.op), node.op));
   if (node.kind === 'unary') {
     const cycle = unaryCycleOf(document, node);
@@ -289,18 +283,7 @@ export interface DropOutcome {
   readonly message?: string;
 }
 
-/**
- * 松手落位。
- *
- * - 落在自己所属组合的行带上 → `moveMember`（组内换行、换列）；
- * - 落在流程序列的带上 → 已经排进序列就 `moveStatementTo`（换位、跨区域），还没排就 `insertStatement`；
- * - 落在另一个节点上 → `createGroup`（吸附成组）；
- * - 落在空白且自己属于组合 → 移出组合：两个成员时直接 `dissolveGroup`，
- *   更多成员时用「解除 + 按原行列重建」表达「只移出这一个」（仍是可撤销的一步）；
- * - 落在空白而自己是流程语句 → **只改坐标，仍在原序列里**：流程带很窄，松手偏一点就
- *   悄悄掉出流程会毁掉整份程序；要换序列就拖到另一条序列的带上。
- * - 落在别人的组合里 → 明确拒绝：命令层没有「往已有组合加成员」这条命令。
- */
+/** 同组重排、流程插位、数据吸附；拖到空白处则脱离并收拢剩余链条。 */
 export function dropEditOf(
   document: canvas.CanvasDocument,
   target: DropTarget | undefined,
@@ -314,19 +297,11 @@ export function dropEditOf(
     if (owner === target.groupId) {
       return { edit: moveMember(document, target.groupId, memberId, target.rowIndex, target.columnIndex) };
     }
-    return {
-      edit: edited(document),
-      message: '组合成员只能整体创建：按住 Shift 选中两个以上节点后点「成组」',
-    };
+    return { edit: snapData(document, target.groupId, memberId) };
   }
-  if (target.kind === 'node') {
-    if (owner !== undefined) {
-      return { edit: edited(document), message: `「${memberId}」已经属于组合「${owner}」，先在组外释放再重新成组` };
-    }
-    return { edit: createGroup(document, [target.nodeId, memberId], newNodeId(document, 'group')) };
-  }
-  if (owner === undefined) return { edit: edited(document) };
-  return detachMember(document, owner, memberId);
+  if (target.kind === 'node') return { edit: snapData(document, target.nodeId, memberId) };
+  if (target.kind === 'stage') return { edit: detachChainMember(document, memberId) };
+  return { edit: edited(document) };
 }
 
 /**
@@ -372,20 +347,4 @@ function startAwareIndex(document: canvas.CanvasDocument, region: canvas.FlowReg
   if (region.kind !== 'main' || index > 0) return index;
   const head = document.main[0] === undefined ? undefined : nodeOf(document, document.main[0]);
   return head !== undefined && head.kind === 'start' ? 1 : index;
-}
-
-/** 把一个成员从组合里移出：两成员时整组解除，更多成员时解除后按原行列重建。 */
-function detachMember(document: canvas.CanvasDocument, groupId: string, memberId: string): DropOutcome {
-  const group = nodeOf(document, groupId);
-  if (group === undefined || group.kind !== 'group') return { edit: edited(document) };
-  if (canvas.groupMembers(group).length <= 2) {
-    return { edit: dissolveGroup(document, groupId), message: '组合只剩两个成员，已解除包络' };
-  }
-  const position = document.layout[groupId] ?? { x: 0, y: 0 };
-  const rows = group.rows
-    .map((row) => row.filter((id) => id !== memberId))
-    .filter((row) => row.length > 0);
-  const dissolved = dissolveGroup(document, groupId).document;
-  const rebuilt = addExistingNode(dissolved, { ...group, rows }, position);
-  return { edit: rebuilt, message: `已把「${memberId}」移出组合「${groupId}」` };
 }

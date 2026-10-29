@@ -1,3 +1,4 @@
+import { structureIds } from '../canvas/structure';
 import { canvas } from '@pwn2block/shared';
 import { regionLabel, regionRefsOf, regionSequenceOf } from '../canvas/editor';
 import type { Point, Rect } from '../canvas/view-model';
@@ -39,7 +40,7 @@ const SLOT_THICKNESS = 4;
 const EMPTY_SLOT_INSET = 8;
 
 /** 数据节点落在流程带上的唯一一句原因：吸附提示与松手提示共用，避免两处说法不一致。 */
-export const FLOW_DATA_REFUSAL = '数据节点不进流程；把它接到需要它的端口上';
+export const FLOW_DATA_REFUSAL = '数据节点不进流程；在侧栏配置需要它的输入来源';
 
 /** 一次流程落位：进哪条序列、排第几步（0 基）、指示条画在哪。 */
 export interface FlowDropTarget {
@@ -113,7 +114,9 @@ function singleIdOf(dragged: readonly string[]): string | undefined {
 function bandHitsOf(input: FlowDropInput): readonly BandHit[] {
   const hits: BandHit[] = [];
   const empty: EmptyZone[] = [];
+  const excluded = new Set(input.dragged.flatMap((id) => structureIds(input.document, id)));
   for (const region of regionRefsOf(input.document)) {
+    if (excluded.has(region.ownerId)) continue;
     const sequence = regionSequenceOf(input.document, region);
     if (sequence === undefined) continue;
     const rects = memberRectsOf(sequence, input.rectOf);
@@ -148,7 +151,7 @@ function filledHitOf(region: canvas.FlowRegionRef, rects: readonly Rect[], point
     return { region, index: rects.length, slot: appendSlotOf(band, bottom), centerY };
   }
   if (!containsPoint(inflateRect(band, FLOW_SNAP_HALO), point)) return undefined;
-  const index = insertIndexOf(rects, point.x);
+  const index = insertIndexOf(rects, point);
   return { region, index, slot: insertSlotOf(rects, band, index), centerY };
 }
 
@@ -159,10 +162,11 @@ function isAppendPoint(point: Point, band: Rect, bottom: number): boolean {
 }
 
 /** 插到第几步：比第 k 个成员的盒子中心靠左就插在 k。 */
-function insertIndexOf(rects: readonly Rect[], x: number): number {
+function insertIndexOf(rects: readonly Rect[], point: Point): number {
+  const vertical = isVertical(rects);
   let index = 0;
   for (const rect of rects) {
-    if (rect.x + rect.width / 2 < x) index += 1;
+    if (vertical ? rect.y + rect.height / 2 < point.y : rect.x + rect.width / 2 < point.x) index += 1;
   }
   return index;
 }
@@ -171,6 +175,11 @@ function insertIndexOf(rects: readonly Rect[], x: number): number {
 function insertSlotOf(rects: readonly Rect[], band: Rect, index: number): Rect {
   const previous = index === 0 ? undefined : rects[index - 1];
   const next = index >= rects.length ? undefined : rects[index];
+  if (isVertical(rects)) {
+    const top = previous === undefined ? band.y : previous.y + previous.height;
+    const bottom = next === undefined ? band.y + band.height : next.y;
+    return { x: band.x, y: (top + bottom) / 2, width: band.width, height: SLOT_THICKNESS };
+  }
   const left = previous === undefined ? band.x : previous.x + previous.width;
   const right = next === undefined ? band.x + band.width : next.x;
   return {
@@ -247,4 +256,11 @@ function nearestHitOf(hits: readonly BandHit[], point: Point): BandHit | undefin
 
 function distanceOf(hit: BandHit, point: Point): number {
   return Math.abs(point.y - hit.centerY);
+}
+
+function isVertical(rects: readonly Rect[]): boolean {
+  if (rects.length < 2) return false;
+  const xs = rects.map((rect) => rect.x + rect.width / 2);
+  const ys = rects.map((rect) => rect.y + rect.height / 2);
+  return Math.max(...ys) - Math.min(...ys) > Math.max(...xs) - Math.min(...xs);
 }

@@ -233,7 +233,7 @@ describe('画布面板：侧栏', () => {
         layout: { c1: { x: 40, y: 40 } },
       }),
     );
-    requireElement(panel, '.relation-box[data-node="c1"]').click();
+    requireElement(panel, '.relation-box[data-relation="c1"]').click();
     await settle(panel);
     const select = rootOf(panel).querySelector('.field-param-width');
     if (!(select instanceof HTMLSelectElement)) throw new Error('侧栏没有宽度参数');

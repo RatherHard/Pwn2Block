@@ -6,7 +6,6 @@ import type {
   CanvasFlowPortView,
   CanvasLayoutView,
   CanvasRow,
-  Point,
   Rect,
 } from '../canvas/view-model';
 import { orthogonalPath, relationToneOf, surfaceSizeOf } from './canvas-panel-geometry';
@@ -22,42 +21,12 @@ import { orthogonalPath, relationToneOf, surfaceSizeOf } from './canvas-panel-ge
  * 于是渲染函数是纯的（给定状态必然给出同一份模板），也就能脱离浏览器读结构。
  */
 
-/** 就地编辑的状态：哪个节点的第几行正在编辑、编辑框里的初始文本。 */
-export interface InlineEditState {
-  readonly nodeId: string;
-  readonly rowIndex: number;
-  readonly value: string;
-}
-
-/** 吸附预览：指示条画在哪、提示文案跟在鼠标哪一侧。 */
-export interface SnapState {
-  readonly slot: Rect;
-  readonly hint: Point;
-  readonly label: string;
-}
-
-/** 连线拖动中的橡皮筋。 */
-export interface WireState {
-  readonly from: Point;
-  readonly to: Point;
-}
-
 /** 渲染一层需要的全部状态。 */
 export interface StageState {
   readonly document: canvas.CanvasDocument;
   readonly view: CanvasLayoutView;
   readonly selection: readonly string[];
-  readonly editing: InlineEditState | undefined;
-  readonly snap: SnapState | undefined;
   readonly marquee: Rect | undefined;
-  readonly wire: WireState | undefined;
-  readonly highlight: string | undefined;
-}
-
-/** 行内输入框的事件处理器（面板外壳提供，渲染层只负责挂上）。 */
-export interface RowHandlers {
-  readonly rowKeyDown: (event: KeyboardEvent) => void;
-  readonly rowBlur: (event: FocusEvent) => void;
 }
 
 /** SVG 里两类连线各自的箭头；数据边用地址灰、流程边用栈青，与线色一致。 */
@@ -72,14 +41,14 @@ const ARROW_FILLS: Readonly<Record<'data' | 'flow', string>> = {
   flow: 'var(--p2b-stack)',
 };
 
-/** 整张画布：连线层 → 包络 → 盒子 → 端口（数据 + 流程）→ 预览层。 */
-export function renderStage(state: StageState, handlers: RowHandlers): TemplateResult {
+/** 整张画布：连线层 → 包络 → 盒子 → 外置流程连接点 → 框选层。 */
+export function renderStage(state: StageState): TemplateResult {
   const size = surfaceSizeOf(state.view.boxes);
   return html`<div class="surface" style=${`width:${size.width}px;height:${size.height}px`}>
     ${renderEdges(state, size)}
-    ${state.view.boxes.map((box) => renderBox(box, state, handlers))}
-    ${state.view.ports.map((port) => renderPort(port, state.selection))} ${state.view.flowPorts.filter(isFlowPortConnected).map(renderFlowPort)}
-    ${renderSnap(state.snap)} ${renderMarquee(state.marquee)}
+    ${state.view.boxes.map((box) => renderBox(box, state))}
+    ${state.view.flowPorts.filter(isFlowPortConnected).map(renderFlowPort)}
+    ${renderMarquee(state.marquee)}
   </div>`;
 }
 
@@ -105,12 +74,6 @@ function renderEdges(state: StageState, size: { readonly width: number; readonly
           marker-end=${`url(#${ARROW_IDS[edge.kind]})`}
         ></path>`,
     )}
-    ${state.wire === undefined
-      ? nothing
-      : html`<path
-          class="edge edge-wire"
-          d=${`M ${state.wire.from.x} ${state.wire.from.y} L ${state.wire.to.x} ${state.wire.to.y}`}
-        ></path>`}
   </svg>`;
 }
 
@@ -118,11 +81,11 @@ function renderEdges(state: StageState, size: { readonly width: number; readonly
 // 盒子
 // ---------------------------------------------------------------------------
 
-function renderBox(box: CanvasBox, state: StageState, handlers: RowHandlers): TemplateResult {
+function renderBox(box: CanvasBox, state: StageState): TemplateResult {
   if (box.kind === 'group') return renderGroupBox(box);
   if (box.kind === 'envelope') return renderEnvelopeBox(box);
   if (box.kind === 'relation') return renderRelationBox(box, state);
-  return renderNodeBox(box, state, handlers);
+  return renderNodeBox(box, state);
 }
 
 /**
@@ -137,55 +100,45 @@ const TONE_LABELS: Readonly<Record<CanvasBox['tone'], string>> = {
   method: '方法',
 };
 
-/** 白框节点：反显白底，标题栏带分类标签，行在下方（需求 §6.1）。 */
-function renderNodeBox(box: CanvasBox, state: StageState, handlers: RowHandlers): TemplateResult {
+/** 白色边框节点：标题栏带分类标签，数据行只读展示。 */
+function renderNodeBox(box: CanvasBox, state: StageState): TemplateResult {
   const rows = state.view.rowsByNode.get(box.nodeId) ?? [];
   return html`<div
-    class=${classesOf(['node-box', `tone-${box.tone}`, selectionClass(box, state), highlightClass(box, state)])}
+    class=${classesOf(['node-box', `tone-${box.tone}`, selectionClass(box, state)])}
     data-node=${box.nodeId}
     style=${rectStyle(box)}
   >
-    <div class="title-bar">
+    <div class="title-bar" data-group-title=${['loop', 'if'].includes(nodeOfNodeId(state.document, box.nodeId)?.kind ?? '') ? box.nodeId : nothing}>
       <span class="tone-tag">${TONE_LABELS[box.tone]}</span>
       <div class="title" title=${box.title}>${box.title}</div>
     </div>
     ${box.subtitle === undefined ? nothing : html`<div class="subtitle">${box.subtitle}</div>`}
-    ${rows.map((row, index) => renderRow(box.nodeId, row, index, state, handlers))}
+    ${rows.map((row, index) => renderRow(box.nodeId, row, index))}
   </div>`;
 }
 
-/** 一行：左标签右值；正在编辑的那一行换成输入框。 */
+/** 只读数据行：左标签右值，配置统一在侧栏完成。 */
 function renderRow(
   nodeId: string,
   row: CanvasRow,
   index: number,
-  state: StageState,
-  handlers: RowHandlers,
 ): TemplateResult {
-  const editing = state.editing !== undefined && state.editing.nodeId === nodeId && state.editing.rowIndex === index;
-  const rowClasses = classesOf(['row', row.editable ? 'editable' : '', row.severity === 'error' ? 'row-error' : '']);
-  return html`<div class=${rowClasses} data-row=${index} data-node=${nodeId} title=${`${row.label}：${row.value}`}>
-    <span class="row-label">${row.label}</span>
-    ${editing
-      ? html`<input
-          class="row-input"
-          .value=${state.editing?.value ?? ''}
-          @keydown=${handlers.rowKeyDown}
-          @blur=${handlers.rowBlur}
-        />`
-      : html`<span class="row-value">${row.value}</span>`}
+  return html`<div class=${row.severity === 'error' ? 'row row-error' : 'row'} data-row=${index} data-node=${nodeId} title=${`${row.label}：${row.value}`}>
+    <span class="row-label">${row.label}</span><span class="row-value">${row.value}</span>
   </div>`;
 }
 
 /** 关系方框：彩色小方框 + 标号，悬停给完整文案，点击切换运算（需求 §6.1）。 */
 function renderRelationBox(box: CanvasBox, state: StageState): TemplateResult {
   const node = nodeOfNodeId(state.document, box.nodeId);
-  const tone = node === undefined ? 'arith' : relationToneOf(node);
+  const tone = node?.kind === 'group' ? 'compare' : node === undefined ? 'arith' : relationToneOf(node);
   const text = node === undefined ? box.title : relationTextOf(node, box);
   return html`<div
-    class=${classesOf(['relation-box', `cat-${tone}`, selectionClass(box, state), highlightClass(box, state)])}
-    data-node=${box.nodeId}
+    class=${classesOf(['relation-box', `cat-${tone}`, selectionClass(box, state)])}
+    role="button" tabindex="0" aria-label=${relationTitleOf(node, box)}
+    @keydown=${(event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); (event.currentTarget as HTMLElement).click(); } }}
     data-relation=${box.nodeId}
+    data-group-title=${node?.kind === 'convert' ? box.nodeId : nothing}
     style=${rectStyle(box)}
     title=${`${relationTitleOf(node, box)}（点击切换运算）`}
   >
@@ -193,11 +146,11 @@ function renderRelationBox(box: CanvasBox, state: StageState): TemplateResult {
   </div>`;
 }
 
-/** 组合包络：虚线框 + 可拖动的标题（拖标题 = 整组移动，需求 §6.2）。 */
+/** 组合包络：实线框 + 可拖动的标题（拖标题 = 整组移动，需求 §6.2）。 */
 function renderGroupBox(box: CanvasBox): TemplateResult {
   const subtitle = box.subtitle === undefined ? '' : ` · ${box.subtitle}`;
   return html`<div class="group-box" data-group=${box.nodeId} style=${rectStyle(box)}>
-    <div class="group-title" data-group-title=${box.nodeId} title="拖动标题可整组移动">
+    <div class="group-title" data-group-title=${box.nodeId} title="拖动包络可整体移动，点击在侧栏编辑">
       ${`${box.title}${subtitle}`}
     </div>
   </div>`;
@@ -206,7 +159,7 @@ function renderGroupBox(box: CanvasBox): TemplateResult {
 /** 转换包络：只画虚线框与标题，内部结构照常画在上面。 */
 function renderEnvelopeBox(box: CanvasBox): TemplateResult {
   return html`<div class="envelope-box" data-envelope=${box.nodeId} style=${rectStyle(box)}>
-    <div class="envelope-title">${box.title}</div>
+    <div class="envelope-title" data-group-title=${box.nodeId}>包络</div>
   </div>`;
 }
 
@@ -214,23 +167,6 @@ function renderEnvelopeBox(box: CanvasBox): TemplateResult {
  * 端口小方框：已接线实心、未接线空心（需求 §6.1「连接点在节点外部」）。
  * 平时是低调的灰框，所在节点被选中时提亮（`active`）——要拉线的时候才需要看清它。
  */
-function renderPort(port: CanvasLayoutView['ports'][number], selection: readonly string[]): TemplateResult {
-  const portClasses = classesOf([
-    'port',
-    port.connected ? 'connected' : 'hollow',
-    port.severity === 'error' ? 'port-error' : '',
-    selection.includes(port.nodeId) ? 'active' : '',
-  ]);
-  const state = port.connected ? '已接线' : '未接线';
-  return html`<div
-    class=${portClasses}
-    data-node=${port.nodeId}
-    data-port=${port.name}
-    style=${`left:${port.x}px;top:${port.y}px`}
-    title=${`${port.label}：${state}（拖到另一个端口接线，拖到空白断开）`}
-  ></div>`;
-}
-
 /** 流程连接点只画已接线的那一端：序列首步没有入口、末步没有出口，画出来就是悬空的小方框。 */
 function isFlowPortConnected(port: CanvasFlowPortView): boolean {
   return port.connected;
@@ -258,14 +194,6 @@ function renderFlowPort(port: CanvasFlowPortView): TemplateResult {
 // 预览层
 // ---------------------------------------------------------------------------
 
-function renderSnap(snap: SnapState | undefined): TemplateResult | typeof nothing {
-  if (snap === undefined) return nothing;
-  return html`<div>
-    <div class="snap-slot" style=${rectStyle(snap.slot)}></div>
-    <div class="snap-hint" style=${`left:${snap.hint.x}px;top:${snap.hint.y}px`}>${snap.label}</div>
-  </div>`;
-}
-
 function renderMarquee(marquee: Rect | undefined): TemplateResult | typeof nothing {
   if (marquee === undefined) return nothing;
   return html`<div class="marquee" style=${rectStyle(marquee)}></div>`;
@@ -280,6 +208,7 @@ function renderMarquee(marquee: Rect | undefined): TemplateResult | typeof nothi
  * 需求 §6.1 要求「不能只靠颜色区分」，所以方框里一定有文字。
  */
 function relationTextOf(node: canvas.CanvasNode, box: CanvasBox): string {
+  if (node.kind === 'group') return node.mode === 'list' ? '组成列表' : '连接串';
   if (node.kind === 'relation') return canvas.binaryOperatorSpec(node.op).symbol;
   if (node.kind === 'unary') return canvas.unaryOperatorSpec(node.op).symbol;
   return box.title;
@@ -299,10 +228,6 @@ function nodeOfNodeId(document: canvas.CanvasDocument, nodeId: string): canvas.C
 
 function selectionClass(box: CanvasBox, state: StageState): string {
   return state.selection.includes(box.nodeId) ? 'selected' : '';
-}
-
-function highlightClass(box: CanvasBox, state: StageState): string {
-  return state.highlight === box.nodeId ? 'highlight' : '';
 }
 
 function classesOf(items: readonly string[]): string {

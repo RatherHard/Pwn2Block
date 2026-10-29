@@ -1,6 +1,9 @@
+import { dissolveEnvelope } from '../canvas/editor-envelope';
 import { canvas } from '@pwn2block/shared';
 import type { AuthorBlock } from '@pwn2block/shared';
 import {
+  connect,
+  disconnect,
   edited,
   insertRowAfter,
   isConversionKind,
@@ -18,7 +21,6 @@ import {
   setRelationOp,
   setUnaryOp,
   setValue,
-  unwrapConversion,
   type CanvasEdit,
 } from '../canvas/editor';
 import { defaultEncodedValue } from '../canvas/catalog';
@@ -42,6 +44,8 @@ export function firstValueNodeId(document: canvas.CanvasDocument): string | unde
 
 /** 侧栏能发出的语义变更；渲染层只描述「改了什么」，不碰命令。 */
 export type InspectorChange =
+  | { readonly kind: 'literal'; readonly value: string }
+  | { readonly kind: 'input-ref'; readonly port: string; readonly source: string }
   | { readonly kind: 'field'; readonly key: string; readonly value: string }
   | { readonly kind: 'conversion-kind'; readonly conversion: string }
   | { readonly kind: 'conversion-param'; readonly param: string; readonly value: string }
@@ -76,6 +80,8 @@ export function applyInspectorChange(
   const node = nodeOf(document, nodeId);
   if (node === undefined) return undefined;
   switch (change.kind) {
+    case 'input-ref':
+      return change.source === '' ? disconnect(document, nodeId, change.port) : connect(document, nodeId, change.port, change.source);
     case 'field':
       return applyFieldChange(document, nodeId, change.key, change.value, ctx);
     case 'conversion-kind':
@@ -114,7 +120,7 @@ export function applyInspectorChange(
       // 转换包络与流程包络一样作用在**整段选区**上，所以包的是 `selection` 而不是当前节点。
       return wrapConvertEdit(document, ctx.selection ?? [nodeId]).edit;
     case 'unwrap-convert':
-      return unwrapConversion(document, nodeId);
+      return dissolveEnvelope(document, nodeId);
   }
 }
 

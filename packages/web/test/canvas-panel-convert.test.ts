@@ -96,7 +96,7 @@ function requireButton(panel: CanvasPanelElement, selector: string): HTMLButtonE
 function clickNode(panel: CanvasPanelElement, nodeId: string, shiftKey = false): void {
   const element =
     rootOf(panel).querySelector(`.node-box[data-node="${nodeId}"]`) ??
-    rootOf(panel).querySelector(`.relation-box[data-node="${nodeId}"]`);
+    rootOf(panel).querySelector(`.relation-box[data-relation="${nodeId}"]`);
   if (!(element instanceof HTMLElement)) throw new Error(`找不到节点 ${nodeId}`);
   const init = { clientX: 0, clientY: 0, bubbles: true, cancelable: true, button: 0, shiftKey };
   element.dispatchEvent(new MouseEvent('pointerdown', init));
@@ -137,7 +137,7 @@ describe('画布面板：包络为转换', () => {
     expect(rootOf(panel).querySelector('.btn-unwrap-convert')).not.toBeNull();
   });
 
-  it('选中转换节点点「解除转换」：转换消失，组合与成员还在', async () => {
+  it('选中转换节点点「解除转换」：转换与包络消失，内部成员保留', async () => {
     const panel = await mount(wrappedDocument());
     clickNode(panel, 'c1');
     await settle(panel);
@@ -145,7 +145,7 @@ describe('画布面板：包络为转换', () => {
     await settle(panel);
 
     expect(panel.document?.nodes.some((node) => node.kind === 'convert')).toBe(false);
-    expect(nodeOf(panel, 'g1')).toMatchObject({ kind: 'group', rows: [['v1', 'v2']] });
+    expect(panel.document?.nodes.some((node) => node.id === 'g1')).toBe(false);
     expect(nodeOf(panel, 'v1')).toMatchObject({ kind: 'value' });
     expect(nodeOf(panel, 'v2')).toMatchObject({ kind: 'value' });
   });

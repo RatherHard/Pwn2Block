@@ -1,3 +1,4 @@
+import { structureIds } from '../canvas/structure';
 import { canvas } from '@pwn2block/shared';
 import type { CanvasBox, CanvasEdgeView, CanvasLayoutView, CanvasPortView, Point, Rect } from '../canvas/view-model';
 import { containsPoint, inflateRect, unionRects } from '../canvas/view-model-geometry';
@@ -198,7 +199,7 @@ export function dropTargetOf(query: DropQuery): DropTarget {
     }
   }
   if (query.flow !== undefined) return query.flow;
-  const box = boxAtPoint(query.boxes, query.point);
+  const box = [...query.boxes].reverse().find((candidate) => !query.dragged.includes(candidate.nodeId) && candidate.kind === 'node' && containsPoint(inflateRect(candidate, DROP_HALO), query.point));
   if (box !== undefined && !query.dragged.includes(box.nodeId)) {
     return { kind: 'node', nodeId: box.nodeId, slot: rectOfBox(box) };
   }
@@ -275,12 +276,21 @@ export function dropTargetFor(
   dragged: readonly string[],
 ): DropTarget | undefined {
   const rects = new Map<string, Rect>();
-  for (const box of view.boxes) rects.set(box.nodeId, rectOfBox(box));
+  for (const box of view.boxes) {
+    if (box.kind !== 'relation' || !rects.has(box.nodeId)) rects.set(box.nodeId, rectOfBox(box));
+  }
+  const excluded = new Set(dragged.flatMap((id) => structureIds(document, id)));
   const owners = canvas.ownerMapOf(document);
   const rectOf = (nodeId: string): Rect | undefined => rects.get(nodeId);
   return dropTargetOf({
     point,
-    boxes: view.boxes,
+    boxes: view.boxes.filter((box) => {
+      if (excluded.has(box.nodeId)) return false;
+      if (box.kind === 'group') return true;
+      const source = document.nodes.find((node) => node.id === dragged[0]);
+      const target = document.nodes.find((node) => node.id === box.nodeId);
+      return source !== undefined && target !== undefined && canvas.isValueNode(source) && (canvas.isValueNode(target) || target.kind === 'var-decl');
+    }),
     rectOf,
     rowsOf: (groupId: string) => {
       const node = document.nodes.find((item) => item.id === groupId);

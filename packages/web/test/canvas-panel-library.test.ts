@@ -72,9 +72,9 @@ afterEach(() => {
 });
 
 describe('节点库：分页分级', () => {
-  it('默认「全部」：十八种都可见，分类下按小类分段', async () => {
+  it('默认显示分类入口，返回后恢复分类页', async () => {
     const panel = await mount();
-    expect(shownKinds(panel)).toHaveLength(18);
+    expect(shownKinds(panel)).toHaveLength(0);
     const tiers = [...rootOf(panel).querySelectorAll('.toolbox-group[data-category="collection"] .tier-label')];
     expect(tiers.map((element) => element.textContent)).toEqual(['组装', '取用', '变换']);
   });
@@ -107,7 +107,7 @@ describe('节点库：分页分级', () => {
     expect(panel.document?.nodes.map((node) => node.kind)).toEqual(['start', 'slice']);
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
     await settle(panel);
-    expect(shownKinds(panel)).toHaveLength(18);
+    expect(shownKinds(panel)).toHaveLength(0);
   });
 
   it('搜不到时给一句说明', async () => {
@@ -128,11 +128,11 @@ describe('节点库：分页分级', () => {
 });
 
 describe('节点库：预览', () => {
-  it('悬停白框节点：标题、行与输入端口来自同一份视图模型', async () => {
+  it('每个选项常驻预览，显示标题和行，不显示数据端口', async () => {
     const panel = await mount();
-    requireElement(panel, '.tool[data-kind="slice"]').dispatchEvent(new MouseEvent('mouseenter'));
+    requireElement(panel, '.library-tab[data-tab="collection"]').click();
     await settle(panel);
-    const preview = requireElement(panel, '.library-preview');
+    const preview = requireElement(panel, '.tool[data-kind="slice"] .library-preview');
     expect(preview.dataset['preview']).toBe('node:slice');
     expect(preview.querySelector('.preview-title')?.textContent).toBe('切片');
     expect([...preview.querySelectorAll('.preview-row .row-label')].map((element) => element.textContent)).toEqual([
@@ -141,7 +141,7 @@ describe('节点库：预览', () => {
       '步长',
       '预览',
     ]);
-    expect(preview.querySelectorAll('.preview-ports li').length).toBeGreaterThan(0);
+    expect(preview.querySelector('.preview-ports')).toBeNull();
     expect(preview.querySelector('.preview-usage')?.textContent).toContain('数据');
   });
 
@@ -158,7 +158,7 @@ describe('节点库：预览', () => {
     const panel = await mount();
     requireElement(panel, '.tool[data-kind="loop"]').dispatchEvent(new MouseEvent('mouseenter'));
     await settle(panel);
-    expect(requireElement(panel, '.preview-usage').textContent).toContain('流程语句');
+    expect(requireElement(panel, '.tool[data-kind="loop"] .preview-usage').textContent).toContain('流程语句');
   });
 });
 
@@ -166,7 +166,7 @@ describe('节点库：题目方法', () => {
   it('「方法」下列出本题方法，点一下得到选好方法、参数齐全的节点并选中它', async () => {
     const panel = await mount();
     const block = requireElement(panel, '.toolbox-group[data-category="method"] .tool-block[data-block="gets"]');
-    expect(block.textContent?.trim()).toBe('gets(buf)');
+    expect(block.textContent).toContain('gets(buf)');
     block.click();
     await settle(panel);
     const added = panel.document?.nodes.find((node) => node.kind === 'method');

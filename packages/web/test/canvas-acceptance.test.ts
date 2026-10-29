@@ -355,7 +355,8 @@ describe('AT-16 吸附、脱离、换行、删除组内成员并撤销', () => {
   it('吸附预览「新增一行」，落位后成为最后一行', () => {
     const document = gridDocument();
     const view = layoutCanvas({ document });
-    const target = groupTargetOf(dropTargetFor(document, view, { x: 100, y: 220 }, ['a']));
+    const last = view.boxes.find((box) => box.nodeId === 'd' && box.kind === 'node')!;
+    const target = groupTargetOf(dropTargetFor(document, view, { x: last.x + 10, y: last.y + last.height + 12 }, ['a']));
 
     expect(target.newRow).toBe(true);
     expect(target.rowIndex).toBe(groupRowsOf(document, 'g1').length);
@@ -386,7 +387,6 @@ describe('AT-16 吸附、脱离、换行、删除组内成员并撤销', () => {
     const document = gridDocument();
     const outcome = dropEditOf(document, { kind: 'stage', slot: { x: 0, y: 600, width: 0, height: 0 } }, ['d']);
 
-    expect(outcome.message).toContain('移出组合');
     const rows = groupRowsOf(outcome.edit.document, 'g1');
     expect(rows).toEqual([['a', 'b', 'c']]);
     expect(rows.every((row) => row.length > 0)).toBe(true);

@@ -115,6 +115,7 @@ export function buildDataEdges(
 ): readonly CanvasEdgeView[] {
   const edges: CanvasEdgeView[] = [];
   for (const node of nodes.values()) {
+    if (node.kind === 'group' || node.kind === 'relation' || node.kind === 'var-decl') continue;
     const target = layout.rectOf.get(node.id);
     if (target === undefined) continue;
     const refs = canvas.inputRefsOf(node);

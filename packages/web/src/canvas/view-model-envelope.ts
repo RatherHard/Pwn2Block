@@ -1,3 +1,4 @@
+import { structureChildren } from './structure';
 import { canvas } from '@pwn2block/shared';
 import { convertLabelOf } from './catalog';
 import {
@@ -105,7 +106,12 @@ function groupRectOf(state: EnvelopeState, nodeId: string): Rect | undefined {
 /** 一个成员占的地方：组合成员用它自己的包络，其余用它自己的盒子。 */
 function drawableRectOf(state: EnvelopeState, nodeId: string): Rect | undefined {
   const node = state.nodes.get(nodeId);
-  return node?.kind === 'group' ? groupRectOf(state, nodeId) : state.boxRectOf(nodeId);
+  if (node?.kind === 'group') return groupRectOf(state, nodeId);
+  if (node === undefined || !['relation', 'unary'].includes(node.kind) || state.visiting.has(nodeId)) return state.boxRectOf(nodeId);
+  state.visiting.add(nodeId);
+  const bounds = unionRects([nodeId, ...structureChildren(node)].flatMap((id) => id === nodeId ? state.boxRectOf(id) ?? [] : drawableRectOf(state, id) ?? []));
+  state.visiting.delete(nodeId);
+  return bounds;
 }
 
 /** 没有成员时组合包络用自身 layout 给 160×80（任务规则 5）。 */

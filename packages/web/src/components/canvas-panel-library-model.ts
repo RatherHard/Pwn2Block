@@ -4,7 +4,7 @@ import { CANVAS_CATALOG, CANVAS_CATEGORY_LABELS } from '../canvas/catalog';
 import type { CanvasNodeCategory } from '../canvas/catalog';
 
 /**
- * 节点库的**纯数据模型**：分页（分类标签页 + 页内翻页）、分级（分类 → 小类）、搜索与预览目标。
+ * 节点库的**纯数据模型**：分页（分类标签页 + 页内翻页）、分级（分类 → 小类）、搜索。
  *
  * 渲染层只认这里算出的「哪些条目可见、第几页、共几页」，自己不做筛选；所以分页与搜索的口径
  * 可以脱离 DOM 单测。两条硬约束：
@@ -20,16 +20,14 @@ export type LibraryTab = 'all' | CanvasNodeCategory;
 /** 节点库的状态：归面板持有，重渲染不丢。 */
 export interface LibraryState {
   readonly tab: LibraryTab;
-  /** 当前页（从 0 起）；只在单个分类标签页里生效。 */
+  /** 当前页（从 0 起）；分类和搜索结果均分页。 */
   readonly page: number;
   readonly query: string;
-  /** 正在预览的条目键；`undefined` 时预览区给提示。 */
-  readonly preview: string | undefined;
 }
 
-export const INITIAL_LIBRARY_STATE: LibraryState = { tab: 'all', page: 0, query: '', preview: undefined };
+export const INITIAL_LIBRARY_STATE: LibraryState = { tab: 'all', page: 0, query: '' };
 
-/** 单个分类标签页里每页最多几项。「全部」与搜索结果不分页（一眼看全更快）。 */
+/** 单个分类标签页里每页最多几项。分类及搜索结果统一分页。 */
 export const LIBRARY_PAGE_SIZE = 5;
 
 /** 节点库里的一项：目录节点或题目方法。 */
@@ -140,17 +138,16 @@ export interface LibraryPageView {
 /**
  * 按标签页、搜索与页码算出可见条目。
  *
- * 只有「单个分类 + 没有搜索词」才分页：搜索时用户要的是「一眼看到全部匹配」，翻页只会把结果藏起来。
+ * 分类和搜索结果都分页，避免常驻预览挤成过长的列表。
  * 页码越界（比如换了题目，方法变少）时收敛到最后一页，而不是给一页空白。
  */
 export function libraryPageOf(items: readonly LibraryItem[], state: LibraryState): LibraryPageView {
   const matched = items.filter(
     (item) => (state.tab === 'all' || item.category === state.tab) && matchesQuery(item, state.query),
   );
-  const paged = state.tab !== 'all' && state.query.trim() === '';
-  const pageCount = paged ? Math.max(1, Math.ceil(matched.length / LIBRARY_PAGE_SIZE)) : 1;
+  const pageCount = Math.max(1, Math.ceil(matched.length / LIBRARY_PAGE_SIZE));
   const page = Math.min(Math.max(0, state.page), pageCount - 1);
-  const shown = paged ? matched.slice(page * LIBRARY_PAGE_SIZE, (page + 1) * LIBRARY_PAGE_SIZE) : matched;
+  const shown = matched.slice(page * LIBRARY_PAGE_SIZE, (page + 1) * LIBRARY_PAGE_SIZE);
   return { visible: new Set(shown.map((item) => item.key)), page, pageCount, empty: shown.length === 0 };
 }
 

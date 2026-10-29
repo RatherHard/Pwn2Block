@@ -34,8 +34,8 @@ test('方法节点没选题目方法时编译失败，输出区能定位到出�
   const output = page.locator('pwn2block-app .output');
   await expect(output).toContainText('方法');
   await output.getByRole('button', { name: '定位积木' }).first().click();
-  // 定位只给 1.2s 的高亮，所以等的是「出现过」。
-  await expect(panel.locator(`.node-box.highlight[data-node="${methodId}"]`)).toBeVisible();
+  // 定位后保持选中，便于继续从侧栏修正配置。
+  await expect(panel.locator(`.node-box.selected[data-node="${methodId}"]`)).toBeVisible();
 });
 
 test('新档损坏时不回退到旧档，原文与旧键都原样保留', async ({ page }) => {

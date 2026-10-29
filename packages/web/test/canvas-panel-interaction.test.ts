@@ -77,9 +77,6 @@ function nodeEl(panel: CanvasPanelElement, nodeId: string): HTMLElement {
   return requireElement(panel, `.node-box[data-node="${nodeId}"]`);
 }
 
-function portEl(panel: CanvasPanelElement, nodeId: string, name: string): HTMLElement {
-  return requireElement(panel, `.port[data-node="${nodeId}"][data-port="${name}"]`);
-}
 
 function rowEl(panel: CanvasPanelElement, nodeId: string, label: string): HTMLElement {
   const rows = [...rootOf(panel).querySelectorAll(`.row[data-node="${nodeId}"]`)];
@@ -88,13 +85,6 @@ function rowEl(panel: CanvasPanelElement, nodeId: string, label: string): HTMLEl
   return found;
 }
 
-/** 端口中心的画布坐标：与面板用同一份视图模型算，避免用例里手抄几何。 */
-function portPoint(doc: canvas.CanvasDocument, nodeId: string, name: string): { x: number; y: number } {
-  const view = layoutCanvas({ document: doc, methods: [] });
-  const port = view.ports.find((item) => item.nodeId === nodeId && item.name === name);
-  if (port === undefined) throw new Error(`没有端口 ${nodeId}.${name}`);
-  return { x: port.x, y: port.y };
-}
 
 /** 盒子矩形（含宽高）：用例要按真实尺寸选落点，不能假设行高。 */
 function boxOf(doc: canvas.CanvasDocument, nodeId: string): { x: number; y: number; width: number; height: number } {
@@ -160,144 +150,27 @@ afterEach(() => {
 // 接线
 // ---------------------------------------------------------------------------
 
-describe('画布面板：端口与连线', () => {
-  const wireDoc = (): canvas.CanvasDocument =>
-    documentOf({
-      nodes: [START, valueNode('v1', { kind: 'int', value: '2' }), { id: 'r1', kind: 'relation', op: 'int.add', left: '', right: '' }],
-      layout: { v1: { x: 40, y: 40 }, r1: { x: 500, y: 300 } },
-    });
-
-  it('从端口拖到另一个节点就接上，并出现一条数据边', async () => {
-    const doc = wireDoc();
-    const panel = await mount(doc);
-    const from = portPoint(doc, 'r1', 'left');
-    drag(portEl(panel, 'r1', 'left'), from, { x: 80, y: 60 });
-    await settle(panel);
-    expect(nodeOf(panel, 'r1')).toMatchObject({ left: 'v1' });
-    expect(rootOf(panel).querySelectorAll('.edge-data')).toHaveLength(1);
-    expect(portEl(panel, 'r1', 'left').classList.contains('connected')).toBe(true);
-  });
-
-  it('从端口拖到空白就断开，端口回到空心', async () => {
-    const base = wireDoc();
-    const doc = documentOf({
-      nodes: base.nodes.map((node) => (node.id === 'r1' && node.kind === 'relation' ? { ...node, left: 'v1' } : node)),
-      layout: base.layout,
-    });
-    const panel = await mount(doc);
-    expect(portEl(panel, 'r1', 'left').classList.contains('connected')).toBe(true);
-    const from = portPoint(doc, 'r1', 'left');
-    drag(portEl(panel, 'r1', 'left'), from, { x: 900, y: 700 });
-    await settle(panel);
-    expect(nodeOf(panel, 'r1')).toMatchObject({ left: '' });
-    expect(rootOf(panel).querySelectorAll('.edge-data')).toHaveLength(0);
-    expect(portEl(panel, 'r1', 'left').classList.contains('hollow')).toBe(true);
-  });
-
-  it('从端口拖到另一个端口也接得上', async () => {
-    const doc = documentOf({
-      nodes: [
-        START,
-        { id: 'r2', kind: 'relation', op: 'int.add', left: '', right: '' },
-        { id: 'r1', kind: 'relation', op: 'int.sub', left: '', right: '' },
-      ],
-      layout: { r2: { x: 40, y: 40 }, r1: { x: 600, y: 400 } },
-    });
-    const panel = await mount(doc);
-    const from = portPoint(doc, 'r1', 'left');
-    const to = portPoint(doc, 'r2', 'left');
-    drag(portEl(panel, 'r1', 'left'), from, to);
-    await settle(panel);
-    expect(nodeOf(panel, 'r1')).toMatchObject({ left: 'r2' });
-    expect(rootOf(panel).querySelectorAll('.edge-data')).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 就地编辑
-// ---------------------------------------------------------------------------
-
-describe('画布面板：就地编辑', () => {
-  const editDoc = (): canvas.CanvasDocument =>
-    documentOf({
-      nodes: [START, valueNode('v1', { kind: 'int', value: '0' })],
-      layout: { v1: { x: 40, y: 40 } },
-    });
-
-  it('双击可编辑的行出现输入框，回车提交', async () => {
-    const panel = await mount(editDoc());
+describe('画布面板：配置只在侧栏编辑', () => {
+  it('节点没有数据端口或行内输入，双击也不会打开编辑器', async () => {
+    const panel = await mount(documentOf({ nodes: [START, valueNode('v1', { kind: 'int', value: '0' })], layout: { v1: { x: 40, y: 40 } } }));
     const row = rowEl(panel, 'v1', '值');
-    fire(row, 'dblclick', 0, 0);
+    fire(row, 'pointerdown', 50, 50);
+    fire(window, 'pointerup', 50, 50);
+    fire(row, 'dblclick', 50, 50);
     await settle(panel);
-    const input = rootOf(panel).querySelector('.row-input');
-    if (!(input instanceof HTMLInputElement)) throw new Error('没有出现输入框');
+    expect(rootOf(panel).querySelector('.port')).toBeNull();
+    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
+    const input = rootOf(panel).querySelector('.field-value');
+    if (!(input instanceof HTMLInputElement)) throw new Error('侧栏没有值输入框');
     input.value = '42';
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
     await settle(panel);
     expect(nodeOf(panel, 'v1')).toMatchObject({ value: { kind: 'int', value: '42' } });
-    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
-  });
-
-  it('Esc 取消就地编辑，文档不动', async () => {
-    const panel = await mount(editDoc());
-    const row = rowEl(panel, 'v1', '值');
-    fire(row, 'dblclick', 0, 0);
-    await settle(panel);
-    const input = rootOf(panel).querySelector('.row-input');
-    if (!(input instanceof HTMLInputElement)) throw new Error('没有出现输入框');
-    input.value = '99';
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    requireElement(panel, '.btn-undo').click();
     await settle(panel);
     expect(nodeOf(panel, 'v1')).toMatchObject({ value: { kind: 'int', value: '0' } });
-    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
-  });
-
-  it('第一次单击只选中；节点已选中时再单击可编辑行直接开框，且框已获得焦点', async () => {
-    const panel = await mount(editDoc());
-    const click = (): void => {
-      fire(rowEl(panel, 'v1', '值'), 'pointerdown', 0, 0);
-      fire(window, 'pointerup', 0, 0);
-    };
-    click();
-    await settle(panel);
-    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
-    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(1);
-    click();
-    await settle(panel);
-    const input = rootOf(panel).querySelector('.row-input');
-    if (!(input instanceof HTMLInputElement)) throw new Error('没有出现输入框');
-    expect(rootOf(panel).activeElement).toBe(input);
-    expect(input.value).toBe('0');
-  });
-
-  it('已选中节点上单击不可编辑的行（预览）不开框', async () => {
-    const panel = await mount(editDoc());
-    for (let index = 0; index < 2; index += 1) {
-      fire(rowEl(panel, 'v1', '预览'), 'pointerdown', 0, 0);
-      fire(window, 'pointerup', 0, 0);
-      await settle(panel);
-    }
-    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
-    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(1);
-  });
-
-  it('双击不可就地编辑的行改为打开侧栏', async () => {
-    const doc = documentOf({
-      nodes: [START, { id: 'm1', kind: 'method', block: 'gets', args: { data: '' } }],
-      layout: { m1: { x: 40, y: 40 } },
-    });
-    const panel = await mount(doc);
-    fire(rowEl(panel, 'm1', '方法'), 'dblclick', 0, 0);
-    await settle(panel);
-    expect(rootOf(panel).querySelector('.row-input')).toBeNull();
-    expect(rootOf(panel).querySelectorAll('.node-box.selected')).toHaveLength(1);
-    expect(rootOf(panel).querySelector('.inspector-id')?.textContent?.trim()).toBe('m1');
   });
 });
-
-// ---------------------------------------------------------------------------
-// 拖动与吸附
-// ---------------------------------------------------------------------------
 
 describe('画布面板：拖动与吸附', () => {
   it('拖动节点按 8px 网格吸附', async () => {
@@ -364,7 +237,7 @@ describe('画布面板：拖动与吸附', () => {
     fire(nodeEl(panel, 'v1'), 'pointerdown', 50, 50);
     fire(window, 'pointermove', drop.x, drop.y);
     await settle(panel);
-    expect(rootOf(panel).querySelector('.snap-hint')?.textContent?.trim()).toBe('插入当前行');
+    expect(rootOf(panel).querySelector('.snap-hint')).toBeNull();
     fire(window, 'pointerup', drop.x, drop.y);
     await settle(panel);
     expect(nodeOf(panel, 'g1')).toMatchObject({ rows: [['v2'], ['v1']] });
@@ -388,7 +261,7 @@ describe('画布面板：拖动与吸附', () => {
     fire(nodeEl(panel, 'v1'), 'pointerdown', 50, 50);
     fire(window, 'pointermove', drop.x, drop.y);
     await settle(panel);
-    expect(rootOf(panel).querySelector('.snap-hint')?.textContent?.trim()).toBe('新增一行');
+    expect(rootOf(panel).querySelector('.snap-hint')).toBeNull();
     fire(window, 'pointerup', drop.x, drop.y);
     await settle(panel);
     expect(nodeOf(panel, 'g1')).toMatchObject({ rows: [['v2'], ['v3', 'v4'], ['v1']] });
@@ -407,7 +280,7 @@ describe('画布面板：拖动与吸附', () => {
     expect(positionOf(panel, 'v1')).toEqual({ x: 680, y: 680 });
   });
 
-  it('把节点拖到另一个节点上就拼成组合', async () => {
+  it('同类数值吸附后建立运算关系', async () => {
     const panel = await mount(
       documentOf({
         nodes: [START, valueNode('v1', { kind: 'int', value: '1' }), valueNode('v2', { kind: 'int', value: '2' })],
@@ -416,10 +289,34 @@ describe('画布面板：拖动与吸附', () => {
     );
     drag(nodeEl(panel, 'v1'), { x: 60, y: 60 }, { x: 470, y: 70 });
     await settle(panel);
-    const group = panel.document?.nodes.find((node) => node.kind === 'group');
-    expect(group?.kind).toBe('group');
-    if (group?.kind !== 'group') throw new Error('没有建出组合');
-    expect([...canvas.groupMembers(group)].sort()).toEqual(['v1', 'v2']);
+    expect(panel.document?.nodes.find((node) => node.kind === 'relation')).toMatchObject({ op: 'int.add', left: 'v2', right: 'v1' });
+    expect(rootOf(panel).querySelector('.relation-box')?.hasAttribute('data-node')).toBe(false);
   });
 });
 
+
+describe('结构整体拖动', () => {
+  it('循环标题带着内部语句吸附进流程，拖回空白整体脱离，撤销恢复', async () => {
+    const doc = documentOf({ nodes: [START,
+      { id: 'loop', kind: 'loop', count: canvas.UNCONNECTED, body: ['method'] },
+      { id: 'method', kind: 'method', block: '', args: {} }],
+      layout: { start: { x: 40, y: 40 }, loop: { x: 500, y: 400 }, method: { x: 500, y: 400 } },
+    });
+    const panel = await mount(doc);
+    const header = layoutCanvas({ document: doc }).boxes.find((box) => box.nodeId === 'loop' && box.kind === 'node')!;
+    drag(requireElement(panel, '[data-group-title="loop"]'), { x: header.x + 10, y: header.y + 10 }, { x: 70, y: 140 });
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start', 'loop']);
+    expect(panel.document?.nodes.find((node) => node.id === 'loop')).toMatchObject({ body: ['method'] });
+    const moved = panel.document!;
+    const attached = layoutCanvas({ document: moved }).boxes.find((box) => box.nodeId === 'loop' && box.kind === 'node')!;
+    drag(requireElement(panel, '[data-group-title="loop"]'), { x: attached.x + 10, y: attached.y + 10 }, { x: 1400, y: 900 });
+    await settle(panel);
+    expect(panel.document?.main).toEqual(['start']);
+    expect(panel.document?.nodes.find((node) => node.id === 'loop')).toMatchObject({ body: ['method'] });
+    expect(panel.document?.layout.method).not.toEqual(moved.layout.method);
+    requireElement(panel, '.btn-undo').click();
+    await settle(panel);
+    expect(panel.document).toEqual(moved);
+  });
+});

@@ -1,3 +1,4 @@
+import { renderDataInputs } from './canvas-panel-inspector-inputs';
 import { html, nothing } from 'lit';
 import type { TemplateResult } from 'lit';
 import { canvas } from '@pwn2block/shared';
@@ -10,7 +11,7 @@ import { labelOf, onInput, onSelect, renderDictEntries, renderGroupRows } from '
 import { renderRegionActions } from './canvas-panel-regions';
 
 /**
- * 右侧检查器（需求 §6.1「简单内容节点内编辑，编码/字节序等复杂配置放侧栏」）。
+ * 右侧检查器：节点配置的唯一编辑入口。
  *
  * 控件来源只有一处：`specOf(kind).fields`。所以「侧栏能改什么」与目录、命令层不会各说一套；
  * 这里唯一的职责是**把语义变更描述出来**（`InspectorChange`），命令由 `canvas-panel-commands` 决定，
@@ -41,13 +42,13 @@ export function renderInspector(input: InspectorInput): TemplateResult {
   if (input.selection.length === 0) {
     return html`<aside class="inspector" aria-label="检查器">
       <h3>检查器</h3>
-      <p class="hint">未选中节点。点一个节点查看它的字段；双击不能就地编辑的行也会打开这里。</p>
+      <p class="hint">选中节点或关系后在这里编辑。框选结构后可右键包络。</p>
     </aside>`;
   }
   if (input.selection.length > 1) {
     return html`<aside class="inspector" aria-label="检查器">
       <h3>检查器</h3>
-      <p class="hint">已选中 ${input.selection.length} 个节点：Delete 删除、方向键移动、点「成组」拼成一个组合。</p>
+      <p class="hint">已选中 ${input.selection.length} 个节点：Delete 删除、方向键移动、右键包络选中结构。</p>
       ${renderRegionActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
       ${renderConvertActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     </aside>`;
@@ -69,6 +70,7 @@ export function renderInspector(input: InspectorInput): TemplateResult {
           ${issues.map((message) => html`<li>${message}</li>`)}
         </ul>`}
     ${specOf(node.kind).fields.map((field) => renderField(node, field, input))}
+    ${renderDataInputs(node, input)}
     ${renderRegionActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     ${renderConvertActions({ document: input.document, selection: input.selection, onChange: input.onChange })}
     ${node.kind === 'dict' ? renderDictEntries(node, input) : nothing}

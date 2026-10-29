@@ -57,10 +57,10 @@ describe('节点库条目', () => {
 });
 
 describe('分页与搜索', () => {
-  it('「全部」不分页，一项不少', () => {
+  it('全部结果按页显示', () => {
     const page = libraryPageOf(ITEMS, INITIAL_LIBRARY_STATE);
-    expect(page.pageCount).toBe(1);
-    expect(page.visible.size).toBe(ITEMS.length);
+    expect(page.pageCount).toBe(Math.ceil(ITEMS.length / LIBRARY_PAGE_SIZE));
+    expect(page.visible.size).toBe(LIBRARY_PAGE_SIZE);
   });
 
   it(`单个分类每页 ${LIBRARY_PAGE_SIZE} 项，第二页接着排`, () => {
@@ -80,7 +80,7 @@ describe('分页与搜索', () => {
     expect(libraryPageOf(ITEMS, { ...INITIAL_LIBRARY_STATE, tab: 'collection', page: -3 }).page).toBe(0);
   });
 
-  it('有搜索词时不分页：标签、说明、种类标识与小类都能命中，不分大小写', () => {
+  it('搜索也遵循分页：标签、说明、种类标识与小类都能命中，不分大小写', () => {
     expect(visibleKeys({ query: '切片' })).toEqual(['node:slice']);
     expect(visibleKeys({ query: 'LOOP' })).toEqual(['node:loop-index', 'node:loop']);
     expect(visibleKeys({ query: '本题' })).toEqual(['block:gets']);

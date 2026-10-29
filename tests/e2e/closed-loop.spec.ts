@@ -1,13 +1,11 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import {
   addToolNode,
-  dragBetween,
   inspectorOf,
   nodeIdOf,
   openChallenge,
   panelOf,
   placeInFlow,
-  portOf,
   readDocument,
   selectNode,
   type CanvasDocumentJson,
@@ -103,30 +101,30 @@ test('画布闭环：建图、编译错误定位、判题结论与刷新恢复',
     await capture(page, info, '01-empty-canvas');
   });
 
-  await test.step('方法节点选 gets(buf) 后才长出参数端口，未接线只提示不报错', async () => {
+  await test.step('方法节点选 gets(buf) 后侧栏显示参数来源，未接线只提示不报错', async () => {
     await addToolNode(page, 'method');
     const methodId = await nodeIdOf(page, 'method');
     await placeInFlow(page, methodId);
     await selectNode(page, methodId);
     await inspectorOf(page).locator('.field-block').selectOption('gets');
-    await expect(portOf(page, methodId, 'data')).toHaveClass(/\bhollow\b/);
+    await expect(inspectorOf(page).locator('.field-param-data')).toHaveValue('');
     await expect(panel.locator('.status-unconnected')).toContainText('未接线 1 处');
     await expect(panel.locator('.status-error')).toContainText('错误 0');
   });
 
-  await test.step('整数值接到 bytes 参数上：编译期报类型不符，点「定位积木」高亮出错的节点', async () => {
+  await test.step('整数值接到 bytes 参数上：编译期报类型不符，点「定位积木」选中出错的节点', async () => {
     await addToolNode(page, 'value');
     const methodId = await nodeIdOf(page, 'method');
     const valueId = await nodeIdOf(page, 'value');
-    await dragBetween(page, portOf(page, methodId, 'data'), panel.locator(`.node-box[data-node="${valueId}"]`));
-    await expect(portOf(page, methodId, 'data')).toHaveClass(/\bconnected\b/);
+    await selectNode(page, methodId);
+    await inspectorOf(page).locator('.field-param-data').selectOption(valueId);
+    await expect(inspectorOf(page).locator('.field-param-data')).toHaveValue(valueId);
     await expect(panel.locator('.status-error')).not.toContainText('错误 0');
 
     const output = page.locator('pwn2block-app .output');
     await expect(output).toContainText('需要字节串');
     await output.getByRole('button', { name: '定位积木' }).first().click();
-    // 高亮只持续 1.2s（`CanvasHighlight`），所以这里等的是「出现过」而不是「一直在」。
-    await expect(panel.locator('.node-box.highlight')).toHaveCount(1);
+    await expect(panel.locator('.node-box.selected')).toHaveCount(1);
     await capture(page, info, '02-compile-failed');
   });
 

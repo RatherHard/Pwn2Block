@@ -1,3 +1,4 @@
+import { structureLayout } from './view-model-structure';
 import { canvas } from '@pwn2block/shared';
 import { type NodeDeck, resolveBoxLayout } from './view-model-boxes';
 import { buildDataEdges, buildFlowEdges, buildFlowPorts, buildPorts } from './view-model-edges';
@@ -56,8 +57,9 @@ export function layoutCanvas(input: CanvasLayoutInput): CanvasLayoutView {
     decks.set(node.id, { title: titleOfNode(node, rowsContext), subtitle: subtitleOfNode(node, rowsContext) });
   }
 
-  const layout = resolveBoxLayout(document, nodes, rowsByNode, decks);
-  const envelopes = buildEnvelopeBoxes(document, nodes, (nodeId) => layout.rectOf.get(nodeId));
+  const rawLayout = resolveBoxLayout(document, nodes, rowsByNode, decks);
+  const rawEnvelopes = buildEnvelopeBoxes(document, nodes, (nodeId) => rawLayout.rectOf.get(nodeId));
+  const { layout, envelopes } = structureLayout(nodes, rawLayout, rawEnvelopes);
 
   return {
     boxes: [...envelopes, ...layout.nodeBoxes, ...layout.relationBoxes],
