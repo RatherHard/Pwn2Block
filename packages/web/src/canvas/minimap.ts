@@ -62,7 +62,7 @@ export function miniMapGeometry(
     width: stageWidth / viewScale,
     height: stageHeight / viewScale,
   };
-  // 将当前视口也纳入世界范围，保证平移到空白处或缩放时视口框仍完整可见。
+  // 将当前视口也纳入世界范围，保证平移到空白处或缩放时视口框始终完整可见。
   const visibleWorld = unionRect(logicContentBounds(graph), viewport);
   const content = {
     x: visibleWorld.x - PADDING,
@@ -81,13 +81,23 @@ export function miniMapPoint(geometry: MiniMapGeometry, point: { x: number; y: n
   };
 }
 
+/**
+ * The viewport indicator is deliberately a fixed-size handle rather than a
+ * literal projection of the stage. A literal projection changes size whenever
+ * the world extent changes while dragging, which makes the minimap difficult
+ * to use as a stable navigation control.
+ */
 export function miniMapViewportStyle(geometry: MiniMapGeometry): MiniMapRect {
-  const topLeft = miniMapPoint(geometry, geometry.viewport);
+  const width = geometry.map.width / 4;
+  const height = geometry.map.height / 4;
+  const center = miniMapPoint(geometry, {
+    x: geometry.viewport.x + geometry.viewport.width / 2,
+    y: geometry.viewport.y + geometry.viewport.height / 2,
+  });
   return {
-    x: topLeft.x,
-    y: topLeft.y,
-    width: geometry.viewport.width * geometry.scale,
-    height: geometry.viewport.height * geometry.scale,
+    x: Math.max(0, Math.min(geometry.map.width - width, center.x - width / 2)),
+    y: Math.max(0, Math.min(geometry.map.height - height, center.y - height / 2)),
+    width,
+    height,
   };
 }
-

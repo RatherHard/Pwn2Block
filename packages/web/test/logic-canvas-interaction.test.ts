@@ -25,6 +25,19 @@ async function press(ui: LogicCanvasElement, selector: string) {
 }
 
 describe('canvas connection and expression interaction', () => {
+  it('anchors the initial viewport on the start node', async () => {
+    const ui = new LogicCanvasElement();
+    ui.graph = { version: 1, nodes: [{ id: 'start', kind: 'start', x: 1000, y: 800 }], edges: [] };
+    document.body.append(ui);
+    mounted.push(ui);
+    await ui.updateComplete;
+    await ui.updateComplete;
+    const transform = (ui.shadowRoot!.querySelector('.surface') as HTMLElement).style.transform;
+    const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(transform);
+    expect(match).not.toBeNull();
+    expect(Number(match![1])).toBeLessThan(0);
+    expect(Number(match![2])).toBeLessThan(0);
+  });
   it('shows one plus choice, including legacy concatenation edges', async () => {
     const ui = await mount([constant('a', 0), constant('b', 268)],
       [{ id: 'ab', kind: 'data', from: 'a', to: 'b', op: 'concat' }]);

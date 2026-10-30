@@ -182,19 +182,6 @@ export const logicCanvasStyles = css`
   .logic-layer .envelope-header {
     pointer-events: auto;
   }
-  .layer-list {
-    position: relative;
-    z-index: 2;
-    margin-left: 4px;
-  }
-  .layer-list summary { cursor: pointer; padding: 4px 8px; border: 1px solid var(--p2b-line); }
-  .layer-list-actions { display: flex; flex-wrap: wrap; gap: 3px; padding: 5px; border: 1px solid var(--p2b-line); border-top: 0; }
-  .layer-list-actions button { margin: 0; }
-  .layer-list ol { margin: 0; padding: 5px 5px 5px 25px; border: 1px solid var(--p2b-line); border-top: 0; max-height: 220px; overflow: auto; background: var(--p2b-bg); }
-  .layer-list li { margin: 2px 0; }
-  .layer-list li button { width: 100%; text-align: left; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .layer-list li button.selected { border-color: var(--p2b-focus); }
-
   .reference-wires .edge-hit { stroke-width: 22; }
   .flow-line {
     stroke: var(--p2b-fg);

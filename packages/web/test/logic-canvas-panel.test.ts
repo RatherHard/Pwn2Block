@@ -616,15 +616,20 @@ it('wheel zoom keeps the world point beneath the cursor stationary without chang
   const { panel } = await mount();
   const root = child(panel)!.shadowRoot!, stage = root.querySelector('.stage')!;
   const original = panel.document;
+  const transformPattern = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/;
+  const initialMatch = transformPattern.exec((root.querySelector('.surface') as HTMLElement).style.transform);
+  expect(initialMatch).not.toBeNull();
+  const initialX = Number(initialMatch![1]), initialY = Number(initialMatch![2]), initialScale = Number(initialMatch![3]);
+  const worldX = (200 - initialX) / initialScale, worldY = (150 - initialY) / initialScale;
   stage.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
   await settle(panel);
   const transform = (root.querySelector('.surface') as HTMLElement).style.transform;
-  const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(transform);
+  const match = transformPattern.exec(transform);
   expect(match).not.toBeNull();
   const [, x, y, scale] = match!;
-  expect(Number(scale)).toBeGreaterThan(1);
-  expect(Number(x) + 200 * Number(scale)).toBeCloseTo(200);
-  expect(Number(y) + 150 * Number(scale)).toBeCloseTo(150);
+  expect(Number(scale)).toBeGreaterThan(initialScale);
+  expect(Number(x) + worldX * Number(scale)).toBeCloseTo(200);
+  expect(Number(y) + worldY * Number(scale)).toBeCloseTo(150);
   expect(panel.document).toBe(original);
 });
 

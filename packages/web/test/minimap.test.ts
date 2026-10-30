@@ -35,17 +35,18 @@ describe('minimap geometry', () => {
     expect(miniMapPoint(geometry, { x: geometry.content.x, y: geometry.content.y })).toEqual({ x: 0, y: 0 });
   });
 
-  it('converts the visible stage into the draggable viewport rectangle', () => {
+  it('uses a fixed quarter-size viewport handle and centers it on the visible stage', () => {
     const g = graph([constant('a', 0, 0)]);
     const geometry = miniMapGeometry(g, 400, 200, 200, 100, { x: -100, y: -40 }, 2);
     const viewport = miniMapViewportStyle(geometry);
-    expect(viewport.width).toBeCloseTo(200 * geometry.scale);
-    expect(viewport.height).toBeCloseTo(100 * geometry.scale);
-    expect(viewport.x).toBeCloseTo((50 - geometry.content.x) * geometry.scale);
-    expect(viewport.y).toBeCloseTo((20 - geometry.content.y) * geometry.scale);
+    const center = miniMapPoint(geometry, { x: 150, y: 70 });
+    expect(viewport.width).toBe(50);
+    expect(viewport.height).toBe(25);
+    expect(viewport.x + viewport.width / 2).toBeCloseTo(center.x);
+    expect(viewport.y + viewport.height / 2).toBeCloseTo(center.y);
   });
 
-  it('expands the world extent when panning or zooming moves the viewport away from nodes', () => {
+  it('keeps the fixed viewport handle inside the minimap when the world extent grows', () => {
     const g = graph([constant('a', 0, 0)]);
     const geometry = miniMapGeometry(g, 400, 200, 200, 100, { x: -2400, y: -1400 }, 0.5);
     const viewport = miniMapViewportStyle(geometry);

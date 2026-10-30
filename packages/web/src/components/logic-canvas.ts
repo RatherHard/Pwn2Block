@@ -29,12 +29,18 @@ import { logicFlowHitClip, logicEdgeGeometry, logicPointInsertionIndex, logicSum
 
 import { renderLogicLibrary, type AddableLogicKind, type LogicLibraryState } from './logic-canvas-library';
 import { logicLayers, moveLogicLayer, normalizeLogicLayerOrder, type LogicLayer } from '../canvas/logic-layers';
-import { miniMapGeometry, miniMapPoint, miniMapViewportStyle } from '../canvas/minimap';
+import { miniMapGeometry, miniMapPoint, miniMapViewportStyle, type MiniMapGeometry, type MiniMapRect } from '../canvas/minimap';
 
 let localClipboard = '';
 let clipboardWrite: Promise<void> = Promise.resolve();
 type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean; library?: boolean; baseline?: canvas.LogicGraph };
-type MiniMapDrag = { grabX: number; grabY: number; viewScale: number };
+type MiniMapDrag = {
+  startX: number;
+  startY: number;
+  startViewport: MiniMapRect;
+  geometry: MiniMapGeometry;
+  viewScale: number;
+};
 export class LogicCanvasElement extends LitElement {
   static override styles = [terminalTheme, sharedStyles, logicCanvasStyles];
   static override properties = {
@@ -63,6 +69,7 @@ export class LogicCanvasElement extends LitElement {
   private suppressLibraryClick = false;
   private viewOffset = { x: 0, y: 0 };
   private viewScale = 1;
+  private initialViewSet = false;
   private pan: { clientX: number; clientY: number; x: number; y: number } | undefined;
   private marquee: { x: number; y: number; endX: number; endY: number } | undefined;
   private minimapDrag: MiniMapDrag | undefined;
@@ -88,6 +95,9 @@ export class LogicCanvasElement extends LitElement {
   }
   override connectedCallback(): void {
     super.connectedCallback();
+    this.viewOffset = { x: 0, y: 0 };
+    this.viewScale = 1;
+    this.initialViewSet = false;
     this.addEventListener('keydown', this.keyDown);
     this.addEventListener('keyup', this.keyUp);
     this.addEventListener('copy', this.copyEvent);
@@ -131,7 +141,25 @@ export class LogicCanvasElement extends LitElement {
     if (changed.has('graph') && this.graph &&
       ((this.drag && (this.drag.baseline ?? this.drag.original) !== this.graph) ||
        (this.bendDrag && this.bendDrag.original !== this.graph))) this.cancelPointer();
+    if (changed.has('graph') && this.graph && !this.initialViewSet && this.graph.nodes.some((node) => node.kind === 'start')) {
+      this.resetViewToStart();
+      this.requestUpdate();
+    }
     this.syncMinimapStage();
+  }
+  private resetViewToStart(): void {
+    const start = this.graph.nodes.find((node) => node.kind === 'start');
+    if (!start) return;
+    const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
+    const stageWidth = stage?.clientWidth || 800;
+    const stageHeight = stage?.clientHeight || 600;
+    const box = logicBox(this.graph, start.id);
+    this.viewScale = 1;
+    this.viewOffset = {
+      x: stageWidth / 2 - (box.x + box.width / 2) * this.viewScale,
+      y: stageHeight / 2 - (box.y + box.height / 2) * this.viewScale,
+    };
+    this.initialViewSet = true;
   }
   private syncMinimapStage(): void {
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
@@ -395,18 +423,21 @@ export class LogicCanvasElement extends LitElement {
       const minimap = this.renderRoot.querySelector<HTMLElement>('.minimap');
       const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
       if (!minimap || !stage) return;
-      const geometry = miniMapGeometry(
-        this.graph,
-        stage.clientWidth,
-        stage.clientHeight,
-        minimap.clientWidth,
-        minimap.clientHeight,
-        this.viewOffset,
-        this.viewScale,
-      );
       const mapRect = minimap.getBoundingClientRect();
-      const worldX = geometry.content.x + (event.clientX - mapRect.left - this.minimapDrag.grabX) / geometry.scale;
-      const worldY = geometry.content.y + (event.clientY - mapRect.top - this.minimapDrag.grabY) / geometry.scale;
+      const mapX = event.clientX - mapRect.left;
+      const mapY = event.clientY - mapRect.top;
+      const deltaX = mapX - this.minimapDrag.startX;
+      const deltaY = mapY - this.minimapDrag.startY;
+      const maxX = this.minimapDrag.geometry.map.width - this.minimapDrag.startViewport.width;
+      const maxY = this.minimapDrag.geometry.map.height - this.minimapDrag.startViewport.height;
+      const viewportX = Math.max(0, Math.min(maxX, this.minimapDrag.startViewport.x + deltaX));
+      const viewportY = Math.max(0, Math.min(maxY, this.minimapDrag.startViewport.y + deltaY));
+      const centerX = this.minimapDrag.geometry.content.x +
+        (viewportX + this.minimapDrag.startViewport.width / 2) / this.minimapDrag.geometry.scale;
+      const centerY = this.minimapDrag.geometry.content.y +
+        (viewportY + this.minimapDrag.startViewport.height / 2) / this.minimapDrag.geometry.scale;
+      const worldX = centerX - stage.clientWidth / (2 * this.minimapDrag.viewScale);
+      const worldY = centerY - stage.clientHeight / (2 * this.minimapDrag.viewScale);
       this.viewOffset = { x: -worldX * this.minimapDrag.viewScale, y: -worldY * this.minimapDrag.viewScale };
       this.requestUpdate();
       return;
@@ -790,21 +821,6 @@ export class LogicCanvasElement extends LitElement {
       ><span class="node-summary" title=${summary}>${summary}</span>${this.ports(node)}
     </div>`;
   }
-  private layerAction(action: 'up' | 'down' | 'top' | 'bottom'): void {
-    this.commit(this.graph, moveLogicLayer(this.graph, this.layerOrder, this.selected, action));
-  }
-  private selectLayer(layer: LogicLayer): void {
-    this.selected = [...layer.members];
-    this.edgeId = undefined;
-    this.bend = undefined;
-    this.requestUpdate();
-  }
-  private layerTitle(graph: canvas.LogicGraph, layer: LogicLayer): string {
-    const envelope = graph.nodes.find((node) => node.kind === 'envelope' && layer.members.includes(node.id));
-    if (envelope?.kind === 'envelope') return envelope.title;
-    const first = graph.nodes.find((node) => layer.members.includes(node.id));
-    return first ? logicTitle(first, this.methods) : layer.id;
-  }
   private renderLayer(
     graph: canvas.LogicGraph,
     layer: LogicLayer,
@@ -825,25 +841,6 @@ export class LogicCanvasElement extends LitElement {
         ? this.relation(this.snap.graph, this.snap.edge, true)
         : nothing}
     </div>`;
-  }
-  private layerList(graph: canvas.LogicGraph, layers: readonly LogicLayer[]): TemplateResult {
-    const selectedLayer = layers.find((layer) => layer.members.some((id) => this.selected.includes(id)));
-    return html`<details class="layer-list">
-      <summary>图层 (${layers.length})</summary>
-      <div class="layer-list-actions">
-        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('up')}>上移一层</button>
-        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('down')}>下移一层</button>
-        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('top')}>置于顶层</button>
-        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('bottom')}>置于底层</button>
-      </div>
-      <ol>
-        ${[...layers].reverse().map((layer) => html`<li>
-          <button class=${selectedLayer?.id === layer.id ? 'selected' : ''} @click=${() => this.selectLayer(layer)}>
-            ${this.layerTitle(graph, layer)} <span>(${layer.members.length})</span>
-          </button>
-        </li>`)}
-      </ol>
-    </details>`;
   }
   private inspector(): TemplateResult {
     const edge = this.graph.edges.find((e) => e.id === this.edgeId);
@@ -988,8 +985,10 @@ export class LogicCanvasElement extends LitElement {
     const mapRect = minimap.getBoundingClientRect();
     const viewport = miniMapViewportStyle(geometry);
     this.minimapDrag = {
-      grabX: event.clientX - mapRect.left - viewport.x,
-      grabY: event.clientY - mapRect.top - viewport.y,
+      startX: event.clientX - mapRect.left,
+      startY: event.clientY - mapRect.top,
+      startViewport: viewport,
+      geometry,
       viewScale: this.viewScale,
     };
     this.listenPointer();
@@ -1045,7 +1044,7 @@ export class LogicCanvasElement extends LitElement {
         ><button @click=${() => this.pasteClipboard()}>粘贴</button
         ><button @click=${() => this.emit('logic-import')}>导入</button
         ><button @click=${() => this.emit('logic-export')}>导出</button
-        >${this.layerList(graph, layers)}<button class="btn-run" @click=${() => this.emit('logic-run')} ?disabled=${this.issues.length > 0}>运行</button
+        ><button class="btn-run" @click=${() => this.emit('logic-run')} ?disabled=${this.issues.length > 0}>运行</button
         ><span class="status"
           >${graph.nodes.length} 节点 · ${graph.edges.length} 连接 · ${this.issues.length} 问题</span
         >
