@@ -18,15 +18,26 @@ export function logicId(graph: canvas.LogicGraph, prefix: string): string {
   while (used.has(`${prefix}-${i}`)) i++;
   return `${prefix}-${i}`;
 }
+export function logicAttachmentHost(node: canvas.LogicNode): string | undefined {
+  return node.kind === 'loop' ? node.body : node.kind === 'convert' ? node.input : undefined;
+}
 export function logicBox(graph: canvas.LogicGraph, id: string, seen = new Set<string>()): LogicBox {
   const node = graph.nodes.find((n) => n.id === id);
   if (!node || seen.has(id)) return { x: 0, y: 0, width: 180, height: 76 };
   seen.add(id);
+  const host = logicAttachmentHost(node);
+  if (host) {
+    const box = logicBox(graph, host, seen);
+    const attachments = graph.nodes.filter((n) => logicAttachmentHost(n) === host);
+    return { x: box.x + 8, y: box.y + 32 + attachments.findIndex((n) => n.id === id) * 26,
+      width: box.width - 16, height: 24 };
+  }
   if (node.kind !== 'envelope' || !node.members.length)
     return { x: node.x, y: node.y, width: 180, height: 76 };
   const boxes = node.members.map((member) => logicBox(graph, member, new Set(seen)));
-  const x = Math.max(0, Math.min(...boxes.map((b) => b.x)) - 24),
-    y = Math.max(0, Math.min(...boxes.map((b) => b.y)) - 44);
+  const header = 44 + graph.nodes.filter((n) => logicAttachmentHost(n) === id).length * 26;
+  const x = Math.min(...boxes.map((b) => b.x)) - 24,
+    y = Math.min(...boxes.map((b) => b.y)) - header;
   return {
     x,
     y,
@@ -66,20 +77,85 @@ export function moveLogicNodes(
       (node.kind === 'convert' && node.input && all.has(node.input))
     )
       all.add(node.id);
-  const moving = graph.nodes.filter((n) => all.has(n.id));
-  const x = Math.max(dx, -Math.min(...moving.map((n) => n.x))),
-    y = Math.max(dy, -Math.min(...moving.map((n) => n.y)));
-  return { ...graph, nodes: graph.nodes.map((n) => (all.has(n.id) ? { ...n, x: n.x + x, y: n.y + y } : n)) };
+  const x = dx, y = dy;
+  return { ...graph, nodes: graph.nodes.map((n) => (all.has(n.id) ? { ...n, x: n.x + x, y: n.y + y } : n)),
+    edges: graph.edges.map((e) => e.kind === 'flow' && e.points && all.has(e.from) && all.has(e.to)
+      ? { ...e, points: e.points.map((p) => ({ x: p.x + x, y: p.y + y })) } : e) };
 }
+export const LOGIC_RELATION_WIDTH = 64;
+export const LOGIC_RELATION_GAP = 12;
+const dataSpacing = LOGIC_RELATION_WIDTH + LOGIC_RELATION_GAP * 2;
+function dataSides(edge: Extract<canvas.LogicEdge, { kind: 'data' }>): [string, string] {
+  return edge.op === 'assign' ? [edge.to, edge.from] : [edge.from, edge.to];
+}
+/** Fixed data rows have one neighbour on each side. Reject overlapping branches. */
+function dataNeighbours(graph: canvas.LogicGraph, anchor: string): Map<string, { left?: string; right?: string }> {
+  const component = new Set([anchor]);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const edge of graph.edges) {
+      if (edge.kind !== 'data' || (!component.has(edge.from) && !component.has(edge.to))) continue;
+      const size = component.size;
+      component.add(edge.from);
+      component.add(edge.to);
+      expanded ||= component.size !== size;
+    }
+  }
+  const neighbours = new Map<string, { left?: string; right?: string }>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== 'data' || !component.has(edge.from)) continue;
+    const [left, right] = dataSides(edge);
+    const a = neighbours.get(left) ?? {}, b = neighbours.get(right) ?? {};
+    if (a.right || b.left) throw new Error('数据节点的这一侧已有连接，请连接结构的空闲端点');
+    a.right = right;
+    b.left = left;
+    neighbours.set(left, a);
+    neighbours.set(right, b);
+  }
+  return neighbours;
+}
+/** Keep the anchor stationary and place its entire data row at fixed horizontal intervals. */
+export function layoutLogicData(graph: canvas.LogicGraph, anchor: string): canvas.LogicGraph {
+  const neighbours = dataNeighbours(graph, anchor);
+  let next = graph;
+  const visited = new Set<string>();
+  const pending = [anchor];
+  while (pending.length) {
+    const id = pending.shift()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const box = logicBox(next, id);
+    const adjacent = neighbours.get(id);
+    for (const side of ['left', 'right'] as const) {
+      const other = adjacent?.[side];
+      if (!other || visited.has(other)) continue;
+      const target = logicBox(next, other);
+      const x = side === 'left' ? box.x - dataSpacing - target.width : box.x + box.width + dataSpacing;
+      next = moveLogicNodes(next, [other], x - target.x, box.y + box.height / 2 - target.height / 2 - target.y);
+      pending.push(other);
+    }
+  }
+  return next;
+}
+/** Detachment is a draft: the original graph remains available for cancel/undo. */
+export function detachLogicData(graph: canvas.LogicGraph, ids: readonly string[]): canvas.LogicGraph {
+  const moving = new Set(ids.flatMap((id) => [...canvas.logicMembers(graph, id)]));
+  return { ...graph, edges: graph.edges.filter((edge) => edge.kind !== 'data' || moving.has(edge.from) === moving.has(edge.to)) };
+}
+
 export function createLogicEdge(
   graph: canvas.LogicGraph,
   a: canvas.LogicNode,
   b: canvas.LogicNode,
   methods: readonly canvas.CanvasMethodDecl[],
 ): canvas.LogicEdge | undefined {
+  if (a.id === b.id || logicAttachmentHost(a) || logicAttachmentHost(b)) return undefined;
   const id = logicId(graph, 'edge');
   if (canvas.logicCategory(a) === 'data' && canvas.logicCategory(b) === 'data')
-    return { id, kind: 'data', from: a.id, to: b.id, op: b.kind === 'variable' ? 'assign' : '+' };
+    return a.kind === 'variable'
+      ? { id, kind: 'data', from: b.id, to: a.id, op: 'assign' }
+      : { id, kind: 'data', from: a.id, to: b.id, op: b.kind === 'variable' ? 'assign' : '+' };
   const data = canvas.logicCategory(a) === 'data' ? a : b;
   const flow = data === a ? b : a;
   let port: string | undefined;
@@ -107,6 +183,7 @@ export function connectLogic(
   graph: canvas.LogicGraph,
   edge: canvas.LogicEdge,
   absorb = false,
+  anchor = edge.from,
 ): canvas.LogicGraph {
   let next = { ...graph, edges: [...graph.edges, edge] };
   if (absorb && edge.kind !== 'reference') {
@@ -131,7 +208,7 @@ export function connectLogic(
         };
     }
   }
-  return next;
+  return edge.kind === 'data' ? layoutLogicData(next, anchor) : next;
 }
 function admissible(before: canvas.LogicGraph, after: canvas.LogicGraph): boolean {
   const old = new Set(canvas.validateLogicGraph(before).map((i) => `${i.nodeId}:${i.message}`));
@@ -165,19 +242,19 @@ export function nearestLogicSnap(
   methods: readonly canvas.CanvasMethodDecl[],
 ): LogicSnap | undefined {
   const moving = graph.nodes.find((n) => n.id === movingId);
-  if (!moving) return undefined;
-  const own = canvas.logicMembers(graph, movingId),
-    box = logicBox(graph, movingId);
+  if (!moving || logicAttachmentHost(moving)) return undefined;
+  const own = canvas.logicMembers(graph, movingId);
+  for (const node of graph.nodes) {
+    const host = logicAttachmentHost(node);
+    if (host && own.has(host)) own.add(node.id);
+  }
+  // 移动已有表达式只调整布局；附着节点的连接也属于其包络。
+  if (graph.edges.some((edge) => own.has(edge.from) || own.has(edge.to))) return undefined;
+  const box = logicBox(graph, movingId);
   const preview = canvas.previewLogicGraph(graph);
   const candidates: LogicSnap[] = [];
   for (const target of graph.nodes) {
-    if (own.has(target.id) || canvas.logicMembers(graph, target.id).has(movingId)) continue;
-    if (
-      graph.edges.some(
-        (e) => (e.from === movingId && e.to === target.id) || (e.to === movingId && e.from === target.id),
-      )
-    )
-      continue;
+    if (logicAttachmentHost(target) || own.has(target.id) || canvas.logicMembers(graph, target.id).has(movingId)) continue;
     const other = logicBox(graph, target.id);
     const distance = Math.hypot(
       Math.max(0, box.x - other.x - other.width, other.x - box.x - box.width),
@@ -217,8 +294,12 @@ export function nearestLogicSnap(
       )
         continue;
     }
-    const next = connectLogic(graph, edge, true);
-    if (admissible(graph, next)) candidates.push({ graph: next, edge, target: target.id, distance });
+    try {
+      const next = connectLogic(graph, edge, true, target.id);
+      if (admissible(graph, next)) candidates.push({ graph: next, edge, target: target.id, distance });
+    } catch {
+      // An occupied data side cannot accept another fixed row.
+    }
   }
   return candidates.sort((a, b) => {
     if (a.distance !== b.distance) return a.distance - b.distance;

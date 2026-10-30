@@ -38,8 +38,9 @@ export function renderLogicLibrary(input: {
   methods: readonly canvas.CanvasMethodDecl[];
   change: (state: LogicLibraryState) => void;
   add: (kind: AddableLogicKind, method?: string) => void;
+  drag: (event: PointerEvent, kind: AddableLogicKind, method?: string) => void;
 }): TemplateResult {
-  const { state, methods, change, add } = input;
+  const { state, methods, change, add, drag } = input;
   const category = categories.find((c) => c.id === state.category);
   if (!category) return html`<aside class="library" aria-label="节点库">
     <h3>节点库</h3>
@@ -47,8 +48,8 @@ export function renderLogicLibrary(input: {
       @click=${() => change({ category: c.id, page: 0 })}>
       <span>${c.label}</span><span>${optionsOf(c.id, methods).length} →</span>
     </button>`)}</nav>
-    <p class="hint">选择分类查看节点预览，点击选项添加到画布。</p>
-    <p class="hint">拖近节点：吸附连接<br />Shift 点击：多选<br />Ctrl+G：包络<br />Esc：取消拖动</p>
+    <p class="hint">选择分类查看节点预览，点击或直接拖拽到画布，靠近节点可预览连接。</p>
+    <p class="hint">节点拖近：预览吸附<br />数据节点拖动：预脱离<br />空白处拖动 / 滚轮：平移<br />Shift 拖动：框选<br />Shift 点击：多选<br />Ctrl+G：包络<br />Ctrl+C / X / V：复制 / 剪切 / 粘贴<br />Esc：取消拖动</p>
   </aside>`;
   const options = optionsOf(category.id, methods);
   const pages = Math.max(1, Math.ceil(options.length / PAGE_SIZE));
@@ -57,7 +58,9 @@ export function renderLogicLibrary(input: {
     <button class="library-back" @click=${() => change({ page: 0 })}>← 返回分类</button>
     <h3>${category.label}</h3>
     <div class="library-options">${options.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((option) => html`
-      <button class="library-option" aria-label=${option.label} @click=${() => add(option.kind, option.method)}>
+      <button class="library-option" aria-label=${option.label} @click=${() => add(option.kind, option.method)}
+        @pointerdown=${(event: PointerEvent) => drag(event, option.kind, option.method)}
+        @dragstart=${(event: Event) => event.preventDefault()}>
         <span class="library-option-label">${option.label}</span>
         <span class="library-preview" data-preview-kind=${option.kind} aria-hidden="true">
           <span class="preview-title">${option.title}</span><span class="preview-summary">${option.summary}</span>

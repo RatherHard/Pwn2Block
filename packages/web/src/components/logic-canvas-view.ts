@@ -53,16 +53,16 @@ export function logicEdgeGeometry(
       y1 = a.y + (edge.outlet === 'then' ? 24 : edge.outlet === 'else' ? 56 : 38);
     const x2 = b.x - 13,
       y2 = b.y + 38;
-    const mid = x2 >= x1 ? (x1 + x2) / 2 : Math.max(x1, b.x + b.width) + 32;
-    const path =
-      x2 >= x1
-        ? `M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`
-        : `M ${x1} ${y1} H ${mid} V ${Math.max(a.y + a.height, b.y + b.height) + 24} H ${x2 - 24} V ${y2} H ${x2}`;
+    const points = [{ x: x1, y: y1 }, ...(edge.points ?? []), { x: x2, y: y2 }];
+    const path = points.length === 2
+      ? `M ${x1} ${y1} L ${x2} ${y2}`
+      : `M ${x1} ${y1} ` + curveSegments(points).map(({ c1, c2, to }) =>
+        `C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${to.x} ${to.y}`).join(' ');
     return { paths: [path], x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
   }
   const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
-  const nx = (-(to.y - from.y) / length) * 3,
-    ny = ((to.x - from.x) / length) * 3;
+  const nx = (-(to.y - from.y) / length) * 6,
+    ny = ((to.x - from.x) / length) * 6;
   return {
     paths:
       edge.kind === 'reference'
@@ -74,4 +74,31 @@ export function logicEdgeGeometry(
     x: (from.x + to.x) / 2,
     y: (from.y + to.y) / 2,
   };
+}
+
+type Point = { x: number; y: number };
+function curveSegments(points: readonly Point[]) {
+  return points.slice(1).map((to, i) => {
+    const from = points[i]!, previous = points[Math.max(0, i - 1)]!, next = points[Math.min(points.length - 1, i + 2)]!;
+    return { from, to,
+      c1: { x: from.x + (to.x - previous.x) / 6, y: from.y + (to.y - previous.y) / 6 },
+      c2: { x: to.x - (next.x - from.x) / 6, y: to.y - (next.y - from.y) / 6 } };
+  });
+}
+/** Insert in route order, including on a curve that doubles back on itself. */
+export function logicPointInsertionIndex(graph: canvas.LogicGraph, edge: Extract<canvas.LogicEdge, { kind: 'flow' }>, point: Point): number {
+  const a = logicBox(graph, edge.from), b = logicBox(graph, edge.to);
+  const points = [{ x: a.x + a.width + 13, y: a.y + (edge.outlet === 'then' ? 24 : edge.outlet === 'else' ? 56 : 38) },
+    ...(edge.points ?? []), { x: b.x - 13, y: b.y + 38 }];
+  let best = Infinity, index = 0;
+  curveSegments(points).forEach(({ from, to, c1, c2 }, i) => {
+    for (let step = 0; step <= 64; step++) {
+      const t = step / 64, u = 1 - t;
+      const x = u ** 3 * from.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t ** 3 * to.x;
+      const y = u ** 3 * from.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t ** 3 * to.y;
+      const distance = Math.hypot(x - point.x, y - point.y);
+      if (distance < best) { best = distance; index = i; }
+    }
+  });
+  return index;
 }

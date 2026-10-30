@@ -29,7 +29,7 @@ export const LOGIC_OPERATORS = [
 export type LogicOperator = (typeof LOGIC_OPERATORS)[number];
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const literal = z.strictObject({ type: z.enum(LOGIC_TYPES), text: z.string().max(131072) });
-const base = { id, x: z.number().finite().min(0).max(100000), y: z.number().finite().min(0).max(100000) };
+const base = { id, x: z.number().finite(), y: z.number().finite() };
 export const LogicNodeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('constant'), value: literal }),
   z.strictObject({ ...base, kind: z.literal('variable'), name: z.string().max(64) }),
@@ -59,7 +59,10 @@ export type LogicNode = z.infer<typeof LogicNodeSchema>;
 export type LogicLiteral = z.infer<typeof literal>;
 export const LogicEdgeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id, kind: z.literal('data'), from: id, to: id, op: z.enum(LOGIC_OPERATORS) }),
-  z.strictObject({ id, kind: z.literal('flow'), from: id, to: id, outlet: z.enum(['next', 'then', 'else']) }),
+  z.strictObject({
+    id, kind: z.literal('flow'), from: id, to: id, outlet: z.enum(['next', 'then', 'else']),
+    points: z.array(z.strictObject({ x: base.x, y: base.y })).max(128).optional(),
+  }),
   z.strictObject({ id, kind: z.literal('reference'), from: id, to: id, port: z.string().max(128) }),
 ]);
 export type LogicEdge = z.infer<typeof LogicEdgeSchema>;

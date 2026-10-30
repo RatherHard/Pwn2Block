@@ -5,8 +5,12 @@ import { canvas } from '@pwn2block/shared';
 import type { WorkflowIssue } from '../canvas/artifact';
 import {
   connectLogic,
+  detachLogicData,
+  layoutLogicData,
+  LOGIC_RELATION_WIDTH,
   createLogicEdge,
   logicBox,
+  logicAttachmentHost,
   logicId,
   moveLogicNodes,
   nextLogicPosition,
@@ -15,14 +19,17 @@ import {
   wrapLogic,
   type LogicSnap,
 } from '../canvas/logic-editor';
+import { copyLogicSelection, parseLogicSelection, pasteLogicSelection, serializeLogicSelection } from '../canvas/logic-clipboard';
 import { terminalTheme, sharedStyles } from '../theme';
 import { LogicNodeFields } from './logic-canvas-fields';
 import { logicCanvasStyles } from './logic-canvas-styles';
-import { logicEdgeGeometry, logicSummary, logicTitle } from './logic-canvas-view';
+import { logicEdgeGeometry, logicPointInsertionIndex, logicSummary, logicTitle } from './logic-canvas-view';
 
-import { renderLogicLibrary, type LogicLibraryState } from './logic-canvas-library';
+import { renderLogicLibrary, type AddableLogicKind, type LogicLibraryState } from './logic-canvas-library';
 
-type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean };
+let localClipboard = '';
+let clipboardWrite: Promise<void> = Promise.resolve();
+type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean; library?: boolean; baseline?: canvas.LogicGraph };
 export class LogicCanvasElement extends LitElement {
   static override styles = [terminalTheme, sharedStyles, logicCanvasStyles];
   static override properties = {
@@ -44,9 +51,16 @@ export class LogicCanvasElement extends LitElement {
   private draft: canvas.LogicGraph | undefined;
   private snap: LogicSnap | undefined;
   private drag: Drag | undefined;
+  private bend: { edgeId: string; index: number } | undefined;
+  private bendDrag: { original: canvas.LogicGraph; startX: number; startY: number; moved: boolean } | undefined;
+  private suppressLibraryClick = false;
+  private viewOffset = { x: 0, y: 0 };
+  private pan: { clientX: number; clientY: number; x: number; y: number } | undefined;
   private marquee: { x: number; y: number; endX: number; endY: number } | undefined;
   private wiring: { id: string; outlet: 'next' | 'then' | 'else' } | undefined;
   private message = '';
+  private pasteCount = 0;
+  private lastPasted = '';
   private targetId = '';
   private libraryState: LogicLibraryState = { page: 0 };
   private menuPosition: { x: number; y: number } | undefined;
@@ -62,21 +76,29 @@ export class LogicCanvasElement extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener('keydown', this.keyDown);
+    this.addEventListener('copy', this.copyEvent);
+    this.addEventListener('cut', this.cutEvent);
+    this.addEventListener('paste', this.pasteEvent);
     document.addEventListener('pointerdown', this.dismissMenu, true);
     document.addEventListener('focusin', this.dismissMenu, true);
     document.addEventListener('wheel', this.dismissMenu, { capture: true, passive: true });
     window.addEventListener('resize', this.closeMenu);
     window.addEventListener('blur', this.closeMenu);
+    window.addEventListener('blur', this.cancelPointer);
   }
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.removeEventListener('keydown', this.keyDown);
+    this.removeEventListener('copy', this.copyEvent);
+    this.removeEventListener('cut', this.cutEvent);
+    this.removeEventListener('paste', this.pasteEvent);
     this.stopPointer();
     document.removeEventListener('pointerdown', this.dismissMenu, true);
     document.removeEventListener('focusin', this.dismissMenu, true);
     document.removeEventListener('wheel', this.dismissMenu, true);
     window.removeEventListener('resize', this.closeMenu);
     window.removeEventListener('blur', this.closeMenu);
+    window.removeEventListener('blur', this.cancelPointer);
     this.menuPosition = undefined;
     this.menuReturnFocus = undefined;
   }
@@ -84,11 +106,14 @@ export class LogicCanvasElement extends LitElement {
     if (changed.has('graph') && this.graph) {
       this.selected = this.selected.filter((id) => this.graph.nodes.some((n) => n.id === id));
       if (this.edgeId && !this.graph.edges.some((e) => e.id === this.edgeId)) this.edgeId = undefined;
+      if (this.bend && !this.graph.edges.some((e) => e.id === this.bend?.edgeId && e.kind === 'flow' && e.points?.[this.bend.index])) this.bend = undefined;
       if (this.wiring && !this.graph.nodes.some((n) => n.id === this.wiring?.id)) this.wiring = undefined;
     }
   }
   protected override updated(changed: PropertyValues<this>): void {
-    if (changed.has('graph') && this.graph && this.drag && this.drag.original !== this.graph) this.cancelPointer();
+    if (changed.has('graph') && this.graph &&
+      ((this.drag && (this.drag.baseline ?? this.drag.original) !== this.graph) ||
+       (this.bendDrag && this.bendDrag.original !== this.graph))) this.cancelPointer();
   }
   private closeMenu = (): void => {
     if (!this.menuPosition) return;
@@ -150,7 +175,77 @@ export class LogicCanvasElement extends LitElement {
       <div class="menu-title">画布编辑</div>
       <button role="menuitem" ?disabled=${!this.canUndo} @click=${() => this.finishMenu('logic-undo')}>撤销 <span>Ctrl Z</span></button>
       <button role="menuitem" ?disabled=${!this.canRedo} @click=${() => this.finishMenu('logic-redo')}>重做 <span>Ctrl Shift Z</span></button>
+      <button role="menuitem" ?disabled=${!this.canCopy} @click=${() => this.clipboardMenu('copy')}>复制 <span>Ctrl C</span></button>
+      <button role="menuitem" ?disabled=${!this.canCopy} @click=${() => this.clipboardMenu('cut')}>剪切 <span>Ctrl X</span></button>
+      <button role="menuitem" @click=${() => this.clipboardMenu('paste')}>粘贴 <span>Ctrl V</span></button>
     </div>`;
+  }
+  private isTextEditing(event: Event): boolean {
+    return event.composedPath().some((target) => target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable));
+  }
+  private get canCopy(): boolean {
+    return this.graph.nodes.some((n) => this.selected.includes(n.id) && n.kind !== 'start');
+  }
+  private copySelection(cut = false, event?: ClipboardEvent): void {
+    this.cancelPointer();
+    const fragment = copyLogicSelection(this.graph, this.selected);
+    if (!fragment) return;
+    localClipboard = serializeLogicSelection(fragment);
+    this.pasteCount = 0;
+    this.lastPasted = '';
+    if (event?.clipboardData) {
+      event.preventDefault();
+      event.clipboardData.setData('text/plain', localClipboard);
+    } else if (navigator.clipboard) {
+      clipboardWrite = navigator.clipboard.writeText(localClipboard).catch(() => { /* In-app clipboard remains available. */ });
+    }
+    if (cut) {
+      this.commit(removeLogic(this.graph, this.selected));
+      this.selected = [];
+      this.edgeId = undefined;
+    }
+    this.message = cut ? '已剪切所选节点' : '已复制所选节点';
+    this.requestUpdate();
+  }
+  private pasteText(text: string, at?: { x: number; y: number }): void {
+    const fragment = parseLogicSelection(text);
+    if (!fragment) { this.message = '剪贴板中没有可粘贴的节点'; this.requestUpdate(); return; }
+    this.cancelPointer();
+    const count = text === this.lastPasted ? this.pasteCount : 0;
+    this.attempt(() => {
+      const pasted = pasteLogicSelection(this.graph, fragment, at ?? {
+        x: -this.viewOffset.x + 40 + count * 24, y: -this.viewOffset.y + 50 + count * 24,
+      });
+      this.selected = pasted.selected;
+      this.edgeId = undefined;
+      this.bend = undefined;
+      this.lastPasted = text;
+      this.pasteCount = count + 1;
+      return pasted.graph;
+    });
+  }
+  private async pasteClipboard(at?: { x: number; y: number }): Promise<void> {
+    const original = this.graph;
+    await clipboardWrite;
+    let text = localClipboard;
+    try { if (navigator.clipboard) text = await navigator.clipboard.readText(); } catch { /* Use the in-app clipboard. */ }
+    if (!this.isConnected || original !== this.graph) return;
+    this.pasteText(text, at);
+  }
+  private copyEvent = (event: ClipboardEvent): void => { if (!this.isTextEditing(event)) this.copySelection(false, event); };
+  private cutEvent = (event: ClipboardEvent): void => { if (!this.isTextEditing(event)) this.copySelection(true, event); };
+  private pasteEvent = (event: ClipboardEvent): void => {
+    if (this.isTextEditing(event)) return;
+    event.preventDefault();
+    this.pasteText(event.clipboardData?.getData('text/plain') ?? localClipboard);
+  };
+  private clipboardMenu(action: 'copy' | 'cut' | 'paste'): void {
+    const at = this.menuPosition ? this.point({ clientX: this.menuPosition.x, clientY: this.menuPosition.y }) : undefined;
+    this.finishMenu();
+    if (action === 'paste') void this.pasteClipboard(at);
+    else this.copySelection(action === 'cut');
   }
   private emit(name: string, detail?: unknown): void {
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
@@ -158,7 +253,7 @@ export class LogicCanvasElement extends LitElement {
   private commit(graph: canvas.LogicGraph): void {
     if (graph === this.graph) return;
     if (!canvas.LogicGraphSchema.safeParse(graph).success) {
-      this.message = '超出文档限制：最多 512 节点、2048 连接，请检查字段长度与坐标范围';
+      this.message = '超出文档限制：最多 512 节点、2048 连接，每条流程线最多 128 个转折点，请检查字段长度与坐标范围';
       this.requestUpdate();
       return;
     }
@@ -174,20 +269,22 @@ export class LogicCanvasElement extends LitElement {
       this.requestUpdate();
     }
   }
-  private point(event: PointerEvent): { x: number; y: number } {
+  private point(event: Pick<MouseEvent, 'clientX' | 'clientY'>): { x: number; y: number } {
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage')!;
     const rect = stage.getBoundingClientRect();
-    return { x: event.clientX - rect.left + stage.scrollLeft, y: event.clientY - rect.top + stage.scrollTop };
+    return { x: event.clientX - rect.left - this.viewOffset.x, y: event.clientY - rect.top - this.viewOffset.y };
   }
   locate(id: string): void {
     const edge = this.graph.edges.find((e) => e.id === id);
+    this.bend = undefined;
     this.edgeId = edge?.id;
     this.selected = edge ? [] : [id];
     const box = logicBox(this.graph, edge?.from ?? id);
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
     if (stage) {
-      stage.scrollLeft = Math.max(0, box.x - 100);
-      stage.scrollTop = Math.max(0, box.y - 100);
+      const left = box.x + this.viewOffset.x, top = box.y + this.viewOffset.y;
+      if (left < 0 || top < 0 || left + box.width > stage.clientWidth || top + box.height > stage.clientHeight)
+        this.viewOffset = { x: 100 - box.x, y: 100 - box.y };
     }
     this.requestUpdate();
   }
@@ -196,6 +293,7 @@ export class LogicCanvasElement extends LitElement {
     event.preventDefault();
     event.stopPropagation();
     this.focus({ preventScroll: true });
+    this.bend = undefined;
     if (this.wiring) {
       const edge: canvas.LogicEdge = {
         id: logicId(this.graph, 'edge'),
@@ -217,16 +315,26 @@ export class LogicCanvasElement extends LitElement {
     this.listenPointer();
     this.requestUpdate();
   }
+  private panWheel(event: WheelEvent): void {
+    if (event.ctrlKey || this.drag || this.bendDrag || this.pan || this.marquee) return;
+    event.preventDefault();
+    const scale = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? 500 : 1;
+    this.viewOffset = { x: this.viewOffset.x - (event.shiftKey ? event.deltaY : event.deltaX) * scale,
+      y: this.viewOffset.y - (event.shiftKey ? event.deltaX : event.deltaY) * scale };
+    this.requestUpdate();
+  }
   private startStage(event: PointerEvent): void {
     if (event.button !== 0) return;
-    if ((event.target as Element).closest('.node, .envelope-title, .relation, .edge-hit, .port')) return;
+    if ((event.target as Element).closest('.node, .envelope-title, .relation, .edge-hit, .bend-handle, .attachment, .port')) return;
     event.preventDefault();
     this.focus({ preventScroll: true });
     const p = this.point(event);
     this.selected = [];
     this.edgeId = undefined;
     this.wiring = undefined;
-    this.marquee = { ...p, endX: p.x, endY: p.y };
+    this.bend = undefined;
+    if (event.shiftKey) this.marquee = { ...p, endX: p.x, endY: p.y };
+    else this.pan = { clientX: event.clientX, clientY: event.clientY, ...this.viewOffset };
     this.listenPointer();
     this.requestUpdate();
   }
@@ -241,31 +349,40 @@ export class LogicCanvasElement extends LitElement {
     window.removeEventListener('pointercancel', this.cancelPointer);
   }
   private pointerMove = (event: PointerEvent): void => {
+    if (this.pan) {
+      this.viewOffset = { x: this.pan.x + event.clientX - this.pan.clientX, y: this.pan.y + event.clientY - this.pan.clientY };
+      this.requestUpdate();
+      return;
+    }
     const p = this.point(event);
-    if (this.drag) {
+    if (this.bendDrag && this.bend) {
+      const { edgeId, index } = this.bend;
+      const dx = p.x - this.bendDrag.startX, dy = p.y - this.bendDrag.startY;
+      if (!this.bendDrag.moved && Math.hypot(dx, dy) < 4) return;
+      this.bendDrag.moved = true;
+      this.draft = this.withBendPoints(this.bendDrag.original, edgeId, (points) => points.map((point, i) =>
+        i === index ? { x: point.x + dx, y: point.y + dy } : point));
+    } else if (this.drag) {
       const dx = p.x - this.drag.startX,
         dy = p.y - this.drag.startY;
       if (!this.drag.moved && Math.hypot(dx, dy) < 4) return;
       this.drag.moved = true;
-      this.draft = moveLogicNodes(this.drag.original, this.drag.ids, dx, dy);
+      if (this.drag.library) {
+        this.suppressLibraryClick = true;
+        if (!this.insideStage(event)) { this.draft = undefined; this.snap = undefined; this.requestUpdate(); return; }
+      }
+      this.draft = moveLogicNodes(detachLogicData(this.drag.original, this.drag.ids), this.drag.ids, dx, dy);
       this.snap = this.drag.ids.length === 1 ? nearestLogicSnap(this.draft, this.drag.id, this.methods) : undefined;
     } else if (this.marquee) this.marquee = { ...this.marquee, endX: p.x, endY: p.y };
     this.requestUpdate();
   };
-  private pointerUp = (): void => {
+  private pointerUp = (event: PointerEvent): void => {
+    if (this.drag?.moved || this.bendDrag || this.pan) this.pointerMove(event);
     this.stopPointer();
+    if (this.drag?.library) setTimeout(() => { this.suppressLibraryClick = false; }, 0);
+    if (this.bendDrag && this.draft) this.commit(this.draft);
     if (this.drag?.moved && this.draft) {
-      let graph = this.snap?.graph ?? this.draft;
-      // A data snap places the relation between two nearby boxes, with a visible gap on either side.
-      if (this.snap?.edge?.kind === 'data') {
-        const moving = this.drag.id,
-          target = moving === this.snap.edge.from ? this.snap.edge.to : this.snap.edge.from;
-        const a = logicBox(graph, moving),
-          b = logicBox(graph, target);
-        const x = moving === this.snap.edge.from ? b.x - a.width - 68 : b.x + b.width + 68;
-        graph = moveLogicNodes(graph, [moving], Math.max(0, x) - a.x, b.y - a.y);
-      }
-      this.commit(graph);
+      this.commit(this.snap?.graph ?? this.draft);
     }
     if (this.marquee) {
       const r = this.marquee,
@@ -275,12 +392,15 @@ export class LogicCanvasElement extends LitElement {
         bottom = Math.max(r.y, r.endY);
       this.selected = this.graph.nodes
         .filter((n) => {
+          if (logicAttachmentHost(n)) return false;
           const b = logicBox(this.graph, n.id);
           return b.x >= left && b.y >= top && b.x + b.width <= right && b.y + b.height <= bottom;
         })
         .map((n) => n.id);
     }
+    this.pan = undefined;
     this.drag = undefined;
+    this.bendDrag = undefined;
     this.draft = undefined;
     this.snap = undefined;
     this.marquee = undefined;
@@ -288,7 +408,10 @@ export class LogicCanvasElement extends LitElement {
   };
   private cancelPointer = (): void => {
     this.stopPointer();
+    if (this.pan) this.viewOffset = { x: this.pan.x, y: this.pan.y };
+    this.pan = undefined;
     this.drag = undefined;
+    this.bendDrag = undefined;
     this.draft = undefined;
     this.snap = undefined;
     this.marquee = undefined;
@@ -306,6 +429,7 @@ export class LogicCanvasElement extends LitElement {
       return;
     const modifier = event.ctrlKey || event.metaKey;
     if (event.key === 'Escape') {
+      this.bend = undefined;
       this.cancelPointer();
       this.selected = [];
       this.edgeId = undefined;
@@ -315,6 +439,7 @@ export class LogicCanvasElement extends LitElement {
       this.emit(event.shiftKey ? 'logic-redo' : 'logic-undo');
     } else if (modifier && event.key.toLowerCase() === 'y') {
       event.preventDefault();
+      this.cancelPointer();
       this.emit('logic-redo');
     } else if (modifier && event.key.toLowerCase() === 'a') {
       event.preventDefault();
@@ -330,7 +455,7 @@ export class LogicCanvasElement extends LitElement {
       const step = event.shiftKey ? 20 : 4;
       this.commit(
         moveLogicNodes(
-          this.graph,
+          detachLogicData(this.graph, this.selected),
           this.selected,
           event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
           event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0,
@@ -340,15 +465,21 @@ export class LogicCanvasElement extends LitElement {
     this.requestUpdate();
   };
   private removeSelection(): void {
+    if (this.bend) {
+      const { edgeId, index } = this.bend;
+      this.commit(this.withBendPoints(this.graph, edgeId, (points) => points.filter((_, i) => i !== index)));
+      this.bend = undefined;
+      return;
+    }
     this.commit(removeLogic(this.graph, this.edgeId ? [this.edgeId] : this.selected));
     this.selected = [];
     this.edgeId = undefined;
   }
-  private add(kind: 'constant' | 'variable' | 'convert' | 'branch' | 'loop' | 'method', method = ''): void {
+  private makeNode(kind: AddableLogicKind, method = ''): canvas.LogicNode {
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
     const base = {
       id: logicId(this.graph, kind),
-      ...nextLogicPosition(this.graph, stage?.scrollLeft ?? 0, stage?.scrollTop ?? 0, stage?.clientWidth ?? 800),
+      ...nextLogicPosition(this.graph, -this.viewOffset.x, -this.viewOffset.y, stage?.clientWidth ?? 800),
     };
     let node: canvas.LogicNode;
     if (kind === 'constant') node = { ...base, kind, value: { type: 'int', text: '0' } };
@@ -367,9 +498,63 @@ export class LogicCanvasElement extends LitElement {
     else if (kind === 'loop') node = { ...base, kind, count: '1' };
     else if (kind === 'method') node = { ...base, kind, method };
     else node = { ...base, kind };
+    return node;
+  }
+  private add(kind: AddableLogicKind, method = ''): void {
+    if (this.suppressLibraryClick) { this.suppressLibraryClick = false; return; }
+    const node = this.makeNode(kind, method);
     this.selected = [node.id];
     this.edgeId = undefined;
+    this.bend = undefined;
     this.commit({ ...this.graph, nodes: [...this.graph.nodes, node] });
+  }
+  private insideStage(event: MouseEvent): boolean {
+    const rect = this.renderRoot.querySelector('.stage')!.getBoundingClientRect();
+    return event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom;
+  }
+  private startLibrary(event: PointerEvent, kind: AddableLogicKind, method?: string): void {
+    if (event.button !== 0) return;
+    this.cancelPointer();
+    this.suppressLibraryClick = false;
+    const point = this.point(event);
+    const node = { ...this.makeNode(kind, method), x: point.x - 90, y: point.y - 38 };
+    this.drag = { id: node.id, startX: point.x, startY: point.y,
+      original: { ...this.graph, nodes: [...this.graph.nodes, node] }, baseline: this.graph,
+      ids: [node.id], moved: false, library: true };
+    this.selected = [node.id];
+    this.edgeId = undefined;
+    this.bend = undefined;
+    this.listenPointer();
+  }
+  private withBendPoints(graph: canvas.LogicGraph, id: string,
+    edit: (points: { x: number; y: number }[]) => { x: number; y: number }[]): canvas.LogicGraph {
+    return { ...graph, edges: graph.edges.map((edge) => edge.id === id && edge.kind === 'flow'
+      ? { ...edge, points: edit(edge.points ?? []) } : edge) };
+  }
+  private addBend(event: MouseEvent, edge: canvas.LogicEdge): void {
+    if (edge.kind !== 'flow') return;
+    event.preventDefault();
+    event.stopPropagation();
+    const p = this.point(event);
+    const point = p;
+    const index = logicPointInsertionIndex(this.graph, edge, point);
+    this.edgeId = edge.id;
+    this.selected = [];
+    this.bend = { edgeId: edge.id, index };
+    this.commit(this.withBendPoints(this.graph, edge.id, (points) => [...points.slice(0, index), point, ...points.slice(index)]));
+  }
+  private startBend(event: PointerEvent, edgeId: string, index: number): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.focus({ preventScroll: true });
+    this.selected = [];
+    this.edgeId = edgeId;
+    this.bend = { edgeId, index };
+    const point = this.point(event);
+    this.bendDrag = { original: this.graph, startX: point.x, startY: point.y, moved: false };
+    this.listenPointer();
+    this.requestUpdate();
   }
   private addEdge(edge: canvas.LogicEdge): void {
     this.attempt(() => {
@@ -382,7 +567,9 @@ export class LogicCanvasElement extends LitElement {
   }
   private chooseEdge(event: Event, id: string): void {
     event.stopPropagation();
+    this.focus({ preventScroll: true });
     this.edgeId = id;
+    this.bend = undefined;
     this.selected = [];
     this.requestUpdate();
   }
@@ -425,7 +612,18 @@ export class LogicCanvasElement extends LitElement {
     const geometry = logicEdgeGeometry(graph, edge);
     return svg`<g data-edge=${edge.id} data-edge-kind=${edge.kind} class=${ghost ? 'ghost' : ''}>
       ${geometry.paths.map((d) => svg`<path class="${edge.kind === 'flow' ? 'flow-line' : 'reference-line'} ${this.edgeId === edge.id ? 'edge-selected' : ''}" d=${d} marker-end=${edge.kind === 'flow' ? 'url(#logic-arrow)' : nothing}></path>`)}
-      ${!ghost && geometry.paths[0] ? svg`<path class="edge-hit" d=${geometry.paths[0]} @pointerdown=${(e: Event) => this.chooseEdge(e, edge.id)}></path>` : nothing}
+      ${!ghost && geometry.paths[0] ? svg`<path class="edge-hit" d=${geometry.paths[edge.kind === 'reference' ? 1 : 0]} @pointerdown=${(e: Event) => this.chooseEdge(e, edge.id)} @dblclick=${(e: MouseEvent) => this.addBend(e, edge)}></path>` : nothing}
+      ${!ghost && edge.kind === 'flow' && this.edgeId === edge.id ? (edge.points ?? []).map((point, index) => svg`
+        <circle class="bend-handle ${this.bend?.edgeId === edge.id && this.bend.index === index ? 'active' : ''}"
+          cx=${point.x} cy=${point.y} r="6" tabindex="0" role="button" aria-label=${`转折点 ${index + 1}`}
+          @pointerdown=${(event: PointerEvent) => this.startBend(event, edge.id, index)}
+          @keydown=${(event: KeyboardEvent) => {
+            if (['Delete', 'Backspace', 'Enter', ' '].includes(event.key)) {
+              event.preventDefault(); event.stopPropagation(); this.bend = { edgeId: edge.id, index };
+              if (event.key === 'Delete' || event.key === 'Backspace') this.removeSelection();
+              this.requestUpdate();
+            }
+          }}></circle>`) : nothing}
     </g>`;
   }
   private relation(graph: canvas.LogicGraph, edge: canvas.LogicEdge, ghost = false): TemplateResult | typeof nothing {
@@ -437,11 +635,11 @@ export class LogicCanvasElement extends LitElement {
       class="relation ${edge.op === 'assign' ? 'assignment' : edge.op === 'concat' ? 'concat' : ''} ${ghost
         ? 'ghost'
         : ''} ${this.edgeId === edge.id ? 'selected' : ''}"
-      style=${styleMap({ left: `${p.x}px`, top: `${p.y}px` })}
+      style=${styleMap({ left: `${p.x}px`, top: `${p.y}px`, width: `${LOGIC_RELATION_WIDTH}px` })}
       aria-label=${`数据连接 ${edge.op}`}
       @pointerdown=${(e: Event) => this.chooseEdge(e, edge.id)}
     >
-      ${edge.op === 'assign' ? '赋值 →' : edge.op === 'concat' ? '拼接 +' : edge.op}
+      ${edge.op === 'assign' ? (logicBox(graph, edge.to).x <= logicBox(graph, edge.from).x ? '← 赋值' : '赋值 →') : edge.op === 'concat' ? '拼接 +' : edge.op}
     </button>`;
   }
   private renderNode(
@@ -462,11 +660,17 @@ export class LogicCanvasElement extends LitElement {
         class="envelope ${selected ? 'selected' : ''} ${snap ? 'snap-target' : ''}"
         style=${styleMap({ left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` })}
       >
-        <button class="envelope-title" @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}>
+        <div class="envelope-header"><button class="envelope-title" @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}>
           ${node.title}
           [${node.category === 'data' ? (canvas.logicHasAssignment(graph, node.id) ? '数据 / 流程' : '数据') : '流程'}]
-          ${attached.map((n) => html`<span class="attachment">· ${logicTitle(n, this.methods)}</span>`)}</button
-        >${this.ports(node)}
+          </button>
+          ${attached.map((n) => html`<button class="attachment ${this.selected.includes(n.id) ? 'selected' : ''} ${this.snap?.attachment === n.id ? 'ghost' : ''}"
+            data-attachment=${n.id} aria-label=${`编辑 ${logicTitle(n, this.methods)}`}
+            @pointerdown=${(e: PointerEvent) => { e.stopPropagation(); }}
+            @click=${() => { this.selected = [n.id]; this.edgeId = undefined; this.bend = undefined; this.requestUpdate(); }}>
+            ${logicTitle(n, this.methods)}${n.kind === 'loop' ? ` · ${n.count} 次` : ''}
+          </button>`)}
+        </div>${this.ports(node)}
       </div>`;
     const summary =
       node.kind === 'start'
@@ -506,24 +710,23 @@ export class LogicCanvasElement extends LitElement {
     if (edge)
       return html`<h3>连接属性</h3>
         <p>${edge.from} → ${edge.to}</p>
+        ${edge.kind === 'flow' ? html`<p class="hint">双击连线添加转折点，拖动调整曲线；选中转折点后按 Delete 删除。</p>
+          ${this.bend?.edgeId === edge.id ? html`<button @click=${() => this.removeSelection()}>删除转折点</button>` : nothing}` : nothing}
         ${edge.kind === 'data'
           ? html`<label
               >关系<select
                 aria-label="关系"
-                @change=${(e: Event) =>
-                  this.commit({
-                    ...this.graph,
-                    edges: this.graph.edges.map((item) =>
-                      item.id === edge.id
-                        ? { ...edge, op: (e.target as HTMLSelectElement).value as canvas.LogicOperator }
-                        : item,
-                    ),
-                  })}
+                @change=${(e: Event) => {
+                  const op = (e.target as HTMLSelectElement).value as canvas.LogicOperator;
+                  const reverse = op === 'assign' && this.graph.nodes.some((n) => n.id === edge.from && n.kind === 'variable');
+                  this.attempt(() => layoutLogicData({ ...this.graph, edges: this.graph.edges.map((item) => item.id === edge.id
+                    ? { ...edge, op, from: reverse ? edge.to : edge.from, to: reverse ? edge.from : edge.to } : item) }, edge.to));
+                }}
               >
                 ${canvas.LOGIC_OPERATORS.map(
                   (op) =>
                     html`<option value=${op} .selected=${live(op === edge.op)}>
-                      ${op === 'assign' ? '赋值 →' : op === 'concat' ? '拼接 +' : op}
+                      ${op === 'assign' ? '赋值（值 → 变量）' : op === 'concat' ? '拼接 +' : op}
                     </option>`,
                 )}
               </select></label
@@ -553,9 +756,11 @@ export class LogicCanvasElement extends LitElement {
         <p class="hint">
           ${this.selected.length
             ? `已选择 ${this.selected.length} 个节点，可创建包络。`
-            : '点击节点或连接编辑属性。Shift 点击多选，空白处拖动框选。'}
+            : '点击节点或连接编辑属性。Shift 点击多选，空白处拖动平移，Shift 拖动框选。'}
         </p>`;
-    const targets = this.graph.nodes.filter((n) => n.id !== node.id);
+    const host = logicAttachmentHost(node);
+    const connectionNode = this.graph.nodes.find((n) => n.id === host) ?? node;
+    const targets = this.graph.nodes.filter((n) => n.id !== connectionNode.id && !logicAttachmentHost(n));
     const targetId = targets.some((n) => n.id === this.targetId) ? this.targetId : '';
     return html`<h3>${logicTitle(node, this.methods)}</h3>
       ${new LogicNodeFields(
@@ -567,6 +772,7 @@ export class LogicCanvasElement extends LitElement {
           this.requestUpdate();
         },
       ).render(node)}
+      ${host ? html`<p class="hint">连接将使用所属包络。</p>` : nothing}
       <label
         >连接到<select
           aria-label="连接到"
@@ -582,7 +788,7 @@ export class LogicCanvasElement extends LitElement {
         ?disabled=${!targetId}
         @click=${() => {
           const target = targets.find((n) => n.id === targetId);
-          const edge = target && createLogicEdge(this.graph, node, target, this.methods);
+          const edge = target && createLogicEdge(this.graph, connectionNode, target, this.methods);
           if (edge) this.addEdge(edge);
           else {
             this.message = '这两个节点之间没有可用连接';
@@ -592,7 +798,7 @@ export class LogicCanvasElement extends LitElement {
       >
         建立连接
       </button>
-      <p class="hint">也可拖近节点吸附。数据连接方向从左向右；引用始终由数据指向流程。</p>
+      <p class="hint">拖动数据节点预脱离原连接，松开后固定间距排列；Esc 恢复。赋值由值指向变量。</p>
       ${this.graph.edges
         .filter((e) => e.from === node.id || e.to === node.id)
         .map(
@@ -621,11 +827,8 @@ export class LogicCanvasElement extends LitElement {
   }
   override render(): TemplateResult {
     if (!this.graph) return html``;
-    const graph = this.draft ?? this.graph,
+    const graph = this.snap?.attachment ? this.snap.graph : this.draft ?? this.graph,
       preview = canvas.previewLogicGraph(graph);
-    const boxes = graph.nodes.map((n) => logicBox(graph, n.id));
-    const width = Math.max(1600, ...boxes.map((b) => b.x + b.width + 200)),
-      height = Math.max(900, ...boxes.map((b) => b.y + b.height + 200));
     return html`<section class="workspace" @contextmenu=${this.openMenu}>
       <div class="toolbar">
         <button
@@ -636,6 +839,9 @@ export class LogicCanvasElement extends LitElement {
         ><button @click=${() => this.removeSelection()} ?disabled=${!this.selected.length && !this.edgeId}>删除</button
         ><button @click=${() => this.emit('logic-undo')} ?disabled=${!this.canUndo}>撤销</button
         ><button @click=${() => this.emit('logic-redo')} ?disabled=${!this.canRedo}>重做</button
+        ><button ?disabled=${!this.canCopy} @click=${() => this.copySelection()}>复制</button
+        ><button ?disabled=${!this.canCopy} @click=${() => this.copySelection(true)}>剪切</button
+        ><button @click=${() => this.pasteClipboard()}>粘贴</button
         ><button @click=${() => this.emit('logic-import')}>导入</button
         ><button @click=${() => this.emit('logic-export')}>导出</button
         ><button class="btn-run" @click=${() => this.emit('logic-run')} ?disabled=${this.issues.length > 0}>运行</button
@@ -658,27 +864,34 @@ export class LogicCanvasElement extends LitElement {
             });
           },
           add: (kind, method) => this.add(kind, method),
+          drag: (event, kind, method) => this.startLibrary(event, kind, method),
         })}
-        <div class="stage" tabindex="0" aria-label="节点画布" @pointerdown=${this.startStage}>
-          <div class="surface" style=${styleMap({ width: `${width}px`, height: `${height}px` })}>
-            <svg class="wires" width=${width} height=${height} aria-label="画布连接">
+        <div class=${this.pan ? 'stage panning' : 'stage'} tabindex="0" aria-label="节点画布" @pointerdown=${this.startStage} @wheel=${this.panWheel}>
+          <svg class="grid" width="100%" height="100%" aria-hidden="true">
+            <defs><pattern id="logic-dots" width="20" height="20" patternUnits="userSpaceOnUse"
+              x=${this.viewOffset.x % 20} y=${this.viewOffset.y % 20}>
+              <rect width="1" height="1" fill="var(--p2b-line)"></rect>
+            </pattern></defs>
+            <rect width="100%" height="100%" fill="url(#logic-dots)"></rect>
+          </svg>
+          <div class="surface" style=${styleMap({ transform: `translate(${this.viewOffset.x}px, ${this.viewOffset.y}px)` })}>
+            <svg class="wires reference-wires" width="100%" height="100%" aria-label="引用连接">
+              ${graph.edges.filter((e) => e.kind === 'reference').map((e) => this.edgeSvg(graph, e))}
+              ${this.snap?.edge?.kind === 'reference' ? this.edgeSvg(this.snap.graph, this.snap.edge, true) : nothing}
+            </svg>
+            <svg class="wires flow-wires" width="100%" height="100%" aria-label="流程连接">
               <defs>
-                <pattern id="logic-dots" width="20" height="20" patternUnits="userSpaceOnUse">
-                  <rect x="0" y="0" width="1" height="1" fill="var(--p2b-line)"></rect>
-                </pattern>
                 <marker id="logic-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
                   <path d="M 0 0 L 6 3.5 L 0 7" fill="none" stroke="var(--p2b-fg)"></path>
                 </marker>
               </defs>
-              <rect width="100%" height="100%" fill="url(#logic-dots)"></rect>
-              ${graph.edges.map((e) => this.edgeSvg(graph, e))}${this.snap?.edge
-                ? this.edgeSvg(this.snap.graph, this.snap.edge, true)
-                : nothing}
+              ${graph.edges.filter((e) => e.kind === 'flow').map((e) => this.edgeSvg(graph, e))}
+              ${this.snap?.edge?.kind === 'flow' ? this.edgeSvg(this.snap.graph, this.snap.edge, true) : nothing}
             </svg>
             ${graph.nodes
               .filter((n) => n.kind === 'envelope')
               .map((n) => this.renderNode(graph, n, preview))}${graph.nodes
-              .filter((n) => n.kind !== 'envelope')
+              .filter((n) => n.kind !== 'envelope' && !logicAttachmentHost(n))
               .map((n) => this.renderNode(graph, n, preview))}${graph.edges.map((e) => this.relation(graph, e))}${this
               .snap?.edge
               ? this.relation(this.snap.graph, this.snap.edge, true)

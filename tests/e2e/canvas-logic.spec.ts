@@ -121,12 +121,13 @@ test('内部吸附纳入包络、转换附着与解除、刷新保留结构', as
     .toMatchObject({ members: ['a', 'b'] });
   await panel.locator('[data-node="convert"]').click();
   await panel.getByLabel('附着包络').selectOption('g');
-  await expect(panel.locator('.envelope-title')).toContainText('类型转换');
+  await expect(panel.locator('.node[data-node="convert"]')).toHaveCount(0);
+  await expect(panel.locator('.envelope-header [data-attachment="convert"]')).toContainText('类型转换');
   await expect
     .poll(async () => page.evaluate(() => Object.values(localStorage).some((v) => v.includes('"input":"g"'))))
     .toBe(true);
   await page.reload();
-  await expect(panel.locator('.envelope-title')).toContainText('类型转换');
+  await expect(panel.locator('.envelope-header [data-attachment="convert"]')).toContainText('类型转换');
   await panel.locator('.envelope-title').click();
   await panel.getByRole('button', { name: '解除包络', exact: true }).click();
   await expect(panel.locator('.envelope')).toHaveCount(0);
@@ -136,7 +137,7 @@ test('内部吸附纳入包络、转换附着与解除、刷新保留结构', as
   await page.screenshot({ path: info.outputPath('logic-envelope.png') });
 });
 
-test('流程外置端口、直角线、三条引用线和分支侧栏', async ({ page }, info) => {
+test('流程外置端口、直线箭头、三条引用线和分支侧栏', async ({ page }, info) => {
   await openChallenge(page);
   await install(page, [
     { id: 'branch', kind: 'branch', x: 400, y: 80 },
@@ -146,8 +147,8 @@ test('流程外置端口、直角线、三条引用线和分支侧栏', async ({
   await panel.locator('[data-node="start"] .port-out').click();
   await panel.locator('[data-node="branch"] .node-title').click();
   await expect(panel.locator('.flow-line')).toHaveCount(1);
-  expect(await panel.locator('.flow-line').getAttribute('d')).toContain('H');
-  expect(await panel.locator('.flow-line').getAttribute('d')).toContain('V');
+  await expect(panel.locator('.flow-line')).toHaveAttribute('d', 'M 263 88 L 387 118');
+  await expect(panel.locator('.flow-line')).toHaveAttribute('marker-end', 'url(#logic-arrow)');
   await panel.locator('[data-node="condition"]').click();
   await panel.getByLabel('连接到', { exact: true }).selectOption('branch');
   await panel.getByRole('button', { name: '建立连接', exact: true }).click();

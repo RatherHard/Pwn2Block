@@ -140,14 +140,23 @@ export const logicCanvasStyles = css`
   }
   .stage {
     position: relative;
-    overflow: auto;
+    overflow: clip;
     min-width: 0;
     min-height: 0;
     touch-action: none;
     outline: none;
   }
+  .stage.panning, .stage.panning * {
+    cursor: grabbing !important;
+  }
+  .grid {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
   .surface {
-    position: relative;
+    position: absolute;
+    inset: 0;
     min-width: 100%;
     min-height: 100%;
   }
@@ -157,6 +166,8 @@ export const logicCanvasStyles = css`
     overflow: visible;
     pointer-events: none;
   }
+  .flow-wires { z-index: 6; }
+  .reference-wires .edge-hit { stroke-width: 22; }
   .flow-line {
     stroke: var(--p2b-fg);
     stroke-width: 1.5;
@@ -224,16 +235,48 @@ export const logicCanvasStyles = css`
   .envelope.selected {
     border-color: var(--p2b-focus);
   }
-  .envelope-title {
+  .envelope-header {
     position: absolute;
     top: 6px;
     left: 8px;
-    pointer-events: auto;
-    cursor: grab;
+    right: 8px;
     background: var(--p2b-bg);
-    padding: 2px 5px;
-    max-width: calc(100% - 16px);
+    pointer-events: auto;
   }
+  .envelope-title {
+    display: block;
+    cursor: grab;
+    padding: 2px 5px;
+    max-width: 100%;
+    height: 26px;
+    min-height: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .envelope-header .attachment {
+    display: block;
+    width: 100%;
+    height: 26px;
+    min-height: 0;
+    text-align: left;
+    border: 0;
+    padding: 2px 5px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .attachment.selected { outline: 1px solid var(--p2b-focus); }
+  .library-option { touch-action: none; user-select: none; cursor: grab; }
+  .bend-handle {
+    pointer-events: all;
+    fill: var(--p2b-bg);
+    stroke: var(--p2b-focus);
+    stroke-width: 2;
+    cursor: move;
+  }
+  .bend-handle.active { fill: var(--p2b-focus); }
   .port {
     pointer-events: auto;
     position: absolute;
