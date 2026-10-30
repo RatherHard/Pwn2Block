@@ -138,6 +138,26 @@ export function layoutLogicData(graph: canvas.LogicGraph, anchor: string): canva
   }
   return next;
 }
+/** 拖动赋值目标时，携带完整的数据表达式及其嵌套包络。 */
+export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[]): string[] {
+  const moving = new Set(ids);
+  for (const id of ids) {
+    if (!graph.edges.some((edge) => edge.kind === 'data' && edge.op === 'assign' && edge.to === id)) continue;
+    const pending = [id], visited = new Set<string>();
+    while (pending.length) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      moving.add(current);
+      for (const edge of graph.edges) {
+        if (edge.kind !== 'data') continue;
+        if (edge.from === current) pending.push(edge.to);
+        if (edge.to === current) pending.push(edge.from);
+      }
+    }
+  }
+  return [...moving];
+}
 /** Detachment is a draft: the original graph remains available for cancel/undo. */
 export function detachLogicData(graph: canvas.LogicGraph, ids: readonly string[]): canvas.LogicGraph {
   const moving = new Set(ids.flatMap((id) => [...canvas.logicMembers(graph, id)]));

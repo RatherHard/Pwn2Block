@@ -221,6 +221,8 @@ export const logicCanvasStyles = css`
     white-space: nowrap;
     font-size: inherit;
   }
+  .node[data-kind='branch'] { padding-right: 62px; }
+  .port[aria-pressed='true'] { border-color: var(--p2b-focus); background: var(--p2b-focus); }
   .node[data-kind='variable'] {
     border-color: var(--p2b-info, #55ffff);
   }
@@ -235,6 +237,20 @@ export const logicCanvasStyles = css`
   }
   .envelope.selected {
     border-color: var(--p2b-focus);
+  }
+  .envelope-summary {
+    position: absolute;
+    bottom: 2px;
+    left: 8px;
+    right: 8px;
+    height: 20px;
+    line-height: 20px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--p2b-dim);
+    background: var(--p2b-bg);
+    pointer-events: auto;
   }
   .envelope-header {
     position: absolute;
@@ -328,9 +344,6 @@ export const logicCanvasStyles = css`
   }
   .relation.assignment {
     border-color: var(--p2b-caution, #ffff55);
-  }
-  .relation.concat {
-    border-color: var(--p2b-ok, #55ff55);
   }
   .relation.selected {
     outline: 1px solid var(--p2b-focus);

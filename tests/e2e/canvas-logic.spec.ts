@@ -144,8 +144,8 @@ test('流程外置端口、直线箭头、三条引用线和分支侧栏', async
     constant('condition', 100, 280, 'true', 'bool'),
   ]);
   const panel = panelOf(page);
+  await panel.locator('[data-node="branch"] .port-in').click();
   await panel.locator('[data-node="start"] .port-out').click();
-  await panel.locator('[data-node="branch"] .node-title').click();
   await expect(panel.locator('.flow-line')).toHaveCount(1);
   await expect(panel.locator('.flow-line')).toHaveAttribute('d', 'M 263 88 L 387 118');
   await expect(panel.locator('.flow-line')).toHaveAttribute('marker-end', 'url(#logic-arrow)');

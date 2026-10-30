@@ -12,6 +12,7 @@ import {
   logicBox,
   logicAttachmentHost,
   logicId,
+  logicDragIds,
   moveLogicNodes,
   nextLogicPosition,
   nearestLogicSnap,
@@ -23,7 +24,7 @@ import { copyLogicSelection, parseLogicSelection, pasteLogicSelection, serialize
 import { terminalTheme, sharedStyles } from '../theme';
 import { LogicNodeFields } from './logic-canvas-fields';
 import { logicCanvasStyles } from './logic-canvas-styles';
-import { logicEdgeGeometry, logicPointInsertionIndex, logicSummary, logicLiteralSummary, logicTitle } from './logic-canvas-view';
+import { logicFlowHitClip, logicEdgeGeometry, logicPointInsertionIndex, logicSummary, logicLiteralSummary, logicTitle } from './logic-canvas-view';
 
 import { renderLogicLibrary, type AddableLogicKind, type LogicLibraryState } from './logic-canvas-library';
 
@@ -58,7 +59,7 @@ export class LogicCanvasElement extends LitElement {
   private viewScale = 1;
   private pan: { clientX: number; clientY: number; x: number; y: number } | undefined;
   private marquee: { x: number; y: number; endX: number; endY: number } | undefined;
-  private wiring: { id: string; outlet: 'next' | 'then' | 'else' } | undefined;
+  private wiring: { input: string } | undefined;
   private message = '';
   private pasteCount = 0;
   private lastPasted = '';
@@ -108,7 +109,7 @@ export class LogicCanvasElement extends LitElement {
       this.selected = this.selected.filter((id) => this.graph.nodes.some((n) => n.id === id));
       if (this.edgeId && !this.graph.edges.some((e) => e.id === this.edgeId)) this.edgeId = undefined;
       if (this.bend && !this.graph.edges.some((e) => e.id === this.bend?.edgeId && e.kind === 'flow' && e.points?.[this.bend.index])) this.bend = undefined;
-      if (this.wiring && !this.graph.nodes.some((n) => n.id === this.wiring?.id)) this.wiring = undefined;
+      if (this.wiring && !this.graph.nodes.some((n) => n.id === this.wiring?.input)) this.wiring = undefined;
     }
   }
   protected override updated(changed: PropertyValues<this>): void {
@@ -296,15 +297,8 @@ export class LogicCanvasElement extends LitElement {
     this.focus({ preventScroll: true });
     this.bend = undefined;
     if (this.wiring) {
-      const edge: canvas.LogicEdge = {
-        id: logicId(this.graph, 'edge'),
-        kind: 'flow',
-        from: this.wiring.id,
-        to: id,
-        outlet: this.wiring.outlet,
-      };
-      this.wiring = undefined;
-      this.addEdge(edge);
+      this.message = '请点击右侧出口完成连接，Esc 取消';
+      this.requestUpdate();
       return;
     }
     if (event.shiftKey)
@@ -312,7 +306,7 @@ export class LogicCanvasElement extends LitElement {
     else if (!this.selected.includes(id)) this.selected = [id];
     this.edgeId = undefined;
     const point = this.point(event);
-    this.drag = { id, startX: point.x, startY: point.y, original: this.graph, ids: [...this.selected], moved: false };
+    this.drag = { id, startX: point.x, startY: point.y, original: this.graph, ids: logicDragIds(this.graph, this.selected), moved: false };
     this.listenPointer();
     this.requestUpdate();
   }
@@ -579,46 +573,46 @@ export class LogicCanvasElement extends LitElement {
     this.selected = [];
     this.requestUpdate();
   }
+  private flowPort(event: PointerEvent, node: canvas.LogicNode, outlet?: 'next' | 'then' | 'else'): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.focus({ preventScroll: true });
+    if (!outlet) {
+      this.wiring = { input: node.id };
+      this.message = '点击另一节点的右侧出口完成连接，Esc 取消';
+    } else if (!this.wiring) {
+      this.message = '请先点击目标节点的左侧入口';
+    } else {
+      const to = this.wiring.input;
+      this.wiring = undefined;
+      this.addEdge({ id: logicId(this.graph, 'edge'), kind: 'flow', from: node.id, to, outlet });
+    }
+    this.requestUpdate();
+  }
   private ports(node: canvas.LogicNode): TemplateResult | typeof nothing {
     if (!canvas.logicIsFlow(this.graph, node) || (node.kind === 'loop' && node.body)) return nothing;
-    const startWire = (event: Event, outlet: 'next' | 'then' | 'else'): void => {
-      if (event instanceof PointerEvent && event.button !== 0) return;
-      event.stopPropagation();
-      this.wiring = { id: node.id, outlet };
-      this.message = '点击目标流程节点完成连接，Esc 取消';
-      this.requestUpdate();
-    };
     return html`${node.kind !== 'start'
-      ? html`<button
-          class="port port-in"
-          aria-label="流程入口"
-          @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}
-        ></button>`
-      : nothing}
+      ? html`<button class="port port-in" aria-label="流程入口"
+          aria-pressed=${this.wiring?.input === node.id}
+          @pointerdown=${(e: PointerEvent) => this.flowPort(e, node)}></button>` : nothing}
     ${node.kind === 'branch'
-      ? html`<span class="port-label then-label">true</span
-          ><button
-            class="port port-then"
-            aria-label="true 分支"
-            @pointerdown=${(e: Event) => startWire(e, 'then')}
-          ></button
-          ><span class="port-label else-label">false</span
-          ><button
-            class="port port-else"
-            aria-label="false 分支"
-            @pointerdown=${(e: Event) => startWire(e, 'else')}
-          ></button>`
-      : html`<button
-          class="port port-out"
-          aria-label="流程出口"
-          @pointerdown=${(e: Event) => startWire(e, 'next')}
-        ></button>`}`;
+      ? html`<span class="port-label then-label">true</span><button
+          class="port port-then" aria-label="true 分支"
+          @pointerdown=${(e: PointerEvent) => this.flowPort(e, node, 'then')}></button>
+        <span class="port-label else-label">false</span><button
+          class="port port-else" aria-label="false 分支"
+          @pointerdown=${(e: PointerEvent) => this.flowPort(e, node, 'else')}></button>`
+      : html`<button class="port port-out" aria-label="流程出口"
+          @pointerdown=${(e: PointerEvent) => this.flowPort(e, node, 'next')}></button>`}`;
   }
   private edgeSvg(graph: canvas.LogicGraph, edge: canvas.LogicEdge, ghost = false): TemplateResult {
     const geometry = logicEdgeGeometry(graph, edge);
-    return svg`<g data-edge=${edge.id} data-edge-kind=${edge.kind} class=${ghost ? 'ghost' : ''}>
+    return svg`${edge.kind === 'flow' && !ghost ? svg`<defs><clipPath id=${`flow-hit-${edge.id}`}>
+      <path clip-rule="evenodd" d=${logicFlowHitClip(graph, edge)}></path>
+    </clipPath></defs>` : nothing}<g data-edge=${edge.id} data-edge-kind=${edge.kind} class=${ghost ? 'ghost' : ''}>
       ${geometry.paths.map((d) => svg`<path class="${edge.kind === 'flow' ? 'flow-line' : 'reference-line'} ${this.edgeId === edge.id ? 'edge-selected' : ''}" d=${d} marker-end=${edge.kind === 'flow' ? 'url(#logic-arrow)' : nothing}></path>`)}
-      ${!ghost && geometry.paths[0] ? svg`<path class="edge-hit" d=${geometry.paths[edge.kind === 'reference' ? 1 : 0]} @pointerdown=${(e: Event) => this.chooseEdge(e, edge.id)} @dblclick=${(e: MouseEvent) => this.addBend(e, edge)}></path>` : nothing}
+      ${!ghost && geometry.paths[0] ? svg`<path class="edge-hit" clip-path=${edge.kind === 'flow' ? `url(#flow-hit-${edge.id})` : nothing} d=${geometry.paths[edge.kind === 'reference' ? 1 : 0]} @pointerdown=${(e: Event) => this.chooseEdge(e, edge.id)} @dblclick=${(e: MouseEvent) => this.addBend(e, edge)}></path>` : nothing}
       ${!ghost && edge.kind === 'flow' && this.edgeId === edge.id ? (edge.points ?? []).map((point, index) => svg`
         <circle class="bend-handle ${this.bend?.edgeId === edge.id && this.bend.index === index ? 'active' : ''}"
           cx=${point.x} cy=${point.y} r="6" tabindex="0" role="button" aria-label=${`转折点 ${index + 1}`}
@@ -638,14 +632,14 @@ export class LogicCanvasElement extends LitElement {
     return html`<button
       data-edge=${edge.id}
       data-edge-kind="data"
-      class="relation ${edge.op === 'assign' ? 'assignment' : edge.op === 'concat' ? 'concat' : ''} ${ghost
+      class="relation ${edge.op === 'assign' ? 'assignment' : ''} ${ghost
         ? 'ghost'
         : ''} ${this.edgeId === edge.id ? 'selected' : ''}"
       style=${styleMap({ left: `${p.x}px`, top: `${p.y}px`, width: `${LOGIC_RELATION_WIDTH}px` })}
-      aria-label=${`数据连接 ${edge.op}`}
+      aria-label=${`数据连接 ${edge.op === 'concat' ? '+' : edge.op}`}
       @pointerdown=${(e: Event) => this.chooseEdge(e, edge.id)}
     >
-      ${edge.op === 'assign' ? (logicBox(graph, edge.to).x <= logicBox(graph, edge.from).x ? '← 赋值' : '赋值 →') : edge.op === 'concat' ? '拼接 +' : edge.op}
+      ${edge.op === 'assign' ? (logicBox(graph, edge.to).x <= logicBox(graph, edge.from).x ? '← 赋值' : '赋值 →') : edge.op === 'concat' ? '+' : edge.op}
     </button>`;
   }
   private renderNode(
@@ -676,7 +670,10 @@ export class LogicCanvasElement extends LitElement {
             @click=${() => { this.selected = [n.id]; this.edgeId = undefined; this.bend = undefined; this.requestUpdate(); }}>
             ${logicTitle(n, this.methods)}${n.kind === 'loop' ? ` · ${n.count} 次` : ''}
           </button>`)}
-        </div>${this.ports(node)}
+        </div>
+        ${node.category === 'data' ? html`<span class="envelope-summary" title=${logicSummary(preview.get(node.id))}>
+          = ${logicSummary(preview.get(node.id))}</span>` : nothing}
+        ${this.ports(node)}
       </div>`;
     const summary =
       node.kind === 'start'
@@ -684,7 +681,7 @@ export class LogicCanvasElement extends LitElement {
         : node.kind === 'loop'
           ? `${node.body ? '已附着' : '拖近流程包络附着'} · ${node.count} 次`
           : node.kind === 'branch'
-            ? 'bool 引用 → true / false'
+            ? 'bool 条件'
             : node.kind === 'method'
               ? '引用数据作为参数'
               : node.kind === 'constant' ? logicLiteralSummary(node.value) : logicSummary(preview.get(node.id));
@@ -731,8 +728,8 @@ export class LogicCanvasElement extends LitElement {
               >
                 ${canvas.LOGIC_OPERATORS.map(
                   (op) =>
-                    html`<option value=${op} .selected=${live(op === edge.op)}>
-                      ${op === 'assign' ? '赋值（值 → 变量）' : op === 'concat' ? '拼接 +' : op === '*' ? '乘法 / 重复 *' : op}
+                    html`<option value=${op} .selected=${live(op === (edge.op === 'concat' ? '+' : edge.op))}>
+                      ${op === 'assign' ? '赋值（值 → 变量）' : op === '+' ? '加法 / 拼接 +' : op === '*' ? '乘法 / 重复 *' : op}
                     </option>`,
                 )}
               </select></label
@@ -804,7 +801,7 @@ export class LogicCanvasElement extends LitElement {
       >
         建立连接
       </button>
-      <p class="hint">拖动数据节点预脱离原连接，松开后固定间距排列；Esc 恢复。赋值由值指向变量。</p>
+      <p class="hint">拖动赋值目标时整体移动表达式；其他数据节点拖动可脱离连接，Esc 恢复。流程连线先点左侧入口，再点右侧出口。</p>
       ${this.graph.edges
         .filter((e) => e.from === node.id || e.to === node.id)
         .map(

@@ -84,6 +84,22 @@ export function logicEdgeGeometry(
   };
 }
 
+/** 连线命中范围避开端口，保证已有连接的端口仍可点击。 */
+export function logicFlowHitClip(graph: canvas.LogicGraph, edge: Extract<canvas.LogicEdge, { kind: 'flow' }>): string {
+  const a = logicBox(graph, edge.from), b = logicBox(graph, edge.to);
+  const from = { x: a.x + a.width + 13, y: a.y + (edge.outlet === 'then' ? 24 : edge.outlet === 'else' ? 56 : 38) };
+  const to = { x: b.x - 13, y: b.y + 38 };
+  const points = [from, ...(edge.points ?? []), to];
+  const left = Math.min(...points.map((p) => p.x)), right = Math.max(...points.map((p) => p.x));
+  const top = Math.min(...points.map((p) => p.y)), bottom = Math.max(...points.map((p) => p.y));
+  const pad = Math.max(right - left, bottom - top, 100);
+  const outer = `M ${left - pad} ${top - pad} H ${right + pad} V ${bottom + pad} H ${left - pad} Z`;
+  // 端口重叠时合并排除区域，避免奇偶裁剪重新开放重叠部分。
+  if (Math.abs(from.x - to.x) < 24 && Math.abs(from.y - to.y) < 24)
+    return `${outer} M ${Math.min(from.x, to.x) - 12} ${Math.min(from.y, to.y) - 12} H ${Math.max(from.x, to.x) + 12} V ${Math.max(from.y, to.y) + 12} H ${Math.min(from.x, to.x) - 12} Z`;
+  return outer + [from, to].map((p) => ` M ${p.x - 12} ${p.y - 12} h 24 v 24 h -24 Z`).join('');
+}
+
 type Point = { x: number; y: number };
 function curveSegments(points: readonly Point[]) {
   return points.slice(1).map((to, i) => {

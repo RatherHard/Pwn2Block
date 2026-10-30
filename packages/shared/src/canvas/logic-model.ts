@@ -1,4 +1,4 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 import type { CanvasDocument } from './document';
 
 /** The editor stores relationships as edges; envelopes only own members. */
@@ -24,9 +24,9 @@ export const LOGIC_OPERATORS = [
   '>>',
   'and',
   'or',
-  'concat',
 ] as const;
-export type LogicOperator = (typeof LOGIC_OPERATORS)[number];
+// 兼容旧存档的 concat；新建连接统一使用 + 表示加法或拼接。
+export type LogicOperator = (typeof LOGIC_OPERATORS)[number] | 'concat';
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const literal = z.strictObject({ type: z.enum(LOGIC_TYPES), text: z.string().max(131072) });
 const base = { id, x: z.number().finite(), y: z.number().finite() };
@@ -58,7 +58,7 @@ export const LogicNodeSchema = z.discriminatedUnion('kind', [
 export type LogicNode = z.infer<typeof LogicNodeSchema>;
 export type LogicLiteral = z.infer<typeof literal>;
 export const LogicEdgeSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ id, kind: z.literal('data'), from: id, to: id, op: z.enum(LOGIC_OPERATORS) }),
+  z.strictObject({ id, kind: z.literal('data'), from: id, to: id, op: z.enum([...LOGIC_OPERATORS, 'concat']) }),
   z.strictObject({
     id, kind: z.literal('flow'), from: id, to: id, outlet: z.enum(['next', 'then', 'else']),
     points: z.array(z.strictObject({ x: base.x, y: base.y })).max(128).optional(),

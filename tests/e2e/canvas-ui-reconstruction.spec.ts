@@ -1,4 +1,5 @@
 import { test } from './helpers';
+test.use({ viewport: { width: 1920, height: 1080 } });
 import { expect } from '@playwright/test';
 import { constant, installGraph, openChallenge, panelOf, readGraph } from './helpers';
 
@@ -19,11 +20,11 @@ test('附着循环的流程包络有可点击的外置端口，附件可解除',
   const panel = panelOf(page);
   await panel.locator('[data-node="loop"]').click();
   await panel.getByLabel('附着包络').selectOption('body');
-  await expect(panel.locator('.envelope-title')).toContainText('次数循环');
-  await panel.locator('[data-node="start"] .port-out').click();
+  await expect(panel.locator('.envelope-header .attachment')).toContainText('次数循环');
   await panel.locator('[data-node="body"] .port-in').click();
+  await panel.locator('[data-node="start"] .port-out').click();
   await expect(page.locator('pwn2block-app p.status')).toContainText('动作 0/3');
-  await panel.locator('[data-node="loop"]').click();
+  await panel.locator('[data-attachment="loop"]').click();
   await panel.getByLabel('附着包络').selectOption('');
   expect((await readGraph(page)).nodes.find((n) => n.id === 'loop')).not.toHaveProperty('body');
 });
@@ -61,10 +62,10 @@ test('赋值包络既能引用为参数，也能通过外置端口接入流程',
   expect((await readGraph(page)).edges).toContainEqual(
     expect.objectContaining({ kind: 'reference', from: 'group', to: 'm', port: 'data' }),
   );
-  await panel.locator('[data-node="start"] .port-out').click();
   await panel.locator('[data-node="group"] .port-in').click();
-  await panel.locator('[data-node="group"] .port-out').click();
+  await panel.locator('[data-node="start"] .port-out').click();
   await panel.locator('[data-node="m"] .port-in').click();
+  await panel.locator('[data-node="group"] .port-out').click();
   expect((await readGraph(page)).edges.filter((e) => e.kind === 'flow')).toHaveLength(2);
   await expect(page.locator('pwn2block-app p.status')).toContainText('动作 0/1');
 });
