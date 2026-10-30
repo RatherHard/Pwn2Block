@@ -248,8 +248,8 @@ export function nearestLogicSnap(
     const host = logicAttachmentHost(node);
     if (host && own.has(host)) own.add(node.id);
   }
-  // 移动已有表达式只调整布局；附着节点的连接也属于其包络。
-  if (graph.edges.some((edge) => own.has(edge.from) || own.has(edge.to))) return undefined;
+  // 内部连接属于包络表达式；只有跨边界的连接阻止整体重新吸附（包括附件）。
+  if (graph.edges.some((edge) => own.has(edge.from) !== own.has(edge.to))) return undefined;
   const box = logicBox(graph, movingId);
   const preview = canvas.previewLogicGraph(graph);
   const candidates: LogicSnap[] = [];

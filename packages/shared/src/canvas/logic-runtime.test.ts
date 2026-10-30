@@ -494,3 +494,48 @@ describe('节点逻辑审查回归：附着循环次数依赖', () => {
     expect(result.sequence.steps.at(-1)?.rounds).toEqual({});
   });
 });
+
+describe('string/bytes repetition connections', () => {
+  it.each([
+    ['string', 'ab🙂', { kind: 'string', value: 'ab🙂ab🙂ab🙂' }],
+    ['bytes', '00ff', { kind: 'byte', bytes: new Uint8Array([0, 255, 0, 255, 0, 255]) }],
+  ] as const)('repeats a %s fragment through a * edge and an envelope', (type, text, expected) => {
+    const g = graph([value('fragment', text, type), value('count', '3'), envelope('result', ['fragment', 'count'])],
+      [data('fragment', 'count', '*')]);
+    expect(validateLogicGraph(g)).toEqual([]);
+    expect(previewLogicGraph(g).get('result')).toEqual(expected);
+  });
+  it.each(['string', 'bytes'] as const)('accepts zero and huge counts for empty %s fragments', (type) => {
+    for (const [text, count] of [['ab', '0'], ['', '1000000000000000000']] as const) {
+      const g = graph([value('fragment', text, type), value('count', count)], [data('fragment', 'count', '*')]);
+      expect(previewLogicGraph(g).get('count')).toEqual(type === 'string'
+        ? { kind: 'string', value: '' } : { kind: 'byte', bytes: new Uint8Array() });
+    }
+  });
+  it.each(['string', 'bytes'] as const)('reports invalid counts and oversized %s results on the connection', (type) => {
+    for (const [count, countType, message] of [
+      ['-1', 'int', /重复次数不能为负/],
+      ['1.5', 'double', /重复次数需要整数/],
+      ['3', 'string', /重复次数需要整数/],
+      ['1000000000000000000', 'int', /超过上限/],
+    ] as const) {
+      const g = graph([value('fragment', 'ab', type), value('count', count, countType)], [data('fragment', 'count', '*')]);
+      expect(previewLogicGraph(g).get('count')).toMatch(message);
+    }
+  });
+});
+
+it('compiles repeated bytes from a nested envelope into method arguments', () => {
+  const g = graph([
+    value('fragment', '00ff', 'bytes'), value('count', '3'),
+    envelope('inner', ['fragment', 'count']), envelope('outer', ['inner']), method('send'),
+  ], [data('fragment', 'count', '*'), ref('outer', 'send', 'payload'), flow('start', 'send')]);
+  const options = { methods: [{ id: 'emit', label: 'emit', params: [{ name: 'payload', type: 'bytes' as const }], actionCount: 1 }] };
+  expect(generateLogicActions(g, options)).toMatchObject({ ok: true, sequence: {
+    actions: [{ type: 'block', id: 'emit', args: { payload: '00ff00ff00ff' } }],
+  } });
+  const invalid = { ...g, nodes: g.nodes.map((n) => n.id === 'count' ? value('count', '-1') : n) };
+  expect(generateLogicActions(invalid, options)).toMatchObject({ ok: false, issues: [
+    { nodeId: 'fragment-count', message: expect.stringMatching(/重复次数不能为负/) },
+  ] });
+});

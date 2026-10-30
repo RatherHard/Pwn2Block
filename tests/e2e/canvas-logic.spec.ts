@@ -189,3 +189,32 @@ test('拖动期间导入新图，松手不能把旧图写回来', async ({ page 
   await page.mouse.up();
   expect((await graph(page)).nodes.map((n) => n.id)).toEqual(['start', 'fresh']);
 });
+
+test('nested envelope with internal edges previews and commits its outer reference', async ({ page }) => {
+  await openChallenge(page);
+  await install(page, [
+    constant('left', 200, 300), constant('right', 448, 300),
+    { id: 'inner', kind: 'envelope', category: 'data', title: 'inner', members: ['left', 'right'], x: 0, y: 0 },
+    { id: 'outer', kind: 'envelope', category: 'data', title: 'outer', members: ['inner'], x: 0, y: 0 },
+    { id: 'loop', kind: 'loop', count: '1', x: 900, y: 300 },
+  ], [{ id: 'sum', kind: 'data', from: 'left', to: 'right', op: '+' }]);
+  const panel = panelOf(page);
+  await panel.locator('.stage').evaluate((e) => e.scrollIntoView({ block: 'start' }));
+  const title = panel.locator('[data-node="outer"] .envelope-title');
+  const box = await title.boundingBox();
+  if (!box) throw new Error('Missing outer envelope title');
+  await page.mouse.move(box.x + 30, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 222, box.y + box.height / 2, { steps: 8 });
+  await expect(panel.locator('.reference-line')).toHaveCount(3);
+  expect((await graph(page)).edges).toHaveLength(1);
+  await page.mouse.up();
+  expect((await graph(page)).edges).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'reference', from: 'outer', to: 'loop', port: 'count' }),
+    expect.objectContaining({ id: 'sum', from: 'left', to: 'right' }),
+  ]));
+  await panel.getByRole('button', { name: '撤销', exact: true }).click();
+  await expect(panel.locator('.reference-line')).toHaveCount(0);
+  await panel.getByRole('button', { name: '重做', exact: true }).click();
+  await expect(panel.locator('.reference-line')).toHaveCount(3);
+});

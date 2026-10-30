@@ -1,4 +1,5 @@
 import { applyBinary } from './ops';
+import { repeatOf } from './collection';
 import { applyConversion } from './convert';
 import { BINARY_OPERATORS, type BinaryOperator } from './operators';
 import { decodeScalarValue } from './value-codec';
@@ -61,6 +62,8 @@ const operators: Readonly<Record<string, string>> = {
   or: 'or',
 };
 export function logicBinary(op: LogicOperator, left: Value, right: Value, id: string): Value {
+  if (op === '*' && (left.kind === 'string' || left.kind === 'byte'))
+    return requireLogic(repeatOf(left, right), id);
   if ((op === '+' || op === 'concat') && left.kind === right.kind) {
     if (left.kind === 'string' && right.kind === 'string') return checked(stringValue(left.value + right.value), id);
     if (left.kind === 'byte' && right.kind === 'byte') {

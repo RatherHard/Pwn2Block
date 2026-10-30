@@ -563,3 +563,34 @@ describe('非法附着保留原图和表单值', () => {
     );
   });
 });
+
+it.each(['string', 'bytes'] as const)('selecting * repeats a %s fragment and survives undo/save', async (type) => {
+  const { panel } = await mount();
+  const doc = canvas.newLogicDocument();
+  panel.setDocument({ ...doc, logic: { version: 1, nodes: [
+    ...doc.logic!.nodes,
+    { id: 'fragment', kind: 'constant', value: { type, text: 'ab' }, x: 50, y: 200 },
+    { id: 'count', kind: 'constant', value: { type: 'int', text: '3' }, x: 298, y: 200 },
+  ], edges: [{ id: 'repeat', kind: 'data', from: 'fragment', to: 'count', op: '+' }] } });
+  await settle(panel);
+  const root = child(panel)!.shadowRoot!;
+  root.querySelector('.relation')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  await child(panel)!.updateComplete;
+  const select = root.querySelector<HTMLSelectElement>('[aria-label="关系"]')!;
+  expect(select.querySelector('option[value="*"]')!.textContent).toContain('重复');
+  select.value = '*';
+  select.dispatchEvent(new Event('change'));
+  await settle(panel);
+  const expected = type === 'string' ? { kind: 'string', value: 'ababab' }
+    : { kind: 'byte', bytes: new Uint8Array([0xab, 0xab, 0xab]) };
+  expect(canvas.previewLogicGraph(panel.document!.logic!).get('count')).toEqual(expected);
+  button(panel, '撤销').click();
+  await settle(panel);
+  expect(panel.document!.logic!.edges[0]).toMatchObject({ op: '+' });
+  button(panel, '重做').click();
+  await settle(panel);
+  const loaded = parseCanvasSave(JSON.parse(panel.exportSave()), ret2winPublic.id);
+  expect(loaded.ok).toBe(true);
+  if (!loaded.ok) throw new Error('save failed');
+  expect(canvas.previewLogicGraph(loaded.save.document.logic!).get('count')).toEqual(expected);
+});

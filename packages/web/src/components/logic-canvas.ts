@@ -726,7 +726,7 @@ export class LogicCanvasElement extends LitElement {
                 ${canvas.LOGIC_OPERATORS.map(
                   (op) =>
                     html`<option value=${op} .selected=${live(op === edge.op)}>
-                      ${op === 'assign' ? '赋值（值 → 变量）' : op === 'concat' ? '拼接 +' : op}
+                      ${op === 'assign' ? '赋值（值 → 变量）' : op === 'concat' ? '拼接 +' : op === '*' ? '乘法 / 重复 *' : op}
                     </option>`,
                 )}
               </select></label
