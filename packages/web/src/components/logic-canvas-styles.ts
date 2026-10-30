@@ -155,6 +155,7 @@ export const logicCanvasStyles = css`
     pointer-events: none;
   }
   .surface {
+    transform-origin: 0 0;
     position: absolute;
     inset: 0;
     min-width: 100%;

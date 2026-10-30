@@ -594,3 +594,64 @@ it.each(['string', 'bytes'] as const)('selecting * repeats a %s fragment and sur
   if (!loaded.ok) throw new Error('save failed');
   expect(canvas.previewLogicGraph(loaded.save.document.logic!).get('count')).toEqual(expected);
 });
+
+it('shows a bytes literal independently from the connected expression result', async () => {
+  const { panel } = await mount();
+  const doc = canvas.newLogicDocument();
+  panel.setDocument({ ...doc, logic: { version: 1, nodes: [
+    ...doc.logic!.nodes,
+    { id: 'prefix', kind: 'constant', value: { type: 'bytes', text: '2f62696e2f7368' }, x: 50, y: 200 },
+    { id: 'zero', kind: 'constant', value: { type: 'bytes', text: '00' }, x: 318, y: 200 },
+  ], edges: [{ id: 'concat', kind: 'data', from: 'prefix', to: 'zero', op: '+' }] } });
+  await settle(panel);
+  panel.locate('zero');
+  await settle(panel);
+  const root = child(panel)!.shadowRoot!;
+  expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="值"]')!.value).toBe('00');
+  expect(root.querySelector('[data-node="zero"] .node-summary')!.textContent).toBe('bytes 00');
+  expect(root.querySelector('.inspector')!.textContent).toContain('2f 62 69 6e 2f 73 68 00');
+});
+
+it('wheel zoom keeps the world point beneath the cursor stationary without changing the graph', async () => {
+  const { panel } = await mount();
+  const root = child(panel)!.shadowRoot!, stage = root.querySelector('.stage')!;
+  const original = panel.document;
+  stage.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
+  await settle(panel);
+  const transform = (root.querySelector('.surface') as HTMLElement).style.transform;
+  const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(transform);
+  expect(match).not.toBeNull();
+  const [, x, y, scale] = match!;
+  expect(Number(scale)).toBeGreaterThan(1);
+  expect(Number(x) + 200 * Number(scale)).toBeCloseTo(200);
+  expect(Number(y) + 150 * Number(scale)).toBeCloseTo(150);
+  expect(panel.document).toBe(original);
+});
+
+it('new envelopes display their unique name and support rename, undo and save', async () => {
+  const { panel } = await mount();
+  child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')!.click();
+  await settle(panel);
+  button(panel, '+ 常量').click();
+  await settle(panel);
+  button(panel, '包络').click();
+  await settle(panel);
+  const envelope = panel.document!.logic!.nodes.find((n) => n.kind === 'envelope')!;
+  expect(envelope).toMatchObject({ title: envelope.id });
+  panel.locate(envelope.id);
+  await settle(panel);
+  const root = child(panel)!.shadowRoot!;
+  expect(root.querySelector('.envelope-title')!.textContent).toContain(envelope.id);
+  const input = root.querySelector<HTMLInputElement>('[aria-label="包络名称"]')!;
+  input.value = 'payload';
+  input.dispatchEvent(new Event('change'));
+  await settle(panel);
+  expect(root.querySelector('.envelope-title')!.textContent).toContain('payload');
+  button(panel, '撤销').click();
+  await settle(panel);
+  expect(input.value).toBe(envelope.id);
+  button(panel, '重做').click();
+  await settle(panel);
+  expect(parseCanvasSave(JSON.parse(panel.exportSave()), ret2winPublic.id)).toMatchObject({ ok: true,
+    save: { document: { logic: { nodes: expect.arrayContaining([expect.objectContaining({ id: envelope.id, title: 'payload' })]) } } } });
+});

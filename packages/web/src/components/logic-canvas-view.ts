@@ -1,4 +1,4 @@
-import type { canvas } from '@pwn2block/shared';
+import { canvas } from '@pwn2block/shared';
 import { logicBox, type LogicBox } from '../canvas/logic-editor';
 export function logicTitle(node: canvas.LogicNode, methods: readonly canvas.CanvasMethodDecl[]): string {
   switch (node.kind) {
@@ -17,7 +17,7 @@ export function logicTitle(node: canvas.LogicNode, methods: readonly canvas.Canv
     case 'method':
       return methods.find((m) => m.id === node.method)?.label ?? node.method;
     case 'envelope':
-      return node.title;
+      return node.title || node.id;
   }
 }
 export function logicSummary(value: canvas.Value | string | undefined): string {
@@ -29,6 +29,14 @@ export function logicSummary(value: canvas.Value | string | undefined): string {
       .join(' ')}`;
   if ('value' in value) return `${value.kind} ${String(value.value)}`;
   return '';
+}
+export function logicLiteralSummary(value: canvas.LogicLiteral): string {
+  try {
+    return logicSummary(canvas.logicLiteral(value, ''));
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    return error.message;
+  }
 }
 function boundary(box: LogicBox, toward: { x: number; y: number }): { x: number; y: number } {
   const cx = box.x + box.width / 2,

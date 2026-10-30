@@ -6,12 +6,15 @@ test.use({ viewport: { width: 1920, height: 1080 } });
 
 test('画布可越过原点和旧尺寸限制，负坐标节点保存刷新后可定位', async ({ page }) => {
   await openChallenge(page, 'ret2win');
-  await installGraph(page, []);
+  await installGraph(page, [constant('far', -200000, -300000)]);
   const panel = panelOf(page), stage = stageOf(page);
   await stage.evaluate((e) => e.scrollIntoView({ block: 'center' }));
   const rect = (await stage.boundingBox())!;
+  await panel.evaluate((e) => { (e as typeof e & { locate: (id: string) => void }).locate('far'); });
   await page.mouse.move(rect.x + 500, rect.y + 300);
-  await page.mouse.wheel(-200000, -300000);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + 400, rect.y + 200, { steps: 8 });
+  await page.mouse.up();
   await expect(panel.locator('.surface')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 200000, 300000)');
   await expect(panel.locator('.grid')).toBeVisible();
   await expect(panel.locator('pattern#logic-dots rect')).toHaveCount(1);
@@ -24,7 +27,7 @@ test('画布可越过原点和旧尺寸限制，负坐标节点保存刷新后�
   await page.mouse.down();
   await page.mouse.move(rect.x + 400, rect.y + 250, { steps: 8 });
   await page.mouse.up();
-  const node = (await readGraph(page)).nodes.find((n) => n.kind === 'constant')!;
+  const node = (await readGraph(page)).nodes.find((n) => n.kind === 'constant' && n.id !== 'far')!;
   expect(node).toMatchObject({ x: -199690, y: -299788 });
   await waitForSave(page, 'ret2win');
   await page.reload();
@@ -103,4 +106,43 @@ test('负坐标流程线可添加和移动转折点，流程节点拖动保留�
   await page.mouse.up();
   expect((await readGraph(page)).edges).toHaveLength(1);
   expect((await readGraph(page)).nodes.find((n) => n.id === 'b')).toMatchObject({ x: -650, y: -100 });
+});
+
+test('wheel zoom anchors the cursor and preserves dragging and library drop coordinates', async ({ page }) => {
+  await openChallenge(page, 'ret2win');
+  await installGraph(page, [constant('a', 100, 220)]);
+  const panel = panelOf(page), stage = stageOf(page);
+  await stage.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  const node = panel.locator('[data-node="a"]');
+  const before = (await node.boundingBox())!;
+  const anchor = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+  const original = await readGraph(page);
+  await page.mouse.move(anchor.x, anchor.y);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(async () => (await node.boundingBox())!.width).toBeGreaterThan(before.width);
+  const zoomed = (await node.boundingBox())!, scale = zoomed.width / before.width;
+  expect(zoomed.x + zoomed.width / 2).toBeCloseTo(anchor.x, 0);
+  expect(zoomed.y + zoomed.height / 2).toBeCloseTo(anchor.y, 0);
+  expect(await readGraph(page)).toEqual(original);
+  await page.mouse.down();
+  await page.mouse.move(anchor.x + 120, anchor.y + 60, { steps: 8 });
+  await page.mouse.up();
+  const moved = (await readGraph(page)).nodes.find((n) => n.id === 'a')!;
+  expect(moved.x).toBeCloseTo(100 + 120 / scale, 0);
+  expect(moved.y).toBeCloseTo(220 + 60 / scale, 0);
+
+  await panel.locator('[data-category="data"]').click();
+  const option = (await panel.getByRole('button', { name: '+ 常量', exact: true }).boundingBox())!;
+  const rect = (await stage.boundingBox())!;
+  const transform = await panel.locator('.surface').evaluate((e) => {
+    const matrix = e.ownerDocument.defaultView!.getComputedStyle(e).transform.slice(7, -1).split(',').map(Number);
+    return { x: matrix[4]!, y: matrix[5]!, scale: matrix[0]! };
+  });
+  await page.mouse.move(option.x + 40, option.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + 650, rect.y + 150, { steps: 8 });
+  await page.mouse.up();
+  const added = (await readGraph(page)).nodes.find((n) => n.kind === 'constant' && n.id !== 'a')!;
+  expect(added.x).toBeCloseTo((650 - transform.x) / transform.scale - 90, 0);
+  expect(added.y).toBeCloseTo((150 - transform.y) / transform.scale - 38, 0);
 });

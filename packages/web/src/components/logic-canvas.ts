@@ -23,7 +23,7 @@ import { copyLogicSelection, parseLogicSelection, pasteLogicSelection, serialize
 import { terminalTheme, sharedStyles } from '../theme';
 import { LogicNodeFields } from './logic-canvas-fields';
 import { logicCanvasStyles } from './logic-canvas-styles';
-import { logicEdgeGeometry, logicPointInsertionIndex, logicSummary, logicTitle } from './logic-canvas-view';
+import { logicEdgeGeometry, logicPointInsertionIndex, logicSummary, logicLiteralSummary, logicTitle } from './logic-canvas-view';
 
 import { renderLogicLibrary, type AddableLogicKind, type LogicLibraryState } from './logic-canvas-library';
 
@@ -55,6 +55,7 @@ export class LogicCanvasElement extends LitElement {
   private bendDrag: { original: canvas.LogicGraph; startX: number; startY: number; moved: boolean } | undefined;
   private suppressLibraryClick = false;
   private viewOffset = { x: 0, y: 0 };
+  private viewScale = 1;
   private pan: { clientX: number; clientY: number; x: number; y: number } | undefined;
   private marquee: { x: number; y: number; endX: number; endY: number } | undefined;
   private wiring: { id: string; outlet: 'next' | 'then' | 'else' } | undefined;
@@ -216,7 +217,7 @@ export class LogicCanvasElement extends LitElement {
     const count = text === this.lastPasted ? this.pasteCount : 0;
     this.attempt(() => {
       const pasted = pasteLogicSelection(this.graph, fragment, at ?? {
-        x: -this.viewOffset.x + 40 + count * 24, y: -this.viewOffset.y + 50 + count * 24,
+        x: (40 - this.viewOffset.x) / this.viewScale + count * 24, y: (50 - this.viewOffset.y) / this.viewScale + count * 24,
       });
       this.selected = pasted.selected;
       this.edgeId = undefined;
@@ -272,7 +273,7 @@ export class LogicCanvasElement extends LitElement {
   private point(event: Pick<MouseEvent, 'clientX' | 'clientY'>): { x: number; y: number } {
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage')!;
     const rect = stage.getBoundingClientRect();
-    return { x: event.clientX - rect.left - this.viewOffset.x, y: event.clientY - rect.top - this.viewOffset.y };
+    return { x: (event.clientX - rect.left - this.viewOffset.x) / this.viewScale, y: (event.clientY - rect.top - this.viewOffset.y) / this.viewScale };
   }
   locate(id: string): void {
     const edge = this.graph.edges.find((e) => e.id === id);
@@ -282,9 +283,9 @@ export class LogicCanvasElement extends LitElement {
     const box = logicBox(this.graph, edge?.from ?? id);
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
     if (stage) {
-      const left = box.x + this.viewOffset.x, top = box.y + this.viewOffset.y;
-      if (left < 0 || top < 0 || left + box.width > stage.clientWidth || top + box.height > stage.clientHeight)
-        this.viewOffset = { x: 100 - box.x, y: 100 - box.y };
+      const left = box.x * this.viewScale + this.viewOffset.x, top = box.y * this.viewScale + this.viewOffset.y;
+      if (left < 0 || top < 0 || left + box.width * this.viewScale > stage.clientWidth || top + box.height * this.viewScale > stage.clientHeight)
+        this.viewOffset = { x: 100 - box.x * this.viewScale, y: 100 - box.y * this.viewScale };
     }
     this.requestUpdate();
   }
@@ -315,12 +316,17 @@ export class LogicCanvasElement extends LitElement {
     this.listenPointer();
     this.requestUpdate();
   }
-  private panWheel(event: WheelEvent): void {
-    if (event.ctrlKey || this.drag || this.bendDrag || this.pan || this.marquee) return;
+  private zoomWheel(event: WheelEvent): void {
     event.preventDefault();
-    const scale = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? 500 : 1;
-    this.viewOffset = { x: this.viewOffset.x - (event.shiftKey ? event.deltaY : event.deltaX) * scale,
-      y: this.viewOffset.y - (event.shiftKey ? event.deltaX : event.deltaY) * scale };
+    if (this.drag || this.bendDrag || this.pan || this.marquee) return;
+    const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? 500 : 1;
+    const next = Math.min(3, Math.max(0.25, this.viewScale * Math.exp(-event.deltaY * unit * 0.001)));
+    const point = this.point(event);
+    this.viewOffset = {
+      x: this.viewOffset.x + point.x * (this.viewScale - next),
+      y: this.viewOffset.y + point.y * (this.viewScale - next),
+    };
+    this.viewScale = next;
     this.requestUpdate();
   }
   private startStage(event: PointerEvent): void {
@@ -479,7 +485,7 @@ export class LogicCanvasElement extends LitElement {
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
     const base = {
       id: logicId(this.graph, kind),
-      ...nextLogicPosition(this.graph, -this.viewOffset.x, -this.viewOffset.y, stage?.clientWidth ?? 800),
+      ...nextLogicPosition(this.graph, -this.viewOffset.x / this.viewScale, -this.viewOffset.y / this.viewScale, (stage?.clientWidth ?? 800) / this.viewScale),
     };
     let node: canvas.LogicNode;
     if (kind === 'constant') node = { ...base, kind, value: { type: 'int', text: '0' } };
@@ -661,7 +667,7 @@ export class LogicCanvasElement extends LitElement {
         style=${styleMap({ left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` })}
       >
         <div class="envelope-header"><button class="envelope-title" @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}>
-          ${node.title}
+          ${logicTitle(node, this.methods)}
           [${node.category === 'data' ? (canvas.logicHasAssignment(graph, node.id) ? '数据 / 流程' : '数据') : '流程'}]
           </button>
           ${attached.map((n) => html`<button class="attachment ${this.selected.includes(n.id) ? 'selected' : ''} ${this.snap?.attachment === n.id ? 'ghost' : ''}"
@@ -681,7 +687,7 @@ export class LogicCanvasElement extends LitElement {
             ? 'bool 引用 → true / false'
             : node.kind === 'method'
               ? '引用数据作为参数'
-              : logicSummary(preview.get(node.id));
+              : node.kind === 'constant' ? logicLiteralSummary(node.value) : logicSummary(preview.get(node.id));
     return html`<div
       role="button"
       tabindex="0"
@@ -866,15 +872,15 @@ export class LogicCanvasElement extends LitElement {
           add: (kind, method) => this.add(kind, method),
           drag: (event, kind, method) => this.startLibrary(event, kind, method),
         })}
-        <div class=${this.pan ? 'stage panning' : 'stage'} tabindex="0" aria-label="节点画布" @pointerdown=${this.startStage} @wheel=${this.panWheel}>
+        <div class=${this.pan ? 'stage panning' : 'stage'} tabindex="0" aria-label="节点画布" @pointerdown=${this.startStage} @wheel=${this.zoomWheel}>
           <svg class="grid" width="100%" height="100%" aria-hidden="true">
-            <defs><pattern id="logic-dots" width="20" height="20" patternUnits="userSpaceOnUse"
-              x=${this.viewOffset.x % 20} y=${this.viewOffset.y % 20}>
-              <rect width="1" height="1" fill="var(--p2b-line)"></rect>
+            <defs><pattern id="logic-dots" width=${20 * this.viewScale} height=${20 * this.viewScale} patternUnits="userSpaceOnUse"
+              x=${this.viewOffset.x % (20 * this.viewScale)} y=${this.viewOffset.y % (20 * this.viewScale)}>
+              <rect width=${this.viewScale} height=${this.viewScale} fill="var(--p2b-line)"></rect>
             </pattern></defs>
             <rect width="100%" height="100%" fill="url(#logic-dots)"></rect>
           </svg>
-          <div class="surface" style=${styleMap({ transform: `translate(${this.viewOffset.x}px, ${this.viewOffset.y}px)` })}>
+          <div class="surface" style=${styleMap({ transform: `translate(${this.viewOffset.x}px, ${this.viewOffset.y}px) scale(${this.viewScale})` })}>
             <svg class="wires reference-wires" width="100%" height="100%" aria-label="引用连接">
               ${graph.edges.filter((e) => e.kind === 'reference').map((e) => this.edgeSvg(graph, e))}
               ${this.snap?.edge?.kind === 'reference' ? this.edgeSvg(this.snap.graph, this.snap.edge, true) : nothing}

@@ -32,3 +32,5 @@ export * from './artifact';
 
 export * from './logic-model';
 export * from './logic-runtime';
+
+export { logicLiteral } from './logic-values';

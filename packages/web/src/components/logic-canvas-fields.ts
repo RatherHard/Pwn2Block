@@ -2,7 +2,7 @@ import { attachLogic, unwrapLogic } from '../canvas/logic-editor';
 import { html, nothing, type TemplateResult } from 'lit';
 import { live } from 'lit/directives/live.js';
 import { canvas } from '@pwn2block/shared';
-import { logicTitle } from './logic-canvas-view';
+import { logicSummary, logicTitle } from './logic-canvas-view';
 
 /** Node property forms share a small edit boundary with the canvas interaction controller. */
 export class LogicNodeFields {
@@ -43,7 +43,7 @@ export class LogicNodeFields {
           value.type === 'bool'
             ? html`<select
                 aria-label="值"
-                .value=${value.text}
+                .value=${live(value.text)}
                 @change=${(e: Event) => update({ ...value, text: (e.target as HTMLSelectElement).value })}
               >
                 <option value="true">true</option>
@@ -51,7 +51,7 @@ export class LogicNodeFields {
               </select>`
             : html`<textarea
                 aria-label="值"
-                .value=${value.text}
+                .value=${live(value.text)}
                 @change=${(e: Event) => update({ ...value, text: (e.target as HTMLTextAreaElement).value })}
               ></textarea>`
         }</label
@@ -59,7 +59,10 @@ export class LogicNodeFields {
   }
   render(node: canvas.LogicNode): TemplateResult | typeof nothing {
     if (node.kind === 'constant')
-      return this.literalFields(node.value, (value) => this.updateNode({ ...node, value }));
+      return html`${this.literalFields(node.value, (value) => this.updateNode({ ...node, value }))}
+        ${this.graph.edges.some((edge) => edge.kind === 'data' && edge.to === node.id && edge.op !== 'assign')
+          ? html`<p class="hint">表达式结果（含左侧连接）：${logicSummary(canvas.previewLogicGraph(this.graph).get(node.id))}</p>`
+          : nothing}`;
     if (node.kind === 'variable')
       return html`<label
           >名称<input
@@ -129,8 +132,8 @@ export class LogicNodeFields {
     if (node.kind === 'envelope')
       return html`<label
           >包络名称<input
-            .value=${node.title}
-            @change=${(e: Event) => this.updateNode({ ...node, title: (e.target as HTMLInputElement).value })}
+            aria-label="包络名称" maxlength="80" .value=${live(node.title || node.id)}
+            @change=${(e: Event) => this.updateNode({ ...node, title: (e.target as HTMLInputElement).value.trim() || node.id })}
         /></label>
         <p class="hint">${node.members.length} 个直接成员；包络整体可参与连接。</p>
         <button @click=${() => this.commit(unwrapLogic(this.graph, node.id))}>解除包络</button>`;

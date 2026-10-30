@@ -333,7 +333,7 @@ export function wrapLogic(graph: canvas.LogicGraph, selected: readonly string[])
     kind: 'envelope',
     category,
     members: ids,
-    title: category === 'data' ? '数据包络' : '流程包络',
+    title: id,
     x: Math.min(...nodes.map((n) => n.x)),
     y: Math.min(...nodes.map((n) => n.y)),
   };
