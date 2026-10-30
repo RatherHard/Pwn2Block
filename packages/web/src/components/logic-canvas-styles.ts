@@ -167,7 +167,8 @@ export const logicCanvasStyles = css`
     overflow: visible;
     pointer-events: none;
   }
-  .flow-wires { z-index: 2; }
+  .reference-wires { z-index: 0; }
+  .flow-wires { z-index: 1000; }
   .logic-layer {
     position: absolute;
     inset: 0;
@@ -259,13 +260,14 @@ export const logicCanvasStyles = css`
     position: absolute;
     border: 1px dashed var(--p2b-dim);
     pointer-events: none;
-    z-index: 1;
   }
   .envelope.selected {
     border-color: var(--p2b-focus);
   }
   .envelope-summary {
     display: block;
+    width: max-content;
+    max-width: 100%;
     margin: -1px 5px 3px;
     height: 18px;
     line-height: 18px;
@@ -281,11 +283,13 @@ export const logicCanvasStyles = css`
     top: 6px;
     left: 8px;
     right: 8px;
-    background: var(--p2b-bg);
-    pointer-events: auto;
+    pointer-events: none;
   }
   .envelope-title {
+    pointer-events: auto;
     display: block;
+    width: max-content;
+    background: var(--p2b-bg);
     cursor: grab;
     padding: 2px 5px;
     max-width: 100%;
@@ -296,6 +300,7 @@ export const logicCanvasStyles = css`
     text-overflow: ellipsis;
   }
   .envelope-header .attachment {
+    pointer-events: auto;
     display: block;
     width: 100%;
     height: 26px;

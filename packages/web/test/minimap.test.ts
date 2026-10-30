@@ -44,4 +44,14 @@ describe('minimap geometry', () => {
     expect(viewport.x).toBeCloseTo((50 - geometry.content.x) * geometry.scale);
     expect(viewport.y).toBeCloseTo((20 - geometry.content.y) * geometry.scale);
   });
+
+  it('expands the world extent when panning or zooming moves the viewport away from nodes', () => {
+    const g = graph([constant('a', 0, 0)]);
+    const geometry = miniMapGeometry(g, 400, 200, 200, 100, { x: -2400, y: -1400 }, 0.5);
+    const viewport = miniMapViewportStyle(geometry);
+    expect(viewport.x).toBeGreaterThanOrEqual(0);
+    expect(viewport.y).toBeGreaterThanOrEqual(0);
+    expect(viewport.x + viewport.width).toBeLessThanOrEqual(200);
+    expect(viewport.y + viewport.height).toBeLessThanOrEqual(100);
+  });
 });

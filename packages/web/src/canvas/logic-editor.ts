@@ -21,6 +21,23 @@ export function logicId(graph: canvas.LogicGraph, prefix: string): string {
 export function logicAttachmentHost(node: canvas.LogicNode): string | undefined {
   return node.kind === 'loop' ? node.body : node.kind === 'convert' ? node.input : undefined;
 }
+function logicOwnerChain(graph: canvas.LogicGraph, id: string): string[] {
+  const owners: string[] = [];
+  let current = id;
+  const seen = new Set<string>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    const owner = canvas.logicOwner(graph, current);
+    if (!owner) break;
+    owners.push(owner.id);
+    current = owner.id;
+  }
+  return owners;
+}
+
+export function logicEnvelopeDepth(graph: canvas.LogicGraph, id: string): number {
+  return logicOwnerChain(graph, id).length;
+}
 export function logicBox(graph: canvas.LogicGraph, id: string, seen = new Set<string>()): LogicBox {
   const node = graph.nodes.find((n) => n.id === id);
   if (!node || seen.has(id)) return { x: 0, y: 0, width: 180, height: 76 };
@@ -35,7 +52,8 @@ export function logicBox(graph: canvas.LogicGraph, id: string, seen = new Set<st
   if (node.kind !== 'envelope' || !node.members.length)
     return { x: node.x, y: node.y, width: 180, height: 76 };
   const boxes = node.members.map((member) => logicBox(graph, member, new Set(seen)));
-  const header = 44 + graph.nodes.filter((n) => logicAttachmentHost(n) === id).length * 26;
+  // 为标题和表达式预览预留独立区域，避免文字压到包络成员。
+  const header = 50 + graph.nodes.filter((n) => logicAttachmentHost(n) === id).length * 26;
   const x = Math.min(...boxes.map((b) => b.x)) - 24,
     y = Math.min(...boxes.map((b) => b.y)) - header;
   return {
@@ -140,7 +158,13 @@ export function layoutLogicData(graph: canvas.LogicGraph, anchor: string): canva
 }
 /** 拖动赋值目标时，携带完整的数据表达式及其嵌套包络。 */
 export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[]): string[] {
-  const moving = new Set(ids);
+  const structuralId = (id: string): string => {
+    const node = graph.nodes.find((candidate) => candidate.id === id);
+    if (node?.kind === 'envelope') return id;
+    const owners = logicOwnerChain(graph, id);
+    return owners[owners.length - 1] ?? id;
+  };
+  const moving = new Set(ids.map(structuralId));
   for (const id of ids) {
     if (!graph.edges.some((edge) => edge.kind === 'data' && edge.op === 'assign' && edge.to === id)) continue;
     const pending = [id], visited = new Set<string>();
@@ -148,7 +172,7 @@ export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[]): 
       const current = pending.pop()!;
       if (visited.has(current)) continue;
       visited.add(current);
-      moving.add(current);
+      moving.add(structuralId(current));
       for (const edge of graph.edges) {
         if (edge.kind !== 'data') continue;
         if (edge.from === current) pending.push(edge.to);

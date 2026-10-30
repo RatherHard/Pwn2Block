@@ -1,4 +1,4 @@
-﻿import type { canvas } from '@pwn2block/shared';
+import type { canvas } from '@pwn2block/shared';
 import { logicBox } from './logic-editor';
 
 export interface MiniMapRect {
@@ -55,15 +55,22 @@ export function miniMapGeometry(
   viewOffset: { x: number; y: number },
   viewScale: number,
 ): MiniMapGeometry {
-  const content = logicContentBounds(graph);
   const map = { x: 0, y: 0, width: mapWidth, height: mapHeight };
-  const scale = Math.min(mapWidth / content.width, mapHeight / content.height);
   const viewport = {
     x: -viewOffset.x / viewScale,
     y: -viewOffset.y / viewScale,
     width: stageWidth / viewScale,
     height: stageHeight / viewScale,
   };
+  // 将当前视口也纳入世界范围，保证平移到空白处或缩放时视口框仍完整可见。
+  const visibleWorld = unionRect(logicContentBounds(graph), viewport);
+  const content = {
+    x: visibleWorld.x - PADDING,
+    y: visibleWorld.y - PADDING,
+    width: visibleWorld.width + PADDING * 2,
+    height: visibleWorld.height + PADDING * 2,
+  };
+  const scale = Math.min(mapWidth / content.width, mapHeight / content.height);
   return { content, viewport, map, scale };
 }
 

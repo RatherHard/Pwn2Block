@@ -69,14 +69,20 @@ export function logicEdgeGeometry(
     return { paths: [path], x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
   }
   const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
-  const nx = (-(to.y - from.y) / length) * 6,
-    ny = ((to.x - from.x) / length) * 6;
+  const ux = (to.x - from.x) / length,
+    uy = (to.y - from.y) / length;
+  // 将引用线端点延长到节点边界以内，交给节点背景覆盖端点。
+  const referenceExtension = 18;
+  const extendedFrom = { x: from.x - ux * referenceExtension, y: from.y - uy * referenceExtension };
+  const extendedTo = { x: to.x + ux * referenceExtension, y: to.y + uy * referenceExtension };
+  const nx = -uy * 6,
+    ny = ux * 6;
   return {
     paths:
       edge.kind === 'reference'
         ? [-1, 0, 1].map(
             (offset) =>
-              `M ${from.x + nx * offset} ${from.y + ny * offset} L ${to.x + nx * offset} ${to.y + ny * offset}`,
+              `M ${extendedFrom.x + nx * offset} ${extendedFrom.y + ny * offset} L ${extendedTo.x + nx * offset} ${extendedTo.y + ny * offset}`,
           )
         : [],
     x: (from.x + to.x) / 2,

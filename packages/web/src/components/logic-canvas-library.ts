@@ -48,8 +48,7 @@ export function renderLogicLibrary(input: {
       @click=${() => change({ category: c.id, page: 0 })}>
       <span>${c.label}</span><span>${optionsOf(c.id, methods).length} →</span>
     </button>`)}</nav>
-    <p class="hint">选择分类查看节点预览，点击或直接拖拽到画布，靠近节点可预览连接。</p>
-    <p class="hint">节点拖近：预览吸附<br />数据节点拖动：预脱离<br />空白处拖动 / 滚轮：平移<br />Shift 拖动：框选<br />Shift 点击：多选<br />Ctrl+G：包络<br />Ctrl+C / X / V：复制 / 剪切 / 粘贴<br />Esc：取消拖动</p>
+    <p class="hint">节点拖近：预览吸附<br />普通拖动：框选<br />Space + 拖动：平移画布<br />滚轮：缩放<br />包络内节点随所属包络移动<br />赋值目标携带完整表达式<br />流程连接：先点左侧入口，再点右侧出口<br />Shift 点击：多选<br />Ctrl+G：包络<br />Ctrl+C / X / V：复制 / 剪切 / 粘贴<br />Esc：取消当前操作</p>
   </aside>`;
   const options = optionsOf(category.id, methods);
   const pages = Math.max(1, Math.ceil(options.length / PAGE_SIZE));

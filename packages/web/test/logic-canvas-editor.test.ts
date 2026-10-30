@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { canvas } from '@pwn2block/shared';
 import {
   createLogicEdge,
+  logicDragIds,
   nearestLogicSnap,
   wrapLogic,
   moveLogicNodes,
@@ -79,6 +80,16 @@ describe('逻辑画布编辑：最近吸附与包络', () => {
     expect(snap?.attachment).toBe('loop');
     expect(snap?.graph.nodes.find((n) => n.id === 'loop')).toMatchObject({ body: 'g' });
   });
+it('dragging a member of a nested envelope moves the outer structure instead of changing its bounds', () => {
+  const g = graph([
+    constant('a', 200),
+    constant('b', 320),
+    { id: 'inner', kind: 'envelope', category: 'data', members: ['a', 'b'], title: 'inner', x: 0, y: 0 },
+    { id: 'outer', kind: 'envelope', category: 'data', members: ['inner'], title: 'outer', x: 0, y: 0 },
+  ]);
+  expect(logicDragIds(g, ['a'])).toEqual(['outer']);
+  expect(logicDragIds(g, ['inner'])).toEqual(['inner']);
+});
 });
 
 it('赋值包络和题目方法能一起组成流程包络', () => {

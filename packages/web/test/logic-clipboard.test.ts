@@ -82,6 +82,21 @@ describe('logic selection clipboard', () => {
   });
 });
 
+it('extends reference line endpoints under both node boxes', () => {
+  const g: canvas.LogicGraph = {
+    version: 1,
+    nodes: [value('a', 0), value('b', 500, 200)],
+    edges: [],
+  };
+  const paths = logicEdgeGeometry(g, { id: 'ref', kind: 'reference', from: 'a', to: 'b', port: 'value' }).paths;
+  const start = paths[1]!.match(/^M ([^ ]+) ([^ ]+)/)!;
+  const end = paths[1]!.match(/L ([^ ]+) ([^ ]+)$/)!;
+  expect(Number(start[1])).toBeGreaterThan(logicBox(g, 'a').x);
+  expect(Number(start[1])).toBeLessThan(logicBox(g, 'a').x + logicBox(g, 'a').width);
+  expect(Number(end[1])).toBeGreaterThan(logicBox(g, 'b').x);
+  expect(Number(end[1])).toBeLessThan(logicBox(g, 'b').x + logicBox(g, 'b').width);
+});
+
 it('spaces reference lines six pixels apart perpendicular to horizontal or diagonal connections', () => {
   for (const y of [200, 500]) {
     const g: canvas.LogicGraph = { version: 1, nodes: [value('a', 0), value('b', 500, y)], edges: [] };

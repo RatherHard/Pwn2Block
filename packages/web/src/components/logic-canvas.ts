@@ -11,6 +11,7 @@ import {
   createLogicEdge,
   logicBox,
   logicAttachmentHost,
+  logicEnvelopeDepth,
   logicId,
   logicDragIds,
   moveLogicNodes,
@@ -33,7 +34,7 @@ import { miniMapGeometry, miniMapPoint, miniMapViewportStyle } from '../canvas/m
 let localClipboard = '';
 let clipboardWrite: Promise<void> = Promise.resolve();
 type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean; library?: boolean; baseline?: canvas.LogicGraph };
-type MiniMapDrag = { clientX: number; clientY: number; offset: { x: number; y: number }; scale: number; viewScale: number };
+type MiniMapDrag = { grabX: number; grabY: number; viewScale: number };
 export class LogicCanvasElement extends LitElement {
   static override styles = [terminalTheme, sharedStyles, logicCanvasStyles];
   static override properties = {
@@ -391,12 +392,22 @@ export class LogicCanvasElement extends LitElement {
   }
   private pointerMove = (event: PointerEvent): void => {
     if (this.minimapDrag) {
-      const dx = event.clientX - this.minimapDrag.clientX;
-      const dy = event.clientY - this.minimapDrag.clientY;
-      this.viewOffset = {
-        x: this.minimapDrag.offset.x - (dx / this.minimapDrag.scale) * this.minimapDrag.viewScale,
-        y: this.minimapDrag.offset.y - (dy / this.minimapDrag.scale) * this.minimapDrag.viewScale,
-      };
+      const minimap = this.renderRoot.querySelector<HTMLElement>('.minimap');
+      const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
+      if (!minimap || !stage) return;
+      const geometry = miniMapGeometry(
+        this.graph,
+        stage.clientWidth,
+        stage.clientHeight,
+        minimap.clientWidth,
+        minimap.clientHeight,
+        this.viewOffset,
+        this.viewScale,
+      );
+      const mapRect = minimap.getBoundingClientRect();
+      const worldX = geometry.content.x + (event.clientX - mapRect.left - this.minimapDrag.grabX) / geometry.scale;
+      const worldY = geometry.content.y + (event.clientY - mapRect.top - this.minimapDrag.grabY) / geometry.scale;
+      this.viewOffset = { x: -worldX * this.minimapDrag.viewScale, y: -worldY * this.minimapDrag.viewScale };
       this.requestUpdate();
       return;
     }
@@ -722,14 +733,15 @@ export class LogicCanvasElement extends LitElement {
     const attached = graph.nodes.filter(
       (n) => (n.kind === 'loop' && n.body === node.id) || (n.kind === 'convert' && n.input === node.id),
     );
-    if (node.kind === 'envelope')
+    if (node.kind === 'envelope') {
+      const envelopeDepth = logicEnvelopeDepth(graph, node.id);
       return html`<div
         data-node=${node.id}
         data-kind="envelope"
         class="envelope ${selected ? 'selected' : ''} ${snap ? 'snap-target' : ''}"
-        style=${styleMap({ left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` })}
+        style=${styleMap({ left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px`, zIndex: `${3 + envelopeDepth}` })}
       >
-        <div class="envelope-header"><button class="envelope-title" @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}>
+        <div class="envelope-header" style=${styleMap({ zIndex: `${10 + envelopeDepth}` })}><button class="envelope-title" @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}>
           ${logicTitle(node, this.methods)}
           [${node.category === 'data' ? (canvas.logicHasAssignment(graph, node.id) ? '数据 / 流程' : '数据') : '流程'}]
           </button>
@@ -744,6 +756,7 @@ export class LogicCanvasElement extends LitElement {
         </div>
         ${this.ports(node)}
       </div>`;
+    }
     const summary =
       node.kind === 'start'
         ? '全局定义完成后执行'
@@ -963,8 +976,22 @@ export class LogicCanvasElement extends LitElement {
     const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
     const minimap = this.renderRoot.querySelector<HTMLElement>('.minimap');
     if (!stage || !minimap) return;
-    const geometry = miniMapGeometry(this.graph, stage.clientWidth, stage.clientHeight, minimap.clientWidth, minimap.clientHeight, this.viewOffset, this.viewScale);
-    this.minimapDrag = { clientX: event.clientX, clientY: event.clientY, offset: { ...this.viewOffset }, scale: geometry.scale, viewScale: this.viewScale };
+    const geometry = miniMapGeometry(
+      this.graph,
+      stage.clientWidth,
+      stage.clientHeight,
+      minimap.clientWidth,
+      minimap.clientHeight,
+      this.viewOffset,
+      this.viewScale,
+    );
+    const mapRect = minimap.getBoundingClientRect();
+    const viewport = miniMapViewportStyle(geometry);
+    this.minimapDrag = {
+      grabX: event.clientX - mapRect.left - viewport.x,
+      grabY: event.clientY - mapRect.top - viewport.y,
+      viewScale: this.viewScale,
+    };
     this.listenPointer();
   }
   private renderMiniMap(graph: canvas.LogicGraph): TemplateResult {
