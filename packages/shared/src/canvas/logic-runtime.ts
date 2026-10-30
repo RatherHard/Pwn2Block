@@ -1,4 +1,4 @@
-﻿import { expandBlock, type Action } from '../actions';
+import { expandBlock, type Action } from '../actions';
 import { bytesToHex, formatHex, MAX_UINT64 } from '../hex';
 import {
   CANVAS_MAX_ACTIONS,
@@ -23,6 +23,27 @@ import type { Value } from './value';
 export { validateLogicGraph } from './logic-validate';
 
 type DataEdge = Extract<LogicEdge, { kind: 'data' }>;
+const EXPRESSION_PRECEDENCE: Readonly<Record<string, number>> = {
+  or: 10,
+  and: 20,
+  '==': 30,
+  '!=': 30,
+  '<': 35,
+  '<=': 35,
+  '>': 35,
+  '>=': 35,
+  '|': 40,
+  '^': 50,
+  '&': 60,
+  '<<': 70,
+  '>>': 70,
+  '+': 80,
+  '-': 80,
+  '*': 90,
+  '/': 90,
+  '%': 90,
+};
+
 
 /** Interpret the graph once. The only output sent to the server remains public block actions. */
 class LogicRuntime {
@@ -129,31 +150,72 @@ class LogicRuntime {
     if (this.evaluating.has(id)) throw new LogicFault(id, '数据连接或变量依赖不允许成环');
     this.evaluating.add(id);
     try {
-      const node = this.node(id);
-      let result: Value;
-      if (node.kind === 'constant') result = logicLiteral(node.value, id);
-      else if (node.kind === 'variable') result = this.read(node.name.trim(), id);
-      else if (node.kind === 'convert')
-        result = node.input ? this.evaluate(node.input) : logicConvert(logicLiteral(node.value, id), node);
-      else if (node.kind === 'envelope' && node.category === 'data') {
-        const sinks = node.members.filter(
-          (member) =>
-            !this.graph.edges.some((e) => e.kind === 'data' && e.from === member && node.members.includes(e.to)),
-        );
-        if (sinks.length !== 1) throw new LogicFault(id, '数据包络需要一个表达式结果；请连接内部节点');
-        result = this.evaluate(sinks[0]!);
-        const conversion = this.graph.nodes.find((n) => n.kind === 'convert' && n.input === id);
-        if (conversion?.kind === 'convert') result = logicConvert(result, conversion);
-      } else throw new LogicFault(id, '该节点不产生数据');
-      const incoming = this.graph.edges.find((e) => e.kind === 'data' && e.to === id && e.op !== 'assign');
-      if (incoming?.kind === 'data') {
-        const left = this.evaluate(incoming.from);
-        result = logicBinary(incoming.op, left, result, incoming.id);
+      const chain = this.expressionChain(id);
+      const values = chain.ids.map((operand) => this.evaluateAtom(operand));
+      const operands = [values[0]!];
+      const operators: DataEdge[] = [];
+      const reduce = (): void => {
+        const operator = operators.pop();
+        const right = operands.pop();
+        const left = operands.pop();
+        if (!operator || right === undefined || left === undefined) throw new LogicFault(id, '表达式求值缺少操作数');
+        operands.push(logicBinary(operator.op, left, right, operator.id));
+      };
+      for (let index = 0; index < chain.edges.length; index++) {
+        const edge = chain.edges[index]!;
+        while (
+          operators.length &&
+          (EXPRESSION_PRECEDENCE[operators.at(-1)!.op] ?? 0) >= (EXPRESSION_PRECEDENCE[edge.op] ?? 0)
+        )
+          reduce();
+        operators.push(edge);
+        operands.push(values[index + 1]!);
       }
+      while (operators.length) reduce();
+      const result = operands[0];
+      if (result === undefined) throw new LogicFault(id, '表达式求值缺少结果');
       return result;
     } finally {
       this.evaluating.delete(id);
     }
+  }
+  /** 收集以 id 为末端的数据连接链，再按 C/Python 风格优先级归约。 */
+  private expressionChain(id: string): { ids: string[]; edges: DataEdge[] } {
+    const ids = [id];
+    const edges: DataEdge[] = [];
+    const seen = new Set<string>();
+    let current = id;
+    while (true) {
+      if (seen.has(current)) throw new LogicFault(current, '数据连接或变量依赖不允许成环');
+      seen.add(current);
+      const incoming = this.graph.edges.find(
+        (edge): edge is DataEdge => edge.kind === 'data' && edge.to === current && edge.op !== 'assign',
+      );
+      if (!incoming) break;
+      edges.unshift(incoming);
+      ids.unshift(incoming.from);
+      current = incoming.from;
+    }
+    return { ids, edges };
+  }
+  private evaluateAtom(id: string): Value {
+    const node = this.node(id);
+    if (node.kind === 'constant') return logicLiteral(node.value, id);
+    if (node.kind === 'variable') return this.read(node.name.trim(), id);
+    if (node.kind === 'convert')
+      return node.input ? this.evaluate(node.input) : logicConvert(logicLiteral(node.value, id), node);
+    if (node.kind === 'envelope' && node.category === 'data') {
+      const sinks = node.members.filter(
+        (member) =>
+          !this.graph.edges.some((edge) => edge.kind === 'data' && edge.from === member && node.members.includes(edge.to)),
+      );
+      if (sinks.length !== 1) throw new LogicFault(id, '数据包络需要一个表达式结果；请连接内部节点');
+      let result = this.evaluate(sinks[0]!);
+      const conversion = this.graph.nodes.find((node) => node.kind === 'convert' && node.input === id);
+      if (conversion?.kind === 'convert') result = logicConvert(result, conversion);
+      return result;
+    }
+    throw new LogicFault(id, '该节点不产生数据');
   }
   private reference(id: string, port: string): Value {
     const edge = this.graph.edges.find((e) => e.kind === 'reference' && e.to === id && e.port === port);

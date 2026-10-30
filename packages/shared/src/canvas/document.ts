@@ -306,8 +306,14 @@ export interface CanvasNodeLayout {
   readonly y: number;
 }
 
+export interface CanvasLogicView {
+  /** 持久化独立视觉结构从底到顶的图层顺序。 */
+  readonly layerOrder: readonly string[];
+}
+
 export interface CanvasDocument {
   readonly logic?: LogicGraph;
+  readonly logicView?: CanvasLogicView;
   readonly format: typeof CANVAS_FORMAT;
   readonly version: number;
   readonly nodes: readonly CanvasNode[];

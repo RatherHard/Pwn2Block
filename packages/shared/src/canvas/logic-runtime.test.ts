@@ -73,6 +73,29 @@ describe('节点功能逻辑基准：数据、赋值与包络', () => {
     );
     expect(previewLogicGraph(g).get('c')).toEqual({ kind: 'int', value: 20n });
   });
+  it('连接表达式按 C/Python 运算优先级计算，而不是简单左结合', () => {
+    const g = graph(
+      [value('a', '2'), value('b', '3'), value('c', '4')],
+      [data('a', 'b', '+'), data('b', 'c', '*')],
+    );
+    expect(previewLogicGraph(g).get('c')).toEqual({ kind: 'int', value: 14n });
+  });
+  it.each([
+    ['left associative subtraction', ['8', '3', '2'], ['-', '-'], 3n],
+    ['multiplication before addition', ['2', '3', '4'], ['*', '+'], 10n],
+    ['shift has lower precedence than addition', ['2', '1', '1'], ['<<', '+'], 8n],
+  ] as const)('%s', (_name, values, operators, expected) => {
+    const nodes = values.map((text, index) => value(String.fromCharCode(97 + index), text));
+    const edges = operators.map((op, index) => data(String.fromCharCode(97 + index), String.fromCharCode(98 + index), op));
+    expect(previewLogicGraph(graph(nodes, edges)).get('c')).toEqual({ kind: 'int', value: expected });
+  });
+  it('supports relational results in equality expressions', () => {
+    const g = graph(
+      [value('a', '1'), value('b', '2'), value('c', 'true', 'bool')],
+      [data('a', 'b', '<'), data('b', 'c', '==')],
+    );
+    expect(previewLogicGraph(g).get('c')).toEqual({ kind: 'bool', value: true });
+  });
   it.each([
     ['string', 'ab', 'cd', { kind: 'string', value: 'abcd' }],
     ['bytes', '4142', '4344', { kind: 'byte', bytes: new Uint8Array([65, 66, 67, 68]) }],

@@ -117,23 +117,48 @@ test('直线双击添加转折点，拖动成曲线，撤销、保存恢复及�
   expect((await graph(page)).edges).toHaveLength(1);
 });
 
-test('从库拖入流程节点时预览直线箭头，滚动画布后仍落在鼠标位置', async ({ page }) => {
+test('普通拖动框选，Space 加拖动平移，Escape 取消交互', async ({ page }) => {
   await openChallenge(page, 'ret2win');
   await install(page, []);
-  const panel = panelOf(page);
-  await panel.locator('[data-category="flow"]').click();
-  const viewport = (await panel.locator('.stage').boundingBox())!;
-  await page.mouse.move(viewport.x + 500, viewport.y + 300);
-  await page.mouse.wheel(60, 0);
-  await expect(panel.locator('.surface')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, -60, 0)');
-  await libraryDrag(page, '+ 条件分支', 340, 88);
-  await expect(panel.locator('.ghost .flow-line')).toHaveAttribute('d', 'M 263 88 L 297 88');
-  expect((await graph(page)).nodes).toHaveLength(1);
-  await page.mouse.up();
-  await expect(panel.locator('.flow-line')).toHaveCount(1);
-  expect((await graph(page)).nodes.find((n) => n.kind === 'branch')).toMatchObject({ x: 310, y: 50 });
-});
+  const panel = panelOf(page), stage = panel.locator('.stage');
+  const rect = (await stage.boundingBox())!;
+  const before = await graph(page);
+  const start = panel.locator('[data-node="start"]');
+  const original = (await start.boundingBox())!;
+  await expect(panel.locator('.minimap')).toBeVisible();
 
+  // Blank-canvas drag is a marquee selection.
+  await page.mouse.move(rect.x + original.x - rect.x - 10, rect.y + original.y - rect.y - 10);
+  await page.mouse.down();
+  await page.mouse.move(original.x + original.width + 10, original.y + original.height + 10, { steps: 6 });
+  await expect(panel.locator('.marquee')).toBeVisible();
+  await page.mouse.up();
+  await expect(start).toHaveClass(/selected/);
+  expect(await graph(page)).toEqual(before);
+
+  // Space turns the same gesture into a canvas pan, even when starting on a node.
+  await stage.focus();
+  await page.keyboard.down('Space');
+  await page.mouse.move(original.x + original.width / 2, original.y + original.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(original.x + original.width / 2 + 120, original.y + original.height / 2 + 60, { steps: 6 });
+  await expect(stage).toHaveClass('stage panning');
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  await expect(stage).toHaveClass('stage');
+  const moved = (await start.boundingBox())!;
+  expect(moved.x - original.x).toBeCloseTo(120, 0);
+  expect(moved.y - original.y).toBeCloseTo(60, 0);
+  expect(await graph(page)).toEqual(before);
+
+  // Escape cancels an in-progress marquee without changing the view.
+  await page.mouse.move(rect.x + 620, rect.y + 410);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + 640, rect.y + 420, { steps: 4 });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(stage).toHaveClass('stage');
+});
 
 test('空白拖动画布双向平移，取消恢复视图，Shift 框选，平移后库拖入坐标准确', async ({ page }) => {
   await openChallenge(page, 'ret2win');

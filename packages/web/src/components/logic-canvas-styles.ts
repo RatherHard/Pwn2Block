@@ -167,7 +167,33 @@ export const logicCanvasStyles = css`
     overflow: visible;
     pointer-events: none;
   }
-  .flow-wires { z-index: 6; }
+  .flow-wires { z-index: 2; }
+  .logic-layer {
+    position: absolute;
+    inset: 0;
+    isolation: isolate;
+    pointer-events: none;
+  }
+  .logic-layer > .node,
+  .logic-layer > .envelope,
+  .logic-layer > .relation,
+  .logic-layer .port,
+  .logic-layer .envelope-header {
+    pointer-events: auto;
+  }
+  .layer-list {
+    position: relative;
+    z-index: 2;
+    margin-left: 4px;
+  }
+  .layer-list summary { cursor: pointer; padding: 4px 8px; border: 1px solid var(--p2b-line); }
+  .layer-list-actions { display: flex; flex-wrap: wrap; gap: 3px; padding: 5px; border: 1px solid var(--p2b-line); border-top: 0; }
+  .layer-list-actions button { margin: 0; }
+  .layer-list ol { margin: 0; padding: 5px 5px 5px 25px; border: 1px solid var(--p2b-line); border-top: 0; max-height: 220px; overflow: auto; background: var(--p2b-bg); }
+  .layer-list li { margin: 2px 0; }
+  .layer-list li button { width: 100%; text-align: left; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .layer-list li button.selected { border-color: var(--p2b-focus); }
+
   .reference-wires .edge-hit { stroke-width: 22; }
   .flow-line {
     stroke: var(--p2b-fg);
@@ -239,12 +265,10 @@ export const logicCanvasStyles = css`
     border-color: var(--p2b-focus);
   }
   .envelope-summary {
-    position: absolute;
-    bottom: 2px;
-    left: 8px;
-    right: 8px;
-    height: 20px;
-    line-height: 20px;
+    display: block;
+    margin: -1px 5px 3px;
+    height: 18px;
+    line-height: 18px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -366,6 +390,49 @@ export const logicCanvasStyles = css`
     border: 1px dashed var(--p2b-focus);
     pointer-events: none;
     z-index: 5;
+  }
+  .minimap {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 20;
+    overflow: hidden;
+    border: 1px solid var(--p2b-line);
+    background: color-mix(in srgb, var(--p2b-bg) 88%, transparent);
+    pointer-events: auto;
+  }
+  .minimap-wires {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+  .minimap-wires path {
+    fill: none;
+    stroke: var(--p2b-dim);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+  .minimap-node {
+    position: absolute;
+    display: block;
+    min-width: 2px;
+    min-height: 2px;
+    border: 1px solid var(--p2b-info, #55ffff);
+    background: color-mix(in srgb, var(--p2b-info, #55ffff) 35%, transparent);
+    pointer-events: none;
+  }
+  .minimap-node.minimap-envelope {
+    border-style: dashed;
+    border-color: var(--p2b-dim);
+    background: transparent;
+  }
+  .minimap-viewport {
+    position: absolute;
+    border: 2px solid var(--p2b-focus);
+    background: color-mix(in srgb, var(--p2b-focus) 12%, transparent);
+    cursor: move;
+    touch-action: none;
   }
   label {
     display: block;

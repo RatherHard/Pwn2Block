@@ -27,14 +27,18 @@ import { logicCanvasStyles } from './logic-canvas-styles';
 import { logicFlowHitClip, logicEdgeGeometry, logicPointInsertionIndex, logicSummary, logicLiteralSummary, logicTitle } from './logic-canvas-view';
 
 import { renderLogicLibrary, type AddableLogicKind, type LogicLibraryState } from './logic-canvas-library';
+import { logicLayers, moveLogicLayer, normalizeLogicLayerOrder, type LogicLayer } from '../canvas/logic-layers';
+import { miniMapGeometry, miniMapPoint, miniMapViewportStyle } from '../canvas/minimap';
 
 let localClipboard = '';
 let clipboardWrite: Promise<void> = Promise.resolve();
 type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean; library?: boolean; baseline?: canvas.LogicGraph };
+type MiniMapDrag = { clientX: number; clientY: number; offset: { x: number; y: number }; scale: number; viewScale: number };
 export class LogicCanvasElement extends LitElement {
   static override styles = [terminalTheme, sharedStyles, logicCanvasStyles];
   static override properties = {
     graph: { attribute: false },
+    layerOrder: { attribute: false },
     methods: { attribute: false },
     issues: { attribute: false },
     steps: { attribute: false },
@@ -42,6 +46,7 @@ export class LogicCanvasElement extends LitElement {
     canRedo: { type: Boolean },
   };
   declare graph: canvas.LogicGraph;
+  declare layerOrder: readonly string[];
   declare methods: readonly canvas.CanvasMethodDecl[];
   declare issues: readonly WorkflowIssue[];
   declare steps: readonly canvas.CanvasStep[];
@@ -59,6 +64,10 @@ export class LogicCanvasElement extends LitElement {
   private viewScale = 1;
   private pan: { clientX: number; clientY: number; x: number; y: number } | undefined;
   private marquee: { x: number; y: number; endX: number; endY: number } | undefined;
+  private minimapDrag: MiniMapDrag | undefined;
+  private minimapStageSize = { width: 0, height: 0 };
+  private minimapResizeObserver: ResizeObserver | undefined;
+  private spacePressed = false;
   private wiring: { input: string } | undefined;
   private message = '';
   private pasteCount = 0;
@@ -70,6 +79,7 @@ export class LogicCanvasElement extends LitElement {
   constructor() {
     super();
     this.methods = [];
+    this.layerOrder = [];
     this.issues = [];
     this.steps = [];
     this.canUndo = false;
@@ -78,6 +88,7 @@ export class LogicCanvasElement extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener('keydown', this.keyDown);
+    this.addEventListener('keyup', this.keyUp);
     this.addEventListener('copy', this.copyEvent);
     this.addEventListener('cut', this.cutEvent);
     this.addEventListener('paste', this.pasteEvent);
@@ -91,10 +102,13 @@ export class LogicCanvasElement extends LitElement {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.removeEventListener('keydown', this.keyDown);
+    this.removeEventListener('keyup', this.keyUp);
     this.removeEventListener('copy', this.copyEvent);
     this.removeEventListener('cut', this.cutEvent);
     this.removeEventListener('paste', this.pasteEvent);
     this.stopPointer();
+    this.minimapResizeObserver?.disconnect();
+    this.minimapResizeObserver = undefined;
     document.removeEventListener('pointerdown', this.dismissMenu, true);
     document.removeEventListener('focusin', this.dismissMenu, true);
     document.removeEventListener('wheel', this.dismissMenu, true);
@@ -116,6 +130,19 @@ export class LogicCanvasElement extends LitElement {
     if (changed.has('graph') && this.graph &&
       ((this.drag && (this.drag.baseline ?? this.drag.original) !== this.graph) ||
        (this.bendDrag && this.bendDrag.original !== this.graph))) this.cancelPointer();
+    this.syncMinimapStage();
+  }
+  private syncMinimapStage(): void {
+    const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
+    if (!stage) return;
+    if (!this.minimapResizeObserver && typeof ResizeObserver !== 'undefined') {
+      this.minimapResizeObserver = new ResizeObserver(() => this.syncMinimapStage());
+      this.minimapResizeObserver.observe(stage);
+    }
+    const size = { width: stage.clientWidth, height: stage.clientHeight };
+    if (size.width === this.minimapStageSize.width && size.height === this.minimapStageSize.height) return;
+    this.minimapStageSize = size;
+    this.requestUpdate();
   }
   private closeMenu = (): void => {
     if (!this.menuPosition) return;
@@ -252,14 +279,17 @@ export class LogicCanvasElement extends LitElement {
   private emit(name: string, detail?: unknown): void {
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
   }
-  private commit(graph: canvas.LogicGraph): void {
-    if (graph === this.graph) return;
-    if (!canvas.LogicGraphSchema.safeParse(graph).success) {
+  private commit(graph: canvas.LogicGraph, layerOrder = this.layerOrder): void {
+    const normalizedOrder = normalizeLogicLayerOrder(graph, layerOrder);
+    const orderChanged = normalizedOrder.length !== this.layerOrder.length || normalizedOrder.some((id, index) => id !== this.layerOrder[index]);
+    if (graph === this.graph && !orderChanged) return;
+    if (graph !== this.graph && !canvas.LogicGraphSchema.safeParse(graph).success) {
       this.message = '超出文档限制：最多 512 节点、2048 连接，每条流程线最多 128 个转折点，请检查字段长度与坐标范围';
       this.requestUpdate();
       return;
     }
     this.message = '';
+    this.layerOrder = normalizedOrder;
     this.emit('logic-edit', graph);
     this.requestUpdate();
   }
@@ -290,8 +320,19 @@ export class LogicCanvasElement extends LitElement {
     }
     this.requestUpdate();
   }
+  private startPan(event: PointerEvent): boolean {
+    if (event.button !== 0 || (!this.spacePressed && !event.getModifierState('Space'))) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    this.focus({ preventScroll: true });
+    this.pan = { clientX: event.clientX, clientY: event.clientY, ...this.viewOffset };
+    this.listenPointer();
+    this.requestUpdate();
+    return true;
+  }
   private startNode(event: PointerEvent, id: string): void {
     if (event.button !== 0) return;
+    if (this.startPan(event)) return;
     event.preventDefault();
     event.stopPropagation();
     this.focus({ preventScroll: true });
@@ -333,8 +374,8 @@ export class LogicCanvasElement extends LitElement {
     this.edgeId = undefined;
     this.wiring = undefined;
     this.bend = undefined;
-    if (event.shiftKey) this.marquee = { ...p, endX: p.x, endY: p.y };
-    else this.pan = { clientX: event.clientX, clientY: event.clientY, ...this.viewOffset };
+    if (this.spacePressed || event.getModifierState('Space')) this.pan = { clientX: event.clientX, clientY: event.clientY, ...this.viewOffset };
+    else this.marquee = { ...p, endX: p.x, endY: p.y };
     this.listenPointer();
     this.requestUpdate();
   }
@@ -349,6 +390,16 @@ export class LogicCanvasElement extends LitElement {
     window.removeEventListener('pointercancel', this.cancelPointer);
   }
   private pointerMove = (event: PointerEvent): void => {
+    if (this.minimapDrag) {
+      const dx = event.clientX - this.minimapDrag.clientX;
+      const dy = event.clientY - this.minimapDrag.clientY;
+      this.viewOffset = {
+        x: this.minimapDrag.offset.x - (dx / this.minimapDrag.scale) * this.minimapDrag.viewScale,
+        y: this.minimapDrag.offset.y - (dy / this.minimapDrag.scale) * this.minimapDrag.viewScale,
+      };
+      this.requestUpdate();
+      return;
+    }
     if (this.pan) {
       this.viewOffset = { x: this.pan.x + event.clientX - this.pan.clientX, y: this.pan.y + event.clientY - this.pan.clientY };
       this.requestUpdate();
@@ -377,7 +428,7 @@ export class LogicCanvasElement extends LitElement {
     this.requestUpdate();
   };
   private pointerUp = (event: PointerEvent): void => {
-    if (this.drag?.moved || this.bendDrag || this.pan) this.pointerMove(event);
+    if (this.drag?.moved || this.bendDrag || this.pan || this.minimapDrag) this.pointerMove(event);
     this.stopPointer();
     if (this.drag?.library) setTimeout(() => { this.suppressLibraryClick = false; }, 0);
     if (this.bendDrag && this.draft) this.commit(this.draft);
@@ -399,6 +450,7 @@ export class LogicCanvasElement extends LitElement {
         .map((n) => n.id);
     }
     this.pan = undefined;
+    this.minimapDrag = undefined;
     this.drag = undefined;
     this.bendDrag = undefined;
     this.draft = undefined;
@@ -416,7 +468,15 @@ export class LogicCanvasElement extends LitElement {
     this.snap = undefined;
     this.marquee = undefined;
     this.wiring = undefined;
+    this.spacePressed = false;
     this.requestUpdate();
+  };
+  private keyUp = (event: KeyboardEvent): void => {
+    if (event.key === ' ' || event.code === 'Space') {
+      this.spacePressed = false;
+      event.preventDefault();
+      this.requestUpdate();
+    }
   };
   private keyDown = (event: KeyboardEvent): void => {
     if (
@@ -427,6 +487,12 @@ export class LogicCanvasElement extends LitElement {
         )
     )
       return;
+    if (event.key === ' ' || event.code === 'Space') {
+      this.spacePressed = true;
+      event.preventDefault();
+      this.requestUpdate();
+      return;
+    }
     const modifier = event.ctrlKey || event.metaKey;
     if (event.key === 'Escape') {
       this.bend = undefined;
@@ -545,6 +611,7 @@ export class LogicCanvasElement extends LitElement {
   }
   private startBend(event: PointerEvent, edgeId: string, index: number): void {
     if (event.button !== 0) return;
+    if (this.startPan(event)) return;
     event.preventDefault();
     event.stopPropagation();
     this.focus({ preventScroll: true });
@@ -566,6 +633,7 @@ export class LogicCanvasElement extends LitElement {
     });
   }
   private chooseEdge(event: Event, id: string): void {
+    if (event instanceof PointerEvent && this.startPan(event)) return;
     event.stopPropagation();
     this.focus({ preventScroll: true });
     this.edgeId = id;
@@ -575,6 +643,7 @@ export class LogicCanvasElement extends LitElement {
   }
   private flowPort(event: PointerEvent, node: canvas.LogicNode, outlet?: 'next' | 'then' | 'else'): void {
     if (event.button !== 0) return;
+    if (this.startPan(event)) return;
     event.preventDefault();
     event.stopPropagation();
     this.focus({ preventScroll: true });
@@ -664,15 +733,15 @@ export class LogicCanvasElement extends LitElement {
           ${logicTitle(node, this.methods)}
           [${node.category === 'data' ? (canvas.logicHasAssignment(graph, node.id) ? '数据 / 流程' : '数据') : '流程'}]
           </button>
+          ${node.category === 'data' ? html`<span class="envelope-summary" title=${logicSummary(preview.get(node.id))}>
+            = ${logicSummary(preview.get(node.id))}</span>` : nothing}
           ${attached.map((n) => html`<button class="attachment ${this.selected.includes(n.id) ? 'selected' : ''} ${this.snap?.attachment === n.id ? 'ghost' : ''}"
             data-attachment=${n.id} aria-label=${`编辑 ${logicTitle(n, this.methods)}`}
-            @pointerdown=${(e: PointerEvent) => { e.stopPropagation(); }}
+            @pointerdown=${(e: PointerEvent) => { if (!this.startPan(e)) e.stopPropagation(); }}
             @click=${() => { this.selected = [n.id]; this.edgeId = undefined; this.bend = undefined; this.requestUpdate(); }}>
             ${logicTitle(n, this.methods)}${n.kind === 'loop' ? ` · ${n.count} 次` : ''}
           </button>`)}
         </div>
-        ${node.category === 'data' ? html`<span class="envelope-summary" title=${logicSummary(preview.get(node.id))}>
-          = ${logicSummary(preview.get(node.id))}</span>` : nothing}
         ${this.ports(node)}
       </div>`;
     const summary =
@@ -707,6 +776,61 @@ export class LogicCanvasElement extends LitElement {
       <span class="node-title">${logicTitle(node, this.methods)}</span
       ><span class="node-summary" title=${summary}>${summary}</span>${this.ports(node)}
     </div>`;
+  }
+  private layerAction(action: 'up' | 'down' | 'top' | 'bottom'): void {
+    this.commit(this.graph, moveLogicLayer(this.graph, this.layerOrder, this.selected, action));
+  }
+  private selectLayer(layer: LogicLayer): void {
+    this.selected = [...layer.members];
+    this.edgeId = undefined;
+    this.bend = undefined;
+    this.requestUpdate();
+  }
+  private layerTitle(graph: canvas.LogicGraph, layer: LogicLayer): string {
+    const envelope = graph.nodes.find((node) => node.kind === 'envelope' && layer.members.includes(node.id));
+    if (envelope?.kind === 'envelope') return envelope.title;
+    const first = graph.nodes.find((node) => layer.members.includes(node.id));
+    return first ? logicTitle(first, this.methods) : layer.id;
+  }
+  private renderLayer(
+    graph: canvas.LogicGraph,
+    layer: LogicLayer,
+    preview: ReadonlyMap<string, canvas.Value | string>,
+  ): TemplateResult {
+    const members = new Set(layer.members);
+    return html`<div class="logic-layer" style=${styleMap({ zIndex: `${10 + layer.index}` })}>
+      ${graph.nodes
+        .filter((node) => members.has(node.id) && node.kind === 'envelope')
+        .map((node) => this.renderNode(graph, node, preview))}
+      ${graph.nodes
+        .filter((node) => members.has(node.id) && node.kind !== 'envelope' && !logicAttachmentHost(node))
+        .map((node) => this.renderNode(graph, node, preview))}
+      ${graph.edges
+        .filter((edge) => edge.kind === 'data' && members.has(edge.from) && members.has(edge.to))
+        .map((edge) => this.relation(graph, edge))}
+      ${this.snap?.edge?.kind === 'data' && members.has(this.snap.edge.from) && members.has(this.snap.edge.to)
+        ? this.relation(this.snap.graph, this.snap.edge, true)
+        : nothing}
+    </div>`;
+  }
+  private layerList(graph: canvas.LogicGraph, layers: readonly LogicLayer[]): TemplateResult {
+    const selectedLayer = layers.find((layer) => layer.members.some((id) => this.selected.includes(id)));
+    return html`<details class="layer-list">
+      <summary>图层 (${layers.length})</summary>
+      <div class="layer-list-actions">
+        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('up')}>上移一层</button>
+        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('down')}>下移一层</button>
+        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('top')}>置于顶层</button>
+        <button ?disabled=${!selectedLayer} @click=${() => this.layerAction('bottom')}>置于底层</button>
+      </div>
+      <ol>
+        ${[...layers].reverse().map((layer) => html`<li>
+          <button class=${selectedLayer?.id === layer.id ? 'selected' : ''} @click=${() => this.selectLayer(layer)}>
+            ${this.layerTitle(graph, layer)} <span>(${layer.members.length})</span>
+          </button>
+        </li>`)}
+      </ol>
+    </details>`;
   }
   private inspector(): TemplateResult {
     const edge = this.graph.edges.find((e) => e.id === this.edgeId);
@@ -828,10 +952,57 @@ export class LogicCanvasElement extends LitElement {
           ? (this.methods.find((m) => m.id === node.method)?.params.map((p) => p.name) ?? [])
           : [];
   }
+  private startMiniMap(event: PointerEvent): void {
+    const target = event.target as Element;
+    if (!target.closest('.minimap-viewport')) {
+      event.stopPropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
+    const minimap = this.renderRoot.querySelector<HTMLElement>('.minimap');
+    if (!stage || !minimap) return;
+    const geometry = miniMapGeometry(this.graph, stage.clientWidth, stage.clientHeight, minimap.clientWidth, minimap.clientHeight, this.viewOffset, this.viewScale);
+    this.minimapDrag = { clientX: event.clientX, clientY: event.clientY, offset: { ...this.viewOffset }, scale: geometry.scale, viewScale: this.viewScale };
+    this.listenPointer();
+  }
+  private renderMiniMap(graph: canvas.LogicGraph): TemplateResult {
+    const width = 190;
+    const height = 130;
+    const geometry = miniMapGeometry(
+      graph,
+      this.minimapStageSize.width || width,
+      this.minimapStageSize.height || height,
+      width,
+      height,
+      this.viewOffset,
+      this.viewScale,
+    );
+    const viewport = miniMapViewportStyle(geometry);
+    const transform = `translate(${-geometry.content.x * geometry.scale} ${-geometry.content.y * geometry.scale}) scale(${geometry.scale})`;
+    return html`<div class="minimap" style=${styleMap({ width: `${width}px`, height: `${height}px` })} @pointerdown=${this.startMiniMap}>
+      <svg class="minimap-wires" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true">
+        <g transform=${transform}>
+          ${graph.edges.map((edge) => logicEdgeGeometry(graph, edge).paths.map((path) => svg`<path d=${path}></path>`))}
+        </g>
+      </svg>
+      ${graph.nodes.map((node) => {
+        const box = logicBox(graph, node.id);
+        const point = miniMapPoint(geometry, box);
+        return html`<span class="minimap-node ${node.kind === 'envelope' ? 'minimap-envelope' : ''}" style=${styleMap({ left: `${point.x}px`, top: `${point.y}px`, width: `${Math.max(2, box.width * geometry.scale)}px`, height: `${Math.max(2, box.height * geometry.scale)}px` })}></span>`;
+      })}
+      <span class="minimap-viewport" style=${styleMap({ left: `${viewport.x}px`, top: `${viewport.y}px`, width: `${viewport.width}px`, height: `${viewport.height}px` })}></span>
+    </div>`;
+  }
   override render(): TemplateResult {
     if (!this.graph) return html``;
     const graph = this.snap?.attachment ? this.snap.graph : this.draft ?? this.graph,
-      preview = canvas.previewLogicGraph(graph);
+      preview = canvas.previewLogicGraph(graph),
+      displayOrder = this.drag
+        ? moveLogicLayer(graph, this.layerOrder, this.drag.ids, 'top')
+        : normalizeLogicLayerOrder(graph, this.layerOrder),
+      layers = logicLayers(graph, displayOrder);
     return html`<section class="workspace" @contextmenu=${this.openMenu}>
       <div class="toolbar">
         <button
@@ -847,7 +1018,7 @@ export class LogicCanvasElement extends LitElement {
         ><button @click=${() => this.pasteClipboard()}>粘贴</button
         ><button @click=${() => this.emit('logic-import')}>导入</button
         ><button @click=${() => this.emit('logic-export')}>导出</button
-        ><button class="btn-run" @click=${() => this.emit('logic-run')} ?disabled=${this.issues.length > 0}>运行</button
+        >${this.layerList(graph, layers)}<button class="btn-run" @click=${() => this.emit('logic-run')} ?disabled=${this.issues.length > 0}>运行</button
         ><span class="status"
           >${graph.nodes.length} 节点 · ${graph.edges.length} 连接 · ${this.issues.length} 问题</span
         >
@@ -891,14 +1062,7 @@ export class LogicCanvasElement extends LitElement {
               ${graph.edges.filter((e) => e.kind === 'flow').map((e) => this.edgeSvg(graph, e))}
               ${this.snap?.edge?.kind === 'flow' ? this.edgeSvg(this.snap.graph, this.snap.edge, true) : nothing}
             </svg>
-            ${graph.nodes
-              .filter((n) => n.kind === 'envelope')
-              .map((n) => this.renderNode(graph, n, preview))}${graph.nodes
-              .filter((n) => n.kind !== 'envelope' && !logicAttachmentHost(n))
-              .map((n) => this.renderNode(graph, n, preview))}${graph.edges.map((e) => this.relation(graph, e))}${this
-              .snap?.edge
-              ? this.relation(this.snap.graph, this.snap.edge, true)
-              : nothing}
+            ${layers.map((layer) => this.renderLayer(graph, layer, preview))}
             ${this.snap?.attachment
               ? html`<div
                   class="attachment ghost"
@@ -923,6 +1087,7 @@ export class LogicCanvasElement extends LitElement {
                 ></div>`
               : nothing}
           </div>
+          ${this.renderMiniMap(graph)}
         </div>
         <aside class="inspector" aria-label="属性">${this.inspector()}</aside>
       </div>
@@ -943,7 +1108,7 @@ export class LogicCanvasElement extends LitElement {
                         <td><button @click=${() => this.locate(s.nodeId)}>${s.step + 1} · ${s.nodeId}</button></td>
                         <td>
                           ${Object.entries(s.rounds)
-                            .map(([id, round]) => `${id} 第 ${round + 1} 轮`)
+                             .map(([id, round]) => `${id} 第 ${round + 1} 轮`)
                             .join(' / ')}
                         </td>
                         <td>${s.variables.map((v) => `${v.name} = ${logicSummary(v.value)}`).join('；')}</td>

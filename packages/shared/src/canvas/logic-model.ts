@@ -80,6 +80,7 @@ export function newLogicDocument(): CanvasDocument {
     layout: {},
     main: [],
     logic: { version: 1, nodes: [{ id: 'start', kind: 'start', x: 100, y: 100 }], edges: [] },
+    logicView: { layerOrder: ['start'] },
   };
 }
 export function logicCategory(node: LogicNode): 'data' | 'flow' {

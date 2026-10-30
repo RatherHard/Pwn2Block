@@ -5,6 +5,7 @@ import type { WorkflowIssue } from '../canvas/artifact';
 import { loadCanvas, makeCanvasSave, parseCanvasSave, type CanvasStore } from '../canvas/save';
 import { CanvasHistory } from './canvas-panel-history';
 import { CanvasAutosave } from './canvas-panel-save';
+import { normalizeLogicLayerOrder } from '../canvas/logic-layers';
 import { legacyDetailOf } from './canvas-panel-legacy';
 import { terminalTheme, sharedStyles } from '../theme';
 import './logic-canvas';
@@ -153,10 +154,14 @@ export class CanvasPanelElement extends LitElement {
     this.autosave.schedule();
     this.requestUpdate();
   }
-  private edit(graph: canvas.LogicGraph): void {
+  private edit(graph: canvas.LogicGraph, layerOrder?: readonly string[]): void {
     if (!this.document) return;
+    const order = normalizeLogicLayerOrder(graph, layerOrder ?? this.document.logicView?.layerOrder);
+    const previous = this.document.logicView?.layerOrder ?? [];
+    const orderChanged = order.length !== previous.length || order.some((id, index) => id !== previous[index]);
+    if (this.document.logic === graph && !orderChanged) return;
     this.history.push(this.document);
-    this.document = { ...this.document, logic: graph };
+    this.document = { ...this.document, logic: graph, logicView: { layerOrder: order } };
     this.changed();
   }
   private undo(): void {
@@ -278,12 +283,13 @@ export class CanvasPanelElement extends LitElement {
             ? html` <pwn2block-logic-canvas
                 tabindex="0"
                 .graph=${this.document.logic}
+                .layerOrder=${this.document.logicView?.layerOrder ?? []}
                 .methods=${canvas.canvasMethodsOf({ authorBlocks: this.challenge?.authorBlocks })}
                 .issues=${this.issues}
                 .steps=${this.steps}
                 .canUndo=${this.history.canUndo()}
                 .canRedo=${this.history.canRedo()}
-                @logic-edit=${(e: CustomEvent<canvas.LogicGraph>) => this.edit(e.detail)}
+                @logic-edit=${(e: CustomEvent<canvas.LogicGraph>) => this.edit(e.detail, (e.currentTarget as LogicCanvasElement).layerOrder)}
                 @logic-undo=${() => this.undo()}
                 @logic-redo=${() => this.redo()}
                 @logic-run=${() => this.run()}

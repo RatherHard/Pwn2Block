@@ -331,8 +331,13 @@ export const CanvasNodeSchema = z.discriminatedUnion('kind', [
 // 文档
 // ---------------------------------------------------------------------------
 
+const CanvasLogicViewSchema = z.strictObject({
+  layerOrder: z.array(CanvasNodeIdSchema).max(CANVAS_MAX_NODES),
+});
+
 export const CanvasDocumentSchema = z.strictObject({
   logic: LogicGraphSchema.optional(),
+  logicView: CanvasLogicViewSchema.optional(),
   format: z.literal(CANVAS_FORMAT),
   version: z.literal(CANVAS_VERSION),
   nodes: z.array(CanvasNodeSchema).max(CANVAS_MAX_NODES, `节点数不能超过 ${CANVAS_MAX_NODES}`),
