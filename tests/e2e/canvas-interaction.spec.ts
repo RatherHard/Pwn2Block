@@ -7,6 +7,7 @@ test.use({ viewport: { width: 1920, height: 1080 } });
 test('节点库加入独立常量，侧栏编辑并撤销', async ({ page }) => {
   await openChallenge(page);
   const panel = panelOf(page);
+  if (await panel.locator('[data-category="data"]').isVisible()) await panel.locator('[data-category="data"]').click();
   await panel.getByRole('button', { name: '+ 常量', exact: true }).click();
   await panel.getByLabel('数据类型').selectOption('string');
   await panel.getByLabel('值', { exact: true }).fill('hello');
@@ -43,6 +44,7 @@ test('空白框选同类节点并创建包络', async ({ page }) => {
 test('连续新增节点不会遮挡已有节点', async ({ page }) => {
   await openChallenge(page);
   const panel = panelOf(page);
+  if (await panel.locator('[data-category="data"]').isVisible()) await panel.locator('[data-category="data"]').click();
   for (let i = 0; i < 5; i++) await panel.getByRole('button', { name: '+ 常量', exact: true }).click();
   const nodes = (await readGraph(page)).nodes;
   for (let i = 0; i < nodes.length; i++)

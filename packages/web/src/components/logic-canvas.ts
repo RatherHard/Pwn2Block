@@ -20,6 +20,8 @@ import { LogicNodeFields } from './logic-canvas-fields';
 import { logicCanvasStyles } from './logic-canvas-styles';
 import { logicEdgeGeometry, logicSummary, logicTitle } from './logic-canvas-view';
 
+import { renderLogicLibrary, type LogicLibraryState } from './logic-canvas-library';
+
 type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean };
 export class LogicCanvasElement extends LitElement {
   static override styles = [terminalTheme, sharedStyles, logicCanvasStyles];
@@ -46,6 +48,9 @@ export class LogicCanvasElement extends LitElement {
   private wiring: { id: string; outlet: 'next' | 'then' | 'else' } | undefined;
   private message = '';
   private targetId = '';
+  private libraryState: LogicLibraryState = { page: 0 };
+  private menuPosition: { x: number; y: number } | undefined;
+  private menuReturnFocus: HTMLElement | undefined;
   constructor() {
     super();
     this.methods = [];
@@ -57,11 +62,23 @@ export class LogicCanvasElement extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener('keydown', this.keyDown);
+    document.addEventListener('pointerdown', this.dismissMenu, true);
+    document.addEventListener('focusin', this.dismissMenu, true);
+    document.addEventListener('wheel', this.dismissMenu, { capture: true, passive: true });
+    window.addEventListener('resize', this.closeMenu);
+    window.addEventListener('blur', this.closeMenu);
   }
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.removeEventListener('keydown', this.keyDown);
     this.stopPointer();
+    document.removeEventListener('pointerdown', this.dismissMenu, true);
+    document.removeEventListener('focusin', this.dismissMenu, true);
+    document.removeEventListener('wheel', this.dismissMenu, true);
+    window.removeEventListener('resize', this.closeMenu);
+    window.removeEventListener('blur', this.closeMenu);
+    this.menuPosition = undefined;
+    this.menuReturnFocus = undefined;
   }
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (changed.has('graph') && this.graph) {
@@ -72,6 +89,68 @@ export class LogicCanvasElement extends LitElement {
   }
   protected override updated(changed: PropertyValues<this>): void {
     if (changed.has('graph') && this.graph && this.drag && this.drag.original !== this.graph) this.cancelPointer();
+  }
+  private closeMenu = (): void => {
+    if (!this.menuPosition) return;
+    this.menuPosition = undefined;
+    this.menuReturnFocus = undefined;
+    this.requestUpdate();
+  };
+  private dismissMenu = (event: Event): void => {
+    if (!event.composedPath().some((target) => target instanceof HTMLElement && target.classList.contains('canvas-context-menu')))
+      this.closeMenu();
+  };
+  private finishMenu(action?: 'logic-undo' | 'logic-redo'): void {
+    const focus = this.menuReturnFocus;
+    this.closeMenu();
+    if (action) this.emit(action);
+    if (focus?.isConnected) focus.focus({ preventScroll: true });
+    else this.focus({ preventScroll: true });
+  }
+  private openMenu = (event: MouseEvent): void => {
+    // Keep native editing commands available inside form controls.
+    if (event.composedPath().some((target) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+    event.preventDefault();
+    this.cancelPointer();
+    this.menuReturnFocus = this.renderRoot.querySelector<HTMLElement>(':focus') ?? this;
+    this.menuPosition = { x: event.clientX, y: event.clientY };
+    this.requestUpdate();
+    void this.updateComplete.then(() => {
+      const menu = this.renderRoot.querySelector<HTMLElement>('.canvas-context-menu');
+      if (!menu || !this.menuPosition) return;
+      const rect = menu.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(this.menuPosition.x, window.innerWidth - rect.width - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(this.menuPosition.y, window.innerHeight - rect.height - 8))}px`;
+      (menu.querySelector<HTMLElement>('button:not(:disabled)') ?? menu).focus({ preventScroll: true });
+    });
+  };
+  private menuKeyDown = (event: KeyboardEvent): void => {
+    event.stopPropagation();
+    if (event.key === 'Escape') { event.preventDefault(); this.finishMenu(); return; }
+    if (event.key === 'Tab') { this.finishMenu(); return; }
+    const buttons = [...this.renderRoot.querySelectorAll<HTMLButtonElement>('.canvas-context-menu button:not(:disabled)')];
+    const index = buttons.findIndex((button) => button === this.shadowRoot?.activeElement);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 :
+        (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next]?.focus();
+    }
+    if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      const redo = event.shiftKey || event.key.toLowerCase() === 'y';
+      if (redo ? this.canRedo : this.canUndo) this.finishMenu(redo ? 'logic-redo' : 'logic-undo');
+    }
+  };
+  private contextMenu(): TemplateResult | typeof nothing {
+    if (!this.menuPosition) return nothing;
+    return html`<div class="canvas-context-menu" role="menu" aria-label="画布菜单" tabindex="-1"
+      style=${styleMap({ left: `${this.menuPosition.x}px`, top: `${this.menuPosition.y}px` })}
+      @keydown=${this.menuKeyDown} @contextmenu=${(event: Event) => { event.preventDefault(); event.stopPropagation(); }}>
+      <div class="menu-title">画布编辑</div>
+      <button role="menuitem" ?disabled=${!this.canUndo} @click=${() => this.finishMenu('logic-undo')}>撤销 <span>Ctrl Z</span></button>
+      <button role="menuitem" ?disabled=${!this.canRedo} @click=${() => this.finishMenu('logic-redo')}>重做 <span>Ctrl Shift Z</span></button>
+    </div>`;
   }
   private emit(name: string, detail?: unknown): void {
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
@@ -310,6 +389,7 @@ export class LogicCanvasElement extends LitElement {
   private ports(node: canvas.LogicNode): TemplateResult | typeof nothing {
     if (!canvas.logicIsFlow(this.graph, node) || (node.kind === 'loop' && node.body)) return nothing;
     const startWire = (event: Event, outlet: 'next' | 'then' | 'else'): void => {
+      if (event instanceof PointerEvent && event.button !== 0) return;
       event.stopPropagation();
       this.wiring = { id: node.id, outlet };
       this.message = '点击目标流程节点完成连接，Esc 取消';
@@ -546,7 +626,7 @@ export class LogicCanvasElement extends LitElement {
     const boxes = graph.nodes.map((n) => logicBox(graph, n.id));
     const width = Math.max(1600, ...boxes.map((b) => b.x + b.width + 200)),
       height = Math.max(900, ...boxes.map((b) => b.y + b.height + 200));
-    return html`<section class="workspace">
+    return html`<section class="workspace" @contextmenu=${this.openMenu}>
       <div class="toolbar">
         <button
           @click=${() => this.attempt(() => wrapLogic(this.graph, this.selected))}
@@ -564,18 +644,21 @@ export class LogicCanvasElement extends LitElement {
         >
       </div>
       <div class="body">
-        <aside class="library" aria-label="节点库">
-          <h3>数据节点</h3>
-          <button @click=${() => this.add('constant')}>+ 常量</button
-          ><button @click=${() => this.add('variable')}>+ 变量</button
-          ><button @click=${() => this.add('convert')}>+ 类型转换</button>
-          <h3>流程节点</h3>
-          <button @click=${() => this.add('loop')}>+ 次数循环</button
-          ><button @click=${() => this.add('branch')}>+ 条件分支</button>
-          <h3>题目方法</h3>
-          ${this.methods.map((m) => html`<button @click=${() => this.add('method', m.id)}>${m.label}</button>`)}
-          <p>拖近节点：吸附连接<br />Shift 点击：多选<br />Ctrl+G：包络<br />Esc：取消拖动</p>
-        </aside>
+        ${renderLogicLibrary({ state: this.libraryState, methods: this.methods,
+          change: (state) => {
+            const previous = this.libraryState.category;
+            this.libraryState = state;
+            this.requestUpdate();
+            void this.updateComplete.then(() => {
+              const options = this.renderRoot.querySelector('.library-options');
+              if (options) options.scrollTop = 0;
+              if (state.category !== previous) {
+                this.renderRoot.querySelector<HTMLElement>(state.category ? '.library-back' : `.library-category[data-category="${previous}"]`)?.focus();
+              }
+            });
+          },
+          add: (kind, method) => this.add(kind, method),
+        })}
         <div class="stage" tabindex="0" aria-label="节点画布" @pointerdown=${this.startStage}>
           <div class="surface" style=${styleMap({ width: `${width}px`, height: `${height}px` })}>
             <svg class="wires" width=${width} height=${height} aria-label="画布连接">
@@ -655,6 +738,7 @@ export class LogicCanvasElement extends LitElement {
             </details>`
           : nothing}
       </div>
+      ${this.contextMenu()}
     </section>`;
   }
 }

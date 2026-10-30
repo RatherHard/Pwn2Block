@@ -1,6 +1,6 @@
 ﻿# 节点画布浏览器回归
 
-当前用例以 `docs/archive/canvas-logic-2026-10-30/节点功能逻辑重构.md` 为基准。运行真实后端和生产构建，不 mock API。此前 UI 方案的列表、分组序列、分页与“手填/接线”断言已替换为显式图行为。
+当前用例以 `docs/archive/canvas-logic-2026-10-30/节点功能逻辑重构.md` 为基准。运行真实后端和生产构建，不 mock API。此前 UI 方案的列表、分组序列与“手填/接线”断言已替换为显式图行为。
 
 ## 运行
 
@@ -24,6 +24,7 @@ pnpm e2e
 
 | 文件 | 内容 |
 |---|---|
+| `canvas-library-menu.spec.ts` | 分级返回、每项常驻预览、方法分页、侧栏宽度、无方括号、右键撤销/重做、键盘与边缘定位 |
 | `canvas-logic.spec.ts` | 五种标量、唯一开始、点阵、真实拖动吸附/远离/提交、间距、右侧关系、内部吸附、转换、跨图拖动取消 |
 | `canvas-interaction.spec.ts` | 新增与编辑、撤销、自由移动、空白框选、无重叠落位 |
 | `canvas-ui-reconstruction.spec.ts` | 新规则下的包络端口、循环附着/解除和跨包络引用（保留文件名，旧 UI 规则已移除） |
@@ -35,7 +36,7 @@ pnpm e2e
 
 公开方法仍只生成 block 动作。闭环用例验证真实提交与服务端的“没有达成目标”结论；题目判胜完整性另外由全部参考解法回放验证，不将手工调试步骤冒充画布生成的 payload。
 
-## 本轮验证
+## 逻辑重构阶段验证（历史）
 
 2026-10-30（Asia/Shanghai），Windows / Chromium / 真实 Fastify 后端。
 
@@ -46,3 +47,13 @@ pnpm e2e
 - 审查回归另覆盖嵌套循环及次数依赖、16 层共享派生依赖与更新、转换入口一致性、解除包络保留引用、动态选项同步、导入竞态和统一附着校验。
 
 详细行为与语义边界见 [实现与验收](../../docs/archive/canvas-logic-2026-10-30/节点功能逻辑重构-实现与验收.md)。
+
+## 节点库与右键菜单验证
+
+2026-10-30（Asia/Shanghai），Windows / Chromium，使用独立 8799 端口的真实后端与生产构建。
+
+- `pnpm typecheck`、`pnpm lint`、`pnpm build`：通过。
+- `pnpm test`：140 个测试文件，2495 项通过，原有 5 项 TODO 保留。
+- `PWN2BLOCK_E2E=1 PWN2BLOCK_BASE_URL=http://127.0.0.1:8799 pnpm e2e`：27 项通过，包括六种窗口尺寸。
+- 新增 3 项浏览器回归覆盖分类、分页、预览和菜单；截图与报告保存在 `.tmp/playwright/` 和 `.tmp/playwright.json`，不提交 Git。
+- 题目包与求解器未改动，本轮未重跑 `challenge:check` / `challenge:solve`；上方结果属于之前阶段。

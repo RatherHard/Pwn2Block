@@ -36,6 +36,7 @@ test('损坏存档保留原文，旧键不会被覆盖', async ({ page }) => {
 test('Delete 删除、撤销恢复，输入名称不会触发画布快捷键', async ({ page }) => {
   await openChallenge(page);
   const panel = panelOf(page);
+  if (await panel.locator('[data-category="data"]').isVisible()) await panel.locator('[data-category="data"]').click();
   await panel.getByRole('button', { name: '+ 变量', exact: true }).click();
   await panel.getByLabel('名称', { exact: true }).fill('变量x');
   await panel.getByLabel('名称', { exact: true }).press('Tab');

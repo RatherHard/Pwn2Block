@@ -18,6 +18,7 @@ test('桌面冒烟：工作区可达、键盘移动、刷新恢复', async ({ pa
   expect(box.width).toBeGreaterThan(240);
   expect(box.height).toBeGreaterThan(320);
   expect(await page.evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  if (await panel.locator('[data-category="data"]').isVisible()) await panel.locator('[data-category="data"]').click();
   await panel.getByRole('button', { name: '+ 变量', exact: true }).click();
   const before = (await readGraph(page)).nodes.find((n) => n.kind === 'variable')!;
   await editorOf(page).press('ArrowRight');

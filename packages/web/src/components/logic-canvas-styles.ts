@@ -33,6 +33,61 @@ export const logicCanvasStyles = css`
     color: var(--p2b-dim);
     cursor: default;
   }
+  button::before,
+  button::after {
+    content: none;
+  }
+  .library {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .library .library-category {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px;
+  }
+  .library-options {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .library .library-option {
+    padding: 10px;
+    white-space: normal;
+  }
+  .library-option-label { display: block; margin-bottom: 8px; }
+  .library-preview {
+    display: block;
+    border: 1px solid var(--p2b-fg);
+    color: var(--p2b-fg);
+    background: var(--p2b-bg);
+    text-align: left;
+  }
+  .preview-title, .preview-summary, .preview-description {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+  .preview-title { padding: 6px; border-bottom: 1px solid var(--p2b-line); font-weight: bold; }
+  .preview-summary { padding: 6px; }
+  .preview-description { margin-top: 8px; line-height: 1.6; }
+  .library-pager { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 8px; }
+  .library .library-pager button { width: auto; margin: 0; }
+  .library-pager span { white-space: nowrap; }
+  .canvas-context-menu {
+    position: fixed;
+    z-index: 100;
+    width: 250px;
+    max-width: calc(100vw - 16px);
+    padding: 4px;
+    border: 1px solid var(--p2b-fg);
+    background: var(--p2b-bg);
+  }
+  .menu-title { padding: 4px 8px; border-bottom: 1px solid var(--p2b-line); color: var(--p2b-dim); }
+  .canvas-context-menu button { display: flex; justify-content: space-between; gap: 12px; width: 100%; border: 0; padding: 8px; }
+  .canvas-context-menu button span { opacity: 0.7; }
+  .canvas-context-menu button:focus-visible { outline: 1px solid var(--p2b-focus); outline-offset: -1px; }
   .workspace {
     height: 100%;
     min-height: 400px;
@@ -53,7 +108,7 @@ export const logicCanvasStyles = css`
   }
   .body {
     display: grid;
-    grid-template-columns: 156px minmax(260px, 1fr) 246px;
+    grid-template-columns: 280px minmax(260px, 1fr) 246px;
     min-height: 0;
   }
   aside {
@@ -307,7 +362,7 @@ export const logicCanvasStyles = css`
   }
   @media (max-width: 1050px) {
     .body {
-      grid-template-columns: 118px minmax(220px, 1fr) 195px;
+      grid-template-columns: 230px minmax(220px, 1fr) 195px;
     }
     aside {
       padding: 6px;
@@ -315,7 +370,7 @@ export const logicCanvasStyles = css`
   }
   @media (max-width: 760px) {
     .body {
-      grid-template-columns: 100px minmax(200px, 1fr);
+      grid-template-columns: 210px minmax(200px, 1fr);
     }
     .inspector {
       grid-column: 1 / -1;

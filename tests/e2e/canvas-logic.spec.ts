@@ -45,6 +45,7 @@ test('格点、唯一开始、五种类型和变量名称属性', async ({ page 
   const panel = panelOf(page);
   await expect(panel.locator('[data-kind="start"]')).toHaveCount(1);
   await expect(panel.locator('pattern#logic-dots rect')).toHaveCount(1);
+  if (await panel.locator('[data-category="data"]').isVisible()) await panel.locator('[data-category="data"]').click();
   await panel.getByRole('button', { name: '+ 常量', exact: true }).click();
   await expect(panel.getByLabel('数据类型')).toBeVisible();
   expect(await panel.getByLabel('数据类型').locator('option').allTextContents()).toEqual([
@@ -54,6 +55,7 @@ test('格点、唯一开始、五种类型和变量名称属性', async ({ page 
     'bytes',
     'bool',
   ]);
+  if (await panel.locator('[data-category="data"]').isVisible()) await panel.locator('[data-category="data"]').click();
   await panel.getByRole('button', { name: '+ 变量', exact: true }).click();
   await expect(panel.getByLabel('名称', { exact: true })).toBeVisible();
   await expect(panel.getByLabel('数据类型')).toHaveCount(0);

@@ -39,7 +39,7 @@ function child(panel: CanvasPanelElement) {
 }
 function button(panel: CanvasPanelElement, text: string) {
   const found = [...(child(panel)?.shadowRoot?.querySelectorAll('button') ?? [])].find(
-    (b) => b.textContent?.trim() === text,
+    (b) => (b.getAttribute('aria-label') ?? b.textContent?.trim()) === text,
   );
   if (!found) throw new Error(`缺少按钮 ${text}`);
   return found;
@@ -53,6 +53,8 @@ describe('逻辑画布面板：应用契约与实际编辑入口', () => {
   it('默认唯一开始，只提供五种常量、变量、转换和流程方法', async () => {
     const { panel } = await mount();
     expect(panel.document?.logic?.nodes.map((n) => n.kind)).toEqual(['start']);
+    child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')?.click();
+    await settle(panel);
     button(panel, '+ 常量').click();
     await settle(panel);
     const ui = child(panel)!;
@@ -65,6 +67,8 @@ describe('逻辑画布面板：应用契约与实际编辑入口', () => {
   });
   it('变量属性只有名称，值类型不再作为预设属性', async () => {
     const { panel } = await mount();
+    child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')?.click();
+    await settle(panel);
     button(panel, '+ 变量').click();
     await settle(panel);
     const inspector = child(panel)!.shadowRoot!.querySelector('.inspector')!;
@@ -112,6 +116,8 @@ describe('逻辑画布面板：应用契约与实际编辑入口', () => {
     panel.addEventListener('p2b-canvas-changed', changed);
     panel.addEventListener('p2b-canvas-compiled', compiled);
     panel.addEventListener('p2b-canvas-run', run);
+    child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')?.click();
+    await settle(panel);
     button(panel, '+ 常量').click();
     await settle(panel);
     button(panel, '运行').click();
@@ -155,6 +161,8 @@ describe('逻辑画布面板：应用契约与实际编辑入口', () => {
   });
   it('自动保存与切题互不串档，切换前先保存原题', async () => {
     const { panel, store } = await mount();
+    child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')?.click();
+    await settle(panel);
     button(panel, '+ 常量').click();
     await settle(panel);
     const old = panel.document;
@@ -214,6 +222,8 @@ function pendingImport(panel: CanvasPanelElement) {
 describe('属性选项与文档同步', () => {
   it('新建转换显示 bytes 和 8，修改与撤销同步选项', async () => {
     const { panel } = await mount();
+    child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')?.click();
+    await settle(panel);
     button(panel, '+ 类型转换').click();
     await settle(panel);
     const target = selectOf(panel, '转换为'),
@@ -349,6 +359,8 @@ describe('异步导入的所属文档', () => {
   it('读取期间发生编辑，不覆盖后续编辑', async () => {
     const { panel } = await mount(),
       pending = pendingImport(panel);
+    child(panel)!.shadowRoot!.querySelector<HTMLButtonElement>('[data-category="data"]')?.click();
+    await settle(panel);
     button(panel, '+ 变量').click();
     await settle(panel);
     const edited = panel.document;
