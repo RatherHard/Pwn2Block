@@ -33,6 +33,57 @@ function pointer(ui: LogicCanvasElement, type: string, x: number, y: number, sel
 }
 
 describe('canvas connection and expression interaction', () => {
+  it.each(['a', 'loop'])('属性栏从 %s 建立附着循环次数引用，流程连接仍走包络', async (selected) => {
+    const ui = await mount([constant('a', 800),
+      { id: 'member', kind: 'method', method: 'emit', x: 200, y: 400 },
+      { id: 'next', kind: 'method', method: 'emit', x: 900, y: 400 },
+      { id: 'env', kind: 'envelope', category: 'flow', members: ['member'], title: 'env', x: 0, y: 0 },
+      { id: 'loop', kind: 'loop', body: 'env', count: '2', x: 0, y: 0 }]);
+    const connect = async (target: string) => {
+      const select = ui.shadowRoot!.querySelector<HTMLSelectElement>('select[aria-label="连接到"]')!;
+      expect([...select.options].map((option) => option.value)).toContain(target);
+      select.value = target;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await ui.updateComplete;
+      [...ui.shadowRoot!.querySelectorAll('button')].find((button) => button.textContent?.trim() === '建立连接')!.click();
+      await ui.updateComplete;
+    };
+    await press(ui, selected === 'a' ? '[data-node="a"]' : '[data-attachment="loop"]');
+    await connect(selected === 'a' ? 'loop' : 'a');
+    expect(ui.graph.edges).toEqual([expect.objectContaining({ kind: 'reference', from: 'a', to: 'loop', port: 'count' })]);
+    await press(ui, '[data-attachment="loop"]');
+    await connect('next');
+    expect(ui.graph.edges).toContainEqual(expect.objectContaining({ kind: 'flow', from: 'env', to: 'next' }));
+    expect(canvas.validateLogicGraph(ui.graph)).toEqual([]);
+  });
+  it.each(['convert', 'loop'] as const)('拖出附着标签解除附着，点击不解除，取消恢复：%s', async (kind) => {
+    const modifier: canvas.LogicNode = kind === 'convert'
+      ? { id: 'attachment', kind, input: 'env', target: 'bytes', value: { type: 'int', text: '0' }, width: '8', endian: 'little', signed: false, x: 900, y: 600 }
+      : { id: 'attachment', kind, body: 'env', count: '2', x: 900, y: 600 };
+    const ui = await mount([kind === 'convert' ? constant('a', 100) : { id: 'a', kind: 'method', method: 'emit', x: 100, y: 220 },
+      { id: 'env', kind: 'envelope', category: kind === 'convert' ? 'data' : 'flow', members: ['a'], title: 'env', x: 0, y: 0 }, modifier]);
+    const original = ui.graph;
+    await press(ui, '[data-attachment="attachment"]');
+    expect(ui.graph).toEqual(original);
+    pointer(ui, 'pointerdown', 150, 190, '[data-attachment="attachment"]');
+    pointer(ui, 'pointermove', 600, 450);
+    await ui.updateComplete;
+    expect(ui.shadowRoot!.querySelector('[data-node="attachment"]')).not.toBeNull();
+    expect(ui.shadowRoot!.querySelector('[data-attachment="attachment"]')).toBeNull();
+    expect(ui.graph).toEqual(original);
+    ui.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await ui.updateComplete;
+    expect(ui.shadowRoot!.querySelector('[data-attachment="attachment"]')).not.toBeNull();
+    pointer(ui, 'pointerdown', 150, 190, '[data-attachment="attachment"]');
+    pointer(ui, 'pointermove', 600, 450);
+    pointer(ui, 'pointerup', 600, 450);
+    await ui.updateComplete;
+    const detached = ui.graph.nodes.find((node) => node.id === 'attachment')!;
+    expect(detached).not.toHaveProperty(kind === 'convert' ? 'input' : 'body');
+    expect(detached).toMatchObject({ x: 510, y: 412 });
+    expect(ui.graph.nodes.find((node) => node.id === 'a')).toEqual(original.nodes.find((node) => node.id === 'a'));
+    expect(canvas.validateLogicGraph(ui.graph)).toEqual([]);
+  });
   it('anchors the initial viewport on the start node', async () => {
     const ui = new LogicCanvasElement();
     ui.graph = { version: 1, nodes: [{ id: 'start', kind: 'start', x: 1000, y: 800 }], edges: [] };

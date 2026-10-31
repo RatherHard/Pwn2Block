@@ -1,12 +1,14 @@
 import { canvas } from '@pwn2block/shared';
 import { logicBox, logicAttachmentHost } from './logic-geometry';
 import { createLogicEdge, connectLogic, attachLogic, admissible } from './logic-connections';
-import type { LogicSnap } from './logic-snap';
+import type { LogicSnap, LogicSnapOptions } from './logic-snap';
+import { returningToAttachment } from './logic-attachment-drag';
 
 export function nearestOtherSnap(
   graph: canvas.LogicGraph,
   movingId: string,
   methods: readonly canvas.CanvasMethodDecl[],
+  options: LogicSnapOptions = {},
 ): LogicSnap | undefined {
   const moving = graph.nodes.find((n) => n.id === movingId);
   if (!moving || logicAttachmentHost(moving)) return undefined;
@@ -15,13 +17,13 @@ export function nearestOtherSnap(
     const host = logicAttachmentHost(node);
     if (host && own.has(host)) own.add(node.id);
   }
-  // 内部连接属于包络表达式；只有跨边界的连接阻止整体重新吸附（包括附件）。
-  if (graph.edges.some((edge) => own.has(edge.from) !== own.has(edge.to))) return undefined;
+  // 跨边界连接阻止普通接线候选；附件的次数引用保留，附着合法性交给共享校验。
+  const connectedOutside = graph.edges.some((edge) => own.has(edge.from) !== own.has(edge.to));
   const box = logicBox(graph, movingId);
   const preview = canvas.previewLogicGraph(graph);
   const candidates: LogicSnap[] = [];
   for (const target of graph.nodes) {
-    if (logicAttachmentHost(target) || own.has(target.id) || canvas.logicMembers(graph, target.id).has(movingId)) continue;
+    if ((logicAttachmentHost(target) && target.kind !== 'loop') || own.has(target.id) || canvas.logicMembers(graph, target.id).has(movingId)) continue;
     const other = logicBox(graph, target.id);
     const distance = Math.hypot(
       Math.max(0, box.x - other.x - other.width, other.x - box.x - box.width),
@@ -33,11 +35,13 @@ export function nearestOtherSnap(
       ((moving.kind === 'loop' && canvas.logicIsFlow(graph, target)) ||
         (moving.kind === 'convert' && target.category === 'data'))
     ) {
+      if (!returningToAttachment(options.original, moving.id, target.id, options.pointer)) continue;
       const attached = attachLogic(graph, moving.id, target.id);
       if (attached.ok)
         candidates.push({ graph: attached.graph, target: target.id, attachment: moving.id, distance });
       continue;
     }
+    if (connectedOutside) continue;
     const a = box.x + box.width / 2 <= other.x + other.width / 2 ? moving : target;
     const b = a === moving ? target : moving;
     const edge = createLogicEdge(graph, a, b, methods);

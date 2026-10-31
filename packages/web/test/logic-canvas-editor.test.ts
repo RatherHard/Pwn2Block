@@ -131,7 +131,7 @@ it('赋值包络和题目方法能一起组成流程包络', () => {
   expect(outer.nodes.filter((n) => n.kind === 'envelope').at(-1)).toMatchObject({ category: 'flow' });
   expect(canvas.validateLogicGraph(outer)).toEqual([]);
 });
-it('删除最后一个成员时同时清理空包络和附着节点', () => {
+it('删除最后一个成员保留空包络和附着节点', () => {
   const g = graph([
     constant('a', 100),
     { id: 'g', kind: 'envelope', category: 'data', members: ['a'], title: 'g', x: 0, y: 0 },
@@ -148,7 +148,7 @@ it('删除最后一个成员时同时清理空包络和附着节点', () => {
       y: 200,
     },
   ]);
-  expect(removeLogic(g, ['a']).nodes.map((n) => n.id)).toEqual(['start']);
+  expect(removeLogic(g, ['a']).nodes.map((n) => n.id)).toEqual(['start', 'g', 'c']);
 });
 
 it('内部落点不受包络与成员标识排序影响', () => {

@@ -260,7 +260,7 @@ export const logicCanvasStyles = css`
     display: block;
     width: max-content;
     max-width: 100%;
-    margin: -1px 5px 3px;
+    margin: 6px 5px 6px;
     height: 18px;
     line-height: 18px;
     overflow: hidden;
@@ -277,6 +277,7 @@ export const logicCanvasStyles = css`
     right: 8px;
     pointer-events: none;
   }
+  .empty-envelope-hint { position: absolute; left: 24px; right: 24px; color: var(--p2b-dim); }
   .envelope-title {
     pointer-events: auto;
     display: block;
@@ -300,7 +301,7 @@ export const logicCanvasStyles = css`
     text-align: left;
     border: 0;
     padding: 2px 5px;
-    cursor: pointer;
+    cursor: grab;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

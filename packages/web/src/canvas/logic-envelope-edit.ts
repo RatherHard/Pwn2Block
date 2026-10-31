@@ -9,7 +9,7 @@ export function pruneLogic(graph: canvas.LogicGraph, removed: Set<string>): canv
     previous = gone.size;
     for (const node of graph.nodes) {
       const host = logicAttachmentHost(node);
-      if ((host && gone.has(host)) || (node.kind === 'envelope' && node.members.every((id) => gone.has(id))))
+      if (host && gone.has(host))
         gone.add(node.id);
     }
   }
@@ -26,7 +26,10 @@ export function placeLogicOutsideEnvelopes(
   const done = new Set<string>();
   for (const id of ids) {
     if (done.has(id) || canvas.logicOwner(next, id) || !next.nodes.some((node) => node.id === id)) continue;
-    const ownerId = logicOwnerChain(before, id).reverse().find((owner) => next.nodes.some((node) => node.id === owner));
+    const original = before.nodes.find((node) => node.id === id);
+    const host = original && logicAttachmentHost(original);
+    const owners = host ? [host, ...logicOwnerChain(before, host)] : logicOwnerChain(before, id);
+    const ownerId = owners.reverse().find((owner) => next.nodes.some((node) => node.id === owner));
     if (!ownerId || !next.nodes.some((node) => node.id === ownerId)) continue;
     const category = canvas.logicOwner(before, id);
     const peers = next.nodes.filter((node) => !canvas.logicOwner(next, node.id)).map((node) => node.id);
@@ -62,6 +65,12 @@ export function normalizeLogicEnvelopes(
   before: canvas.LogicGraph, graph: canvas.LogicGraph, moving: readonly string[] = [], repair?: string,
 ): canvas.LogicGraph {
   let next = pruneLogic(graph, new Set());
+  next = { ...next, nodes: next.nodes.map((node) => {
+    const original = before.nodes.find((item) => item.id === node.id);
+    if (node.kind !== 'envelope' || node.members.length || original?.kind !== 'envelope' || !original.members.length) return node;
+    const box = logicBox(before, node.id);
+    return { ...node, x: box.x, y: box.y };
+  }) };
   const expelled: string[] = [];
   const envelopes = before.nodes.filter((node) => node.kind === 'envelope')
     .sort((a, b) => logicEnvelopeDepth(before, b.id) - logicEnvelopeDepth(before, a.id));

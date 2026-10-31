@@ -1,7 +1,7 @@
 import { html, svg, nothing, type TemplateResult } from 'lit';
 import { styleMap } from 'lit/directives/style-map.js';
 import { canvas } from '@pwn2block/shared';
-import { logicBox, logicEnvelopeDepth, logicAttachmentHost, LOGIC_RELATION_WIDTH, type LogicSnap } from '../canvas/logic-editor';
+import { logicBox, logicEnvelopeDepth, logicEnvelopeHeaderHeight, logicAttachmentHost, LOGIC_RELATION_WIDTH, type LogicSnap } from '../canvas/logic-editor';
 import { logicFlowHitClip, logicEdgeGeometry, logicSummary, logicLiteralSummary, logicTitle } from './logic-canvas-view';
 import type { LogicLayer } from '../canvas/logic-layers';
 
@@ -117,14 +117,15 @@ export class LogicCanvasView {
           [${node.category === 'data' ? (canvas.logicHasAssignment(graph, node.id) ? '数据 / 流程' : '数据') : '流程'}]
           </button>
           ${node.category === 'data' ? html`<span class="envelope-summary" title=${logicSummary(preview.get(node.id))}>
-            = ${logicSummary(preview.get(node.id))}</span>` : nothing}
+            ${node.members.length ? `= ${logicSummary(preview.get(node.id))}` : '空包络'}</span>` : nothing}
           ${attached.map((n) => html`<button class="attachment ${this.ui.selected.includes(n.id) ? 'selected' : ''} ${this.ui.snap?.attachment === n.id ? 'ghost' : ''}"
             data-attachment=${n.id} aria-label=${`编辑 ${logicTitle(n, this.ui.methods)}`}
-            @pointerdown=${(e: PointerEvent) => { if (!this.ui.startPan(e)) e.stopPropagation(); }}
+            @pointerdown=${(e: PointerEvent) => this.ui.startNode(e, n.id)}
             @click=${() => { this.ui.selectNode(n.id); }}>
             ${logicTitle(n, this.ui.methods)}${n.kind === 'loop' ? ` · ${n.count} 次` : ''}
           </button>`)}
         </div>
+        ${!node.members.length ? html`<span class="empty-envelope-hint" style=${styleMap({ top: `${logicEnvelopeHeaderHeight(graph, node.id) + 24}px` })}>拖入一个完整结构</span>` : nothing}
         ${this.ports(node)}
       </div>`;
     }

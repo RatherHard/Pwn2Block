@@ -3,6 +3,7 @@ import { logicAttachmentHost, logicBox, logicEnvelopeDepth, logicId, layoutLogic
   LOGIC_RELATION_GAP, LOGIC_RELATION_WIDTH, LogicLayoutError } from './logic-geometry';
 import { admissible } from './logic-connections';
 import { nearestOtherSnap } from './logic-other-snap';
+import { emptyEnvelopeSnap } from './logic-empty-snap';
 
 export interface LogicSnap {
   graph: canvas.LogicGraph;
@@ -11,7 +12,7 @@ export interface LogicSnap {
   target: string;
   distance: number;
   attachment?: string;
-  kind?: 'insert' | 'connect';
+  kind?: 'insert' | 'connect' | 'enclose';
   key?: string;
 }
 export interface LogicSnapOptions {
@@ -99,7 +100,7 @@ function connections(context: Context): LogicSnap[] {
   const { graph, ids, own } = context;
   const candidates: LogicSnap[] = [];
   for (const node of graph.nodes) {
-    if (own.has(node.id) || logicAttachmentHost(node) || canvas.logicCategory(node) !== 'data' ||
+    if (own.has(node.id) || node.kind === 'convert' || logicAttachmentHost(node) || canvas.logicCategory(node) !== 'data' ||
       ids.some((id) => canvas.logicMembers(graph, node.id).has(id))) continue;
     const target = logicBox(graph, node.id);
     for (const side of ['left', 'right'] as const) {
@@ -125,12 +126,14 @@ export function nearestLogicSnap(
   graph: canvas.LogicGraph, movingId: string, methods: readonly canvas.CanvasMethodDecl[], options: LogicSnapOptions = {},
 ): LogicSnap | undefined {
   const ids = [...(options.movingIds ?? [movingId])];
+  const empty = emptyEnvelopeSnap(graph, ids, options);
+  if (empty) return empty;
   const row = canvas.logicDataRow(graph, movingId);
   const own = new Set(ids.flatMap((id) => [...canvas.logicMembers(graph, id)]));
   for (const node of graph.nodes) if (own.has(logicAttachmentHost(node) ?? '')) own.add(node.id);
   const isData = ids.every((id) => {
     const node = graph.nodes.find((item) => item.id === id);
-    return node && canvas.logicCategory(node) === 'data' && !logicAttachmentHost(node);
+    return node && node.kind !== 'convert' && canvas.logicCategory(node) === 'data' && !logicAttachmentHost(node);
   });
   const complete = row.length === ids.length && ids.every((id) => row.includes(id));
   const candidates: LogicSnap[] = [];
@@ -139,7 +142,7 @@ export function nearestLogicSnap(
     candidates.push(...insertion(context), ...connections(context));
   }
   if (ids.length === 1) {
-    const other = nearestOtherSnap(graph, movingId, methods);
+    const other = nearestOtherSnap(graph, movingId, methods, options);
     if (other) candidates.push(other);
   }
   return candidates.sort((a, b) => {

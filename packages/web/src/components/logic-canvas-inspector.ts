@@ -80,7 +80,8 @@ export class LogicCanvasInspector {
         </p>`;
     const host = logicAttachmentHost(node);
     const connectionNode = ui.graph.nodes.find((n) => n.id === host) ?? node;
-    const targets = ui.graph.nodes.filter((n) => n.id !== connectionNode.id && !logicAttachmentHost(n));
+    const targets = ui.graph.nodes.filter((n) => n.id !== connectionNode.id && n.id !== node.id && n.kind !== 'convert' &&
+      (!logicAttachmentHost(n) || (n.kind === 'loop' && canvas.logicCategory(connectionNode) === 'data')));
     const targetId = targets.some((n) => n.id === this.targetId) ? this.targetId : '';
     return html`<h3>${logicTitle(node, ui.methods)}</h3>
       ${new LogicNodeFields(
@@ -91,8 +92,8 @@ export class LogicCanvasInspector {
           ui.feedback(message);
         },
       ).render(node)}
-      ${host ? html`<p class="hint">连接将使用所属包络。</p>` : nothing}
-      <label
+      ${host ? html`<p class="hint">${node.kind === 'loop' ? '次数引用连接到循环附件；流程连接使用所属包络。' : '连接将使用所属包络。'}</p>` : nothing}
+      ${node.kind === 'convert' && !host ? html`<p class="hint">独立类型转换不可连接；拖到数据包络上附着后，通过包络参与连接。</p>` : html`<label
         >连接到<select
           aria-label="连接到"
           @change=${(e: Event) => {
@@ -111,7 +112,8 @@ export class LogicCanvasInspector {
         ?disabled=${!targetId}
         @click=${() => {
           const target = targets.find((n) => n.id === targetId);
-          let edge = target && createLogicEdge(ui.graph, connectionNode, target, ui.methods);
+          const source = node.kind === 'loop' && target && canvas.logicCategory(target) === 'data' ? node : connectionNode;
+          let edge = target && createLogicEdge(ui.graph, source, target, ui.methods);
           if (edge?.kind === 'data' && this.connectionOperator) {
             const op = this.connectionOperator;
             edge = { ...edge, op, from: op === 'assign' && connectionNode.kind === 'variable' ? target!.id : connectionNode.id,
@@ -124,7 +126,7 @@ export class LogicCanvasInspector {
         }}
       >
         建立连接
-      </button>
+      </button>`}
       <p class="hint">拖节点拔起自身及右侧尾段；Alt 拖动只取出此节点。关系框不可拖动，可接收插入。Esc 取消拖动。</p>
       ${canvas.logicCategory(node) === 'data' ? html`<button @click=${() => ui.extractSelected()}>取出此节点</button>` : nothing}
       ${node.kind === 'envelope' && canvas.logicComponents(ui.graph, node.members, node.category).length > 1

@@ -29,7 +29,6 @@ export function validateLogicGraph(graph: LogicGraph): CanvasIssue[] {
   for (const node of graph.nodes) {
     if (node.kind === 'variable' && !node.name.trim()) fail(node.id, '变量名称不能为空');
     if (node.kind === 'envelope') {
-      if (!node.members.length) fail(node.id, '包络不能为空');
       if (logicComponents(graph, node.members, node.category).length > 1)
         fail(node.id, '包络只能包含一个连接整体，请先连接或移出孤立结构');
       for (const member of node.members) {
@@ -71,6 +70,8 @@ export function validateLogicGraph(graph: LogicGraph): CanvasIssue[] {
       continue;
     }
     if (from.id === to.id) fail(edge.id, '不能连接自身');
+    if ((from.kind === 'convert' && !from.input) || (to.kind === 'convert' && !to.input))
+      fail(edge.id, '独立类型转换不可连接，请先附着数据包络并连接包络');
     let port: string;
     if (edge.kind === 'data') {
       if (logicCategory(from) !== 'data' || logicCategory(to) !== 'data') fail(edge.id, '数据关系需要两个数据节点');

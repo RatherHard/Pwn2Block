@@ -5,6 +5,7 @@ export * from './logic-geometry';
 export * from './logic-connections';
 export * from './logic-snap';
 import { admissible } from './logic-connections';
+import { detachLogicAttachments } from './logic-attachment-drag';
 export { normalizeLogicEnvelopes, placeLogicOutsideEnvelopes } from './logic-envelope-edit';
 /** 节点拖动只带同层右侧尾段；子包络内部由移动函数递归携带。 */
 export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[], single = false): string[] {
@@ -30,7 +31,8 @@ export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[], s
     other !== id && canvas.logicMembers(graph, other).has(id)));
 }
 /** 拔出仅生成草稿，保留原图以便取消和撤销。 */
-export function detachLogicData(graph: canvas.LogicGraph, ids: readonly string[]): canvas.LogicGraph {
+export function detachLogicData(graph: canvas.LogicGraph, ids: readonly string[], point?: { x: number; y: number }): canvas.LogicGraph {
+  graph = detachLogicAttachments(graph, ids, point);
   const moving = new Set(ids.flatMap((id) => [...canvas.logicMembers(graph, id)]));
   const roots = new Set(ids.filter((id) => {
     const node = graph.nodes.find((item) => item.id === id);

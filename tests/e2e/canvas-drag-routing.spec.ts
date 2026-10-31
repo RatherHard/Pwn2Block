@@ -241,7 +241,7 @@ test('数据节点拖动预脱离旧连接，松手按新吸附结果排列', as
   expect((await graph(page)).nodes.find((n) => n.id === 'b')).toMatchObject({ x: 432, y: 350 });
 });
 
-test('隐藏附件不出现在连接目标中，拖近标题只连接到包络', async ({ page }) => {
+test('转换附件不出现在连接目标中，拖近标题只连接到包络', async ({ page }) => {
   await openChallenge(page, 'ret2win');
   await install(page, [
     { id: 'member', kind: 'constant', value: { type: 'int', text: '2' }, x: 400, y: 300 },

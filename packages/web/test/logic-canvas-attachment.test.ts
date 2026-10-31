@@ -66,7 +66,8 @@ describe('共享附着操作的结构边界', () => {
         n.kind === 'envelope' ? { ...n, members: [...n.members, 'attach'] } : n,
       ),
     };
-    expect(canvas.validateLogicGraph(recursive)).toEqual([]);
+    if (kind === 'loop') expect(canvas.validateLogicGraph(recursive)).toEqual([]);
+    else expect(canvas.validateLogicGraph(recursive)).toContainEqual(expect.objectContaining({ nodeId: 'link', message: expect.stringContaining('独立类型转换') }));
     expect(attachLogic(recursive, 'attach', 'env').ok).toBe(false);
   });
   it.each(['convert', 'loop'] as const)('拒绝类别不兼容的包络：%s', (kind) => {

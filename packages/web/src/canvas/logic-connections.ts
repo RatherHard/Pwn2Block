@@ -7,7 +7,7 @@ export function createLogicEdge(
   b: canvas.LogicNode,
   methods: readonly canvas.CanvasMethodDecl[],
 ): canvas.LogicEdge | undefined {
-  if (a.id === b.id || logicAttachmentHost(a) || logicAttachmentHost(b)) return undefined;
+  if (a.id === b.id || a.kind === 'convert' || b.kind === 'convert') return undefined;
   const id = logicId(graph, 'edge');
   if (canvas.logicCategory(a) === 'data' && canvas.logicCategory(b) === 'data')
     return a.kind === 'variable'
@@ -25,6 +25,7 @@ export function createLogicEdge(
         (p) => !graph.edges.some((e) => e.kind === 'reference' && e.to === flow.id && e.port === p.name),
       )?.name;
   if (port !== undefined) return { id, kind: 'reference', from: data.id, to: flow.id, port };
+  if (logicAttachmentHost(a) || logicAttachmentHost(b)) return undefined;
   if (canvas.logicIsFlow(graph, a) && canvas.logicIsFlow(graph, b)) {
     const outlet =
       a.kind === 'branch'

@@ -40,15 +40,17 @@ export function logicBox(graph: canvas.LogicGraph, id: string, seen = new Set<st
     const box = logicBox(graph, host, seen);
     const attachments = graph.nodes.filter((n) => logicAttachmentHost(n) === host);
     const hostNode = graph.nodes.find((candidate) => candidate.id === host);
-    const attachmentTop = hostNode?.kind === 'envelope' && hostNode.category === 'data' ? 52 : 32;
+    const attachmentTop = hostNode?.kind === 'envelope' && hostNode.category === 'data' ? 62 : 32;
     return { x: box.x + 8, y: box.y + attachmentTop + attachments.findIndex((n) => n.id === id) * 26,
       width: box.width - 16, height: 24 };
   }
-  if (node.kind !== 'envelope' || !node.members.length)
+  if (node.kind !== 'envelope')
     return { x: node.x, y: node.y, width: 180, height: 76 };
+  if (!node.members.length)
+    return { x: node.x, y: node.y, width: 228, height: logicEnvelopeHeaderHeight(graph, id) + 100 };
   const boxes = node.members.map((member) => logicBox(graph, member, new Set(seen)));
   // 为标题和表达式预览预留独立区域，避免文字压到包络成员。
-  const header = 60 + graph.nodes.filter((n) => logicAttachmentHost(n) === id).length * 26;
+  const header = logicEnvelopeHeaderHeight(graph, id);
   const x = Math.min(...boxes.map((b) => b.x)) - 24,
     y = Math.min(...boxes.map((b) => b.y)) - header;
   return {
@@ -57,6 +59,11 @@ export function logicBox(graph: canvas.LogicGraph, id: string, seen = new Set<st
     width: Math.max(...boxes.map((b) => b.x + b.width)) + 24 - x,
     height: Math.max(...boxes.map((b) => b.y + b.height)) + 24 - y,
   };
+}
+export function logicEnvelopeHeaderHeight(graph: canvas.LogicGraph, id: string): number {
+  const node = graph.nodes.find((item) => item.id === id);
+  return (node?.kind === 'envelope' && node.category === 'data' ? 72 : 60) +
+    graph.nodes.filter((item) => logicAttachmentHost(item) === id).length * 26;
 }
 /** 从可见区域开始寻找空位，连续添加节点时不覆盖已有表达式。 */
 export function nextLogicPosition(

@@ -412,7 +412,7 @@ export class LogicCanvasElement extends LitElement {
       this.drag.moved = true;
       if (this.drag.library) this.suppressLibraryClick = true;
       if (!this.insideStage(event)) { this.draft = undefined; this.snap = undefined; this.requestUpdate(); return; }
-      this.drag.detached ??= detachLogicData(this.drag.original, this.drag.ids);
+      this.drag.detached ??= detachLogicData(this.drag.original, this.drag.ids, { x: this.drag.startX, y: this.drag.startY });
       const moved = moveLogicNodes(this.drag.detached, this.drag.ids, dx, dy);
       this.snap = nearestLogicSnap(moved, this.drag.id, this.methods, {
         movingIds: this.drag.ids, pointer: p, scale: this.viewScale, previous: this.snap, original: this.drag.original,
@@ -755,7 +755,7 @@ export class LogicCanvasElement extends LitElement {
         })}</aside>
       </div>
       <div class="feedback" role="status">
-        ${this.snap?.kind ? html`<div class="snap-feedback">松开${this.snap.kind === 'insert' ? '插入' : '接续'} ·
+        ${this.snap?.kind ? html`<div class="snap-feedback">松开${this.snap.kind === 'enclose' ? '放入包络' : this.snap.kind === 'insert' ? '插入' : '接续'} ·
           ${canvas.logicOwner(graph, this.snap.target)?.id ?? '画布顶层'} ·
           ${(this.snap.edges ?? []).map((edge) => edge.kind === 'data' ? edge.op === 'assign' ? '← 赋值' : edge.op : '').join(' / ')} ·
           ${logicSummary(preview.get(canvas.logicDataRow(graph, this.snap.target).at(-1)!))}</div>` : nothing}
