@@ -6,6 +6,7 @@ import {
   nearestLogicSnap,
   wrapLogic,
   moveLogicNodes,
+  logicBox,
   unwrapLogic,
   removeLogic,
 } from '../src/canvas/logic-editor';
@@ -89,6 +90,26 @@ it('dragging a member of a nested envelope moves the outer structure instead of 
   ]);
   expect(logicDragIds(g, ['a'])).toEqual(['outer']);
   expect(logicDragIds(g, ['inner'])).toEqual(['inner']);
+});
+it('leaves a gap between an envelope header and its member border', () => {
+  const g = graph([
+    constant('a', 200),
+    { id: 'env', kind: 'envelope', category: 'data', members: ['a'], title: 'env', x: 0, y: 0 },
+  ]);
+  const envelope = logicBox(g, 'env');
+  const member = logicBox(g, 'a');
+  expect(member.y - envelope.y).toBeGreaterThanOrEqual(58);
+});
+it('moves the whole data connection when dragging any connected data node', () => {
+  const g = graph(
+    [constant('a', 100), constant('b', 348), constant('c', 596)],
+    [
+      { id: 'ab', kind: 'data', from: 'a', to: 'b', op: '+' },
+      { id: 'bc', kind: 'data', from: 'b', to: 'c', op: '+' },
+    ],
+  );
+  expect(logicDragIds(g, ['b'])).toEqual(expect.arrayContaining(['a', 'b', 'c']));
+  expect(logicDragIds(g, ['b'])).toHaveLength(3);
 });
 });
 

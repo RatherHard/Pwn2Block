@@ -46,14 +46,16 @@ export function logicBox(graph: canvas.LogicGraph, id: string, seen = new Set<st
   if (host) {
     const box = logicBox(graph, host, seen);
     const attachments = graph.nodes.filter((n) => logicAttachmentHost(n) === host);
-    return { x: box.x + 8, y: box.y + 32 + attachments.findIndex((n) => n.id === id) * 26,
+    const hostNode = graph.nodes.find((candidate) => candidate.id === host);
+    const attachmentTop = hostNode?.kind === 'envelope' && hostNode.category === 'data' ? 52 : 32;
+    return { x: box.x + 8, y: box.y + attachmentTop + attachments.findIndex((n) => n.id === id) * 26,
       width: box.width - 16, height: 24 };
   }
   if (node.kind !== 'envelope' || !node.members.length)
     return { x: node.x, y: node.y, width: 180, height: 76 };
   const boxes = node.members.map((member) => logicBox(graph, member, new Set(seen)));
   // 为标题和表达式预览预留独立区域，避免文字压到包络成员。
-  const header = 50 + graph.nodes.filter((n) => logicAttachmentHost(n) === id).length * 26;
+  const header = 60 + graph.nodes.filter((n) => logicAttachmentHost(n) === id).length * 26;
   const x = Math.min(...boxes.map((b) => b.x)) - 24,
     y = Math.min(...boxes.map((b) => b.y)) - header;
   return {
@@ -106,8 +108,7 @@ const dataSpacing = LOGIC_RELATION_WIDTH + LOGIC_RELATION_GAP * 2;
 function dataSides(edge: Extract<canvas.LogicEdge, { kind: 'data' }>): [string, string] {
   return edge.op === 'assign' ? [edge.to, edge.from] : [edge.from, edge.to];
 }
-/** Fixed data rows have one neighbour on each side. Reject overlapping branches. */
-function dataNeighbours(graph: canvas.LogicGraph, anchor: string): Map<string, { left?: string; right?: string }> {
+function dataComponent(graph: canvas.LogicGraph, anchor: string): Set<string> {
   const component = new Set([anchor]);
   let expanded = true;
   while (expanded) {
@@ -120,6 +121,11 @@ function dataNeighbours(graph: canvas.LogicGraph, anchor: string): Map<string, {
       expanded ||= component.size !== size;
     }
   }
+  return component;
+}
+/** Fixed data rows have one neighbour on each side. Reject overlapping branches. */
+function dataNeighbours(graph: canvas.LogicGraph, anchor: string): Map<string, { left?: string; right?: string }> {
+  const component = dataComponent(graph, anchor);
   const neighbours = new Map<string, { left?: string; right?: string }>();
   for (const edge of graph.edges) {
     if (edge.kind !== 'data' || !component.has(edge.from)) continue;
@@ -156,7 +162,27 @@ export function layoutLogicData(graph: canvas.LogicGraph, anchor: string): canva
   }
   return next;
 }
-/** 拖动赋值目标时，携带完整的数据表达式及其嵌套包络。 */
+function stableDataAnchor(graph: canvas.LogicGraph, component: Set<string>): string {
+  const order = new Map(graph.nodes.map((node, index) => [node.id, index]));
+  return [...component].sort((a, b) => {
+    const left = logicBox(graph, a), right = logicBox(graph, b);
+    return left.x - right.x || left.y - right.y || (order.get(a) ?? 0) - (order.get(b) ?? 0);
+  })[0]!;
+}
+/** Rebuild every data row after a structural edit, while keeping one stable node per row fixed. */
+export function layoutLogicDataComponents(graph: canvas.LogicGraph, preferredAnchor?: string): canvas.LogicGraph {
+  let next = graph;
+  const visited = new Set<string>();
+  for (const node of graph.nodes) {
+    if (visited.has(node.id) || !graph.edges.some((edge) => edge.kind === 'data' && (edge.from === node.id || edge.to === node.id))) continue;
+    const component = dataComponent(graph, node.id);
+    for (const id of component) visited.add(id);
+    const anchor = preferredAnchor && component.has(preferredAnchor) ? preferredAnchor : stableDataAnchor(graph, component);
+    next = layoutLogicData(next, anchor);
+  }
+  return next;
+}
+/** 拖动数据节点时，携带完整的数据连接结构及其嵌套包络。 */
 export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[]): string[] {
   const structuralId = (id: string): string => {
     const node = graph.nodes.find((candidate) => candidate.id === id);
@@ -166,7 +192,8 @@ export function logicDragIds(graph: canvas.LogicGraph, ids: readonly string[]): 
   };
   const moving = new Set(ids.map(structuralId));
   for (const id of ids) {
-    if (!graph.edges.some((edge) => edge.kind === 'data' && edge.op === 'assign' && edge.to === id)) continue;
+    const node = graph.nodes.find((candidate) => candidate.id === id);
+    if (!node || canvas.logicCategory(node) !== 'data') continue;
     const pending = [id], visited = new Set<string>();
     while (pending.length) {
       const current = pending.pop()!;
@@ -252,7 +279,7 @@ export function connectLogic(
         };
     }
   }
-  return edge.kind === 'data' ? layoutLogicData(next, anchor) : next;
+  return edge.kind === 'data' ? layoutLogicDataComponents(next, anchor) : next;
 }
 function admissible(before: canvas.LogicGraph, after: canvas.LogicGraph): boolean {
   const old = new Set(canvas.validateLogicGraph(before).map((i) => `${i.nodeId}:${i.message}`));
@@ -399,7 +426,7 @@ export function wrapLogic(graph: canvas.LogicGraph, selected: readonly string[])
   };
   if (!admissible(graph, next))
     throw new Error('该选择会产生含糊的跨包络关系，请将完整表达式或连续流程一起包络');
-  return next;
+  return layoutLogicDataComponents(next);
 }
 export function removeLogic(graph: canvas.LogicGraph, ids: readonly string[]): canvas.LogicGraph {
   const gone = new Set(ids.flatMap((id) => [...canvas.logicMembers(graph, id)]));
@@ -429,11 +456,11 @@ export function removeLogic(graph: canvas.LogicGraph, ids: readonly string[]): c
       .filter((n) => !gone.has(n.id))
       .map((n) => (n.kind === 'envelope' ? { ...n, members: n.members.filter((id) => !gone.has(id)) } : n));
   }
-  return {
+  return layoutLogicDataComponents({
     ...graph,
     nodes,
     edges: graph.edges.filter((e) => !ids.includes(e.id) && !gone.has(e.from) && !gone.has(e.to)),
-  };
+  });
 }
 export function unwrapLogic(graph: canvas.LogicGraph, id: string): canvas.LogicGraph {
   const node = graph.nodes.find((n) => n.id === id);
@@ -453,7 +480,7 @@ export function unwrapLogic(graph: canvas.LogicGraph, id: string): canvas.LogicG
     if (candidates.length !== 1) throw new Error('无法确定解除包络后的连接端点，请先调整外部连接');
     return [{ ...e, from: e.from === id ? candidates[0]! : e.from, to: e.to === id ? candidates[0]! : e.to }];
   });
-  return {
+  return layoutLogicDataComponents({
     ...graph,
     edges,
     nodes: graph.nodes
@@ -471,5 +498,5 @@ export function unwrapLogic(graph: canvas.LogicGraph, id: string): canvas.LogicG
         }
         return n;
       }),
-  };
+  });
 }

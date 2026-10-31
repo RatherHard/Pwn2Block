@@ -6,7 +6,7 @@ import type { WorkflowIssue } from '../canvas/artifact';
 import {
   connectLogic,
   detachLogicData,
-  layoutLogicData,
+  layoutLogicDataComponents,
   LOGIC_RELATION_WIDTH,
   createLogicEdge,
   logicBox,
@@ -29,18 +29,10 @@ import { logicFlowHitClip, logicEdgeGeometry, logicPointInsertionIndex, logicSum
 
 import { renderLogicLibrary, type AddableLogicKind, type LogicLibraryState } from './logic-canvas-library';
 import { logicLayers, moveLogicLayer, normalizeLogicLayerOrder, type LogicLayer } from '../canvas/logic-layers';
-import { miniMapGeometry, miniMapPoint, miniMapViewportStyle, type MiniMapGeometry, type MiniMapRect } from '../canvas/minimap';
 
 let localClipboard = '';
 let clipboardWrite: Promise<void> = Promise.resolve();
 type Drag = { id: string; startX: number; startY: number; original: canvas.LogicGraph; ids: string[]; moved: boolean; library?: boolean; baseline?: canvas.LogicGraph };
-type MiniMapDrag = {
-  startX: number;
-  startY: number;
-  startViewport: MiniMapRect;
-  geometry: MiniMapGeometry;
-  viewScale: number;
-};
 export class LogicCanvasElement extends LitElement {
   static override styles = [terminalTheme, sharedStyles, logicCanvasStyles];
   static override properties = {
@@ -72,9 +64,6 @@ export class LogicCanvasElement extends LitElement {
   private initialViewSet = false;
   private pan: { clientX: number; clientY: number; x: number; y: number } | undefined;
   private marquee: { x: number; y: number; endX: number; endY: number } | undefined;
-  private minimapDrag: MiniMapDrag | undefined;
-  private minimapStageSize = { width: 0, height: 0 };
-  private minimapResizeObserver: ResizeObserver | undefined;
   private spacePressed = false;
   private wiring: { input: string } | undefined;
   private message = '';
@@ -118,8 +107,6 @@ export class LogicCanvasElement extends LitElement {
     this.removeEventListener('cut', this.cutEvent);
     this.removeEventListener('paste', this.pasteEvent);
     this.stopPointer();
-    this.minimapResizeObserver?.disconnect();
-    this.minimapResizeObserver = undefined;
     document.removeEventListener('pointerdown', this.dismissMenu, true);
     document.removeEventListener('focusin', this.dismissMenu, true);
     document.removeEventListener('wheel', this.dismissMenu, true);
@@ -145,7 +132,6 @@ export class LogicCanvasElement extends LitElement {
       this.resetViewToStart();
       this.requestUpdate();
     }
-    this.syncMinimapStage();
   }
   private resetViewToStart(): void {
     const start = this.graph.nodes.find((node) => node.kind === 'start');
@@ -160,18 +146,6 @@ export class LogicCanvasElement extends LitElement {
       y: stageHeight / 2 - (box.y + box.height / 2) * this.viewScale,
     };
     this.initialViewSet = true;
-  }
-  private syncMinimapStage(): void {
-    const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
-    if (!stage) return;
-    if (!this.minimapResizeObserver && typeof ResizeObserver !== 'undefined') {
-      this.minimapResizeObserver = new ResizeObserver(() => this.syncMinimapStage());
-      this.minimapResizeObserver.observe(stage);
-    }
-    const size = { width: stage.clientWidth, height: stage.clientHeight };
-    if (size.width === this.minimapStageSize.width && size.height === this.minimapStageSize.height) return;
-    this.minimapStageSize = size;
-    this.requestUpdate();
   }
   private closeMenu = (): void => {
     if (!this.menuPosition) return;
@@ -419,29 +393,6 @@ export class LogicCanvasElement extends LitElement {
     window.removeEventListener('pointercancel', this.cancelPointer);
   }
   private pointerMove = (event: PointerEvent): void => {
-    if (this.minimapDrag) {
-      const minimap = this.renderRoot.querySelector<HTMLElement>('.minimap');
-      const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
-      if (!minimap || !stage) return;
-      const mapRect = minimap.getBoundingClientRect();
-      const mapX = event.clientX - mapRect.left;
-      const mapY = event.clientY - mapRect.top;
-      const deltaX = mapX - this.minimapDrag.startX;
-      const deltaY = mapY - this.minimapDrag.startY;
-      const maxX = this.minimapDrag.geometry.map.width - this.minimapDrag.startViewport.width;
-      const maxY = this.minimapDrag.geometry.map.height - this.minimapDrag.startViewport.height;
-      const viewportX = Math.max(0, Math.min(maxX, this.minimapDrag.startViewport.x + deltaX));
-      const viewportY = Math.max(0, Math.min(maxY, this.minimapDrag.startViewport.y + deltaY));
-      const centerX = this.minimapDrag.geometry.content.x +
-        (viewportX + this.minimapDrag.startViewport.width / 2) / this.minimapDrag.geometry.scale;
-      const centerY = this.minimapDrag.geometry.content.y +
-        (viewportY + this.minimapDrag.startViewport.height / 2) / this.minimapDrag.geometry.scale;
-      const worldX = centerX - stage.clientWidth / (2 * this.minimapDrag.viewScale);
-      const worldY = centerY - stage.clientHeight / (2 * this.minimapDrag.viewScale);
-      this.viewOffset = { x: -worldX * this.minimapDrag.viewScale, y: -worldY * this.minimapDrag.viewScale };
-      this.requestUpdate();
-      return;
-    }
     if (this.pan) {
       this.viewOffset = { x: this.pan.x + event.clientX - this.pan.clientX, y: this.pan.y + event.clientY - this.pan.clientY };
       this.requestUpdate();
@@ -470,7 +421,7 @@ export class LogicCanvasElement extends LitElement {
     this.requestUpdate();
   };
   private pointerUp = (event: PointerEvent): void => {
-    if (this.drag?.moved || this.bendDrag || this.pan || this.minimapDrag) this.pointerMove(event);
+    if (this.drag?.moved || this.bendDrag || this.pan) this.pointerMove(event);
     this.stopPointer();
     if (this.drag?.library) setTimeout(() => { this.suppressLibraryClick = false; }, 0);
     if (this.bendDrag && this.draft) this.commit(this.draft);
@@ -492,7 +443,6 @@ export class LogicCanvasElement extends LitElement {
         .map((n) => n.id);
     }
     this.pan = undefined;
-    this.minimapDrag = undefined;
     this.drag = undefined;
     this.bendDrag = undefined;
     this.draft = undefined;
@@ -806,7 +756,7 @@ export class LogicCanvasElement extends LitElement {
       aria-label=${logicTitle(node, this.methods)}
       aria-pressed=${selected}
       class="node ${selected ? 'selected' : ''} ${snap ? 'snap-target' : ''}"
-      style=${styleMap({ left: `${box.x}px`, top: `${box.y}px` })}
+      style=${styleMap({ left: `${box.x}px`, top: `${box.y}px`, zIndex: `${2 + logicEnvelopeDepth(graph, node.id)}` })}
       @pointerdown=${(e: PointerEvent) => this.startNode(e, node.id)}
       @keydown=${(e: KeyboardEvent) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -856,8 +806,10 @@ export class LogicCanvasElement extends LitElement {
                 @change=${(e: Event) => {
                   const op = (e.target as HTMLSelectElement).value as canvas.LogicOperator;
                   const reverse = op === 'assign' && this.graph.nodes.some((n) => n.id === edge.from && n.kind === 'variable');
-                  this.attempt(() => layoutLogicData({ ...this.graph, edges: this.graph.edges.map((item) => item.id === edge.id
-                    ? { ...edge, op, from: reverse ? edge.to : edge.from, to: reverse ? edge.from : edge.to } : item) }, edge.to));
+                  this.attempt(() => {
+                    const updated = { ...edge, op, from: reverse ? edge.to : edge.from, to: reverse ? edge.from : edge.to };
+                    return layoutLogicDataComponents({ ...this.graph, edges: this.graph.edges.map((item) => item.id === edge.id ? updated : item) }, updated.to);
+                  });
                 }}
               >
                 ${canvas.LOGIC_OPERATORS.map(
@@ -935,7 +887,7 @@ export class LogicCanvasElement extends LitElement {
       >
         建立连接
       </button>
-      <p class="hint">拖动赋值目标时整体移动表达式；其他数据节点拖动可脱离连接，Esc 恢复。流程连线先点左侧入口，再点右侧出口。</p>
+      <p class="hint">拖动数据节点时整体移动数据连接结构；Esc 可恢复未提交的拖动。流程连线先点左侧入口，再点右侧出口。</p>
       ${this.graph.edges
         .filter((e) => e.from === node.id || e.to === node.id)
         .map(
@@ -961,65 +913,6 @@ export class LogicCanvasElement extends LitElement {
         : node?.kind === 'method'
           ? (this.methods.find((m) => m.id === node.method)?.params.map((p) => p.name) ?? [])
           : [];
-  }
-  private startMiniMap(event: PointerEvent): void {
-    const target = event.target as Element;
-    if (!target.closest('.minimap-viewport')) {
-      event.stopPropagation();
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const stage = this.renderRoot.querySelector<HTMLElement>('.stage');
-    const minimap = this.renderRoot.querySelector<HTMLElement>('.minimap');
-    if (!stage || !minimap) return;
-    const geometry = miniMapGeometry(
-      this.graph,
-      stage.clientWidth,
-      stage.clientHeight,
-      minimap.clientWidth,
-      minimap.clientHeight,
-      this.viewOffset,
-      this.viewScale,
-    );
-    const mapRect = minimap.getBoundingClientRect();
-    const viewport = miniMapViewportStyle(geometry);
-    this.minimapDrag = {
-      startX: event.clientX - mapRect.left,
-      startY: event.clientY - mapRect.top,
-      startViewport: viewport,
-      geometry,
-      viewScale: this.viewScale,
-    };
-    this.listenPointer();
-  }
-  private renderMiniMap(graph: canvas.LogicGraph): TemplateResult {
-    const width = 190;
-    const height = 130;
-    const geometry = miniMapGeometry(
-      graph,
-      this.minimapStageSize.width || width,
-      this.minimapStageSize.height || height,
-      width,
-      height,
-      this.viewOffset,
-      this.viewScale,
-    );
-    const viewport = miniMapViewportStyle(geometry);
-    const transform = `translate(${-geometry.content.x * geometry.scale} ${-geometry.content.y * geometry.scale}) scale(${geometry.scale})`;
-    return html`<div class="minimap" style=${styleMap({ width: `${width}px`, height: `${height}px` })} @pointerdown=${this.startMiniMap}>
-      <svg class="minimap-wires" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true">
-        <g transform=${transform}>
-          ${graph.edges.map((edge) => logicEdgeGeometry(graph, edge).paths.map((path) => svg`<path d=${path}></path>`))}
-        </g>
-      </svg>
-      ${graph.nodes.map((node) => {
-        const box = logicBox(graph, node.id);
-        const point = miniMapPoint(geometry, box);
-        return html`<span class="minimap-node ${node.kind === 'envelope' ? 'minimap-envelope' : ''}" style=${styleMap({ left: `${point.x}px`, top: `${point.y}px`, width: `${Math.max(2, box.width * geometry.scale)}px`, height: `${Math.max(2, box.height * geometry.scale)}px` })}></span>`;
-      })}
-      <span class="minimap-viewport" style=${styleMap({ left: `${viewport.x}px`, top: `${viewport.y}px`, width: `${viewport.width}px`, height: `${viewport.height}px` })}></span>
-    </div>`;
   }
   override render(): TemplateResult {
     if (!this.graph) return html``;
@@ -1113,7 +1006,6 @@ export class LogicCanvasElement extends LitElement {
                 ></div>`
               : nothing}
           </div>
-          ${this.renderMiniMap(graph)}
         </div>
         <aside class="inspector" aria-label="属性">${this.inspector()}</aside>
       </div>

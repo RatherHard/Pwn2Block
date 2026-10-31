@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canvas } from '@pwn2block/shared';
-import { connectLogic, detachLogicData, logicBox, moveLogicNodes, nearestLogicSnap,
-  LOGIC_RELATION_GAP, LOGIC_RELATION_WIDTH } from '../src/canvas/logic-editor';
+import { connectLogic, detachLogicData, layoutLogicDataComponents, logicBox, moveLogicNodes, nearestLogicSnap,
+  LOGIC_RELATION_GAP, LOGIC_RELATION_WIDTH, removeLogic } from '../src/canvas/logic-editor';
 import { logicEdgeGeometry } from '../src/components/logic-canvas-view';
 import { makeCanvasSave, parseCanvasSave } from '../src/canvas/save';
 
@@ -78,5 +78,25 @@ describe('unbounded coordinates and fixed data rows', () => {
   it('refuses a second node on an occupied side instead of overlapping a fixed row', () => {
     const initial = connectLogic(graph([value('a', 0), value('b', 300), value('c', 600)]), edge('ab', 'a', 'b'));
     expect(() => connectLogic(initial, edge('ac', 'a', 'c'))).toThrow(/空闲端点/);
+  });
+  it('rebuilds every remaining data row after one connection splits the structure', () => {
+    const initial = graph(
+      [value('a', -800, 40), value('b', 120, 700), value('c', 900, 180), value('d', 1800, 900)],
+      [edge('ab', 'a', 'b'), edge('bc', 'b', 'c'), edge('cd', 'c', 'd')],
+    );
+    const next = removeLogic(initial, ['bc']);
+    expectFixed(next, 'a', 'b', 'ab');
+    expectFixed(next, 'c', 'd', 'cd');
+  });
+  it('rebuilds a data row when its operator changes the connection direction', () => {
+    const initial = graph(
+      [{ id: 'v', kind: 'variable', name: 'x', x: 1000, y: 500 }, value('a', 0, 0)],
+      [{ id: 'assign', kind: 'data', from: 'a', to: 'v', op: '+' }],
+    );
+    const next = layoutLogicDataComponents(
+      { ...initial, edges: [{ id: 'assign', kind: 'data', from: 'a', to: 'v', op: 'assign' }] },
+      'v',
+    );
+    expectFixed(next, 'v', 'a', 'assign');
   });
 });

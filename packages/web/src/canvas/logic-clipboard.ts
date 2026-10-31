@@ -1,5 +1,5 @@
 import { canvas } from '@pwn2block/shared';
-import { logicAttachmentHost, logicBox, logicId } from './logic-editor';
+import { layoutLogicDataComponents, logicAttachmentHost, logicBox, logicId } from './logic-editor';
 
 const FORMAT = 'pwn2block.logic-selection';
 export function copyLogicSelection(graph: canvas.LogicGraph, selected: readonly string[]): canvas.LogicGraph | undefined {
@@ -70,5 +70,5 @@ export function pasteLogicSelection(
   }
   if (!canvas.LogicGraphSchema.safeParse(next).success) throw new Error('粘贴超出画布容量：最多 512 节点、2048 连接');
   const members = new Set(fragment.nodes.flatMap((n) => n.kind === 'envelope' ? n.members : []));
-  return { graph: next, selected: fragment.nodes.filter((n) => !members.has(n.id) && !logicAttachmentHost(n)).map((n) => ids.get(n.id)!) };
+  return { graph: layoutLogicDataComponents(next), selected: fragment.nodes.filter((n) => !members.has(n.id) && !logicAttachmentHost(n)).map((n) => ids.get(n.id)!) };
 }

@@ -383,49 +383,6 @@ export const logicCanvasStyles = css`
     pointer-events: none;
     z-index: 5;
   }
-  .minimap {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 20;
-    overflow: hidden;
-    border: 1px solid var(--p2b-line);
-    background: color-mix(in srgb, var(--p2b-bg) 88%, transparent);
-    pointer-events: auto;
-  }
-  .minimap-wires {
-    position: absolute;
-    inset: 0;
-    overflow: visible;
-    pointer-events: none;
-  }
-  .minimap-wires path {
-    fill: none;
-    stroke: var(--p2b-dim);
-    stroke-width: 2;
-    vector-effect: non-scaling-stroke;
-  }
-  .minimap-node {
-    position: absolute;
-    display: block;
-    min-width: 2px;
-    min-height: 2px;
-    border: 1px solid var(--p2b-info, #55ffff);
-    background: color-mix(in srgb, var(--p2b-info, #55ffff) 35%, transparent);
-    pointer-events: none;
-  }
-  .minimap-node.minimap-envelope {
-    border-style: dashed;
-    border-color: var(--p2b-dim);
-    background: transparent;
-  }
-  .minimap-viewport {
-    position: absolute;
-    border: 2px solid var(--p2b-focus);
-    background: color-mix(in srgb, var(--p2b-focus) 12%, transparent);
-    cursor: move;
-    touch-action: none;
-  }
   label {
     display: block;
     margin: 10px 0;
