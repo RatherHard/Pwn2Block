@@ -18,6 +18,7 @@ import {
   type LogicNode,
 } from './logic-model';
 import { validateLogicGraph } from './logic-validate';
+import { logicAssignmentSource } from './logic-structure';
 import { LogicFault, logicBinary, logicConvert, logicLiteral } from './logic-values';
 import type { Value } from './value';
 export { validateLogicGraph } from './logic-validate';
@@ -94,7 +95,7 @@ class LogicRuntime {
       const name = this.variableName(edge.to);
       if (this.definitions.has(name)) throw new LogicFault(edge.to, `变量 ${name} 有多个全局定义`);
       this.definitions.set(name, edge);
-      if (this.dependencies(edge.from).size > 0) this.derived.add(name);
+      if (this.dependencies(logicAssignmentSource(this.graph, edge.from)).size > 0) this.derived.add(name);
     }
     for (const name of this.definitions.keys()) this.read(name, this.definitions.get(name)!.to);
     // Reject writes to derived globals even if the offending branch is not taken.
@@ -129,7 +130,7 @@ class LogicRuntime {
     if (!definition) throw new LogicFault(id, `变量 ${name} 在第一次赋值前不能读取`);
     this.reading.add(name);
     try {
-      const value = this.evaluate(definition.from);
+      const value = this.evaluate(logicAssignmentSource(this.graph, definition.from));
       this.store(name, value, id);
       return value;
     } finally {
@@ -205,7 +206,8 @@ class LogicRuntime {
     if (node.kind === 'convert')
       return node.input ? this.evaluate(node.input) : logicConvert(logicLiteral(node.value, id), node);
     if (node.kind === 'envelope' && node.category === 'data') {
-      const sinks = node.members.filter(
+      const assignments = this.graph.edges.filter((edge) => edge.kind === 'data' && edge.op === 'assign' && node.members.includes(edge.to));
+      const sinks = assignments.length === 1 ? [assignments[0]!.to] : node.members.filter(
         (member) =>
           !this.graph.edges.some((edge) => edge.kind === 'data' && edge.from === member && node.members.includes(edge.to)),
       );
@@ -249,7 +251,7 @@ class LogicRuntime {
       const members = logicMembers(this.graph, member);
       const edges = assignmentEdges(members);
       if (!edges.length) continue;
-      const reads = new Set(edges.flatMap((e) => [...this.dependencies(e.from)]));
+      const reads = new Set(edges.flatMap((e) => [...this.dependencies(logicAssignmentSource(this.graph, e.from))]));
       // 次数引用同样属于执行依赖：先完成外层对次数变量的赋值，再进入内层循环。
       const loops = new Set(
         this.graph.nodes.filter((n) => n.kind === 'loop' && n.body && members.has(n.body)).map((n) => n.id),
@@ -269,10 +271,10 @@ class LogicRuntime {
       units.push({
         id: edge.id,
         writes: new Set([name]),
-        reads: this.dependencies(edge.from),
+        reads: this.dependencies(logicAssignmentSource(this.graph, edge.from)),
         run: () => {
           if (this.derived.has(name)) throw new LogicFault(edge.to, `派生变量 ${name} 只读`);
-          const value = this.evaluate(edge.from);
+          const value = this.evaluate(logicAssignmentSource(this.graph, edge.from));
           this.store(name, value, edge.to);
           this.snapshot(id, 'assign', [{ name, value }]);
         },

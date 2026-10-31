@@ -1,4 +1,5 @@
 import { errorIssue, type CanvasIssue } from './issues';
+import { logicAssignmentSource, logicComponents } from './logic-structure';
 import {
   LogicGraphSchema,
   logicCategory,
@@ -29,6 +30,8 @@ export function validateLogicGraph(graph: LogicGraph): CanvasIssue[] {
     if (node.kind === 'variable' && !node.name.trim()) fail(node.id, '变量名称不能为空');
     if (node.kind === 'envelope') {
       if (!node.members.length) fail(node.id, '包络不能为空');
+      if (logicComponents(graph, node.members, node.category).length > 1)
+        fail(node.id, '包络只能包含一个连接整体，请先连接或移出孤立结构');
       for (const member of node.members) {
         const child = nodes.get(member);
         if (!child) {
@@ -125,7 +128,8 @@ export function validateLogicGraph(graph: LogicGraph): CanvasIssue[] {
     const node = nodes.get(id);
     if (node?.kind === 'envelope' && node.category === 'data') for (const member of node.members) visitData(member);
     if (node?.kind === 'convert' && node.input) visitData(node.input);
-    for (const edge of graph.edges) if (edge.kind === 'data' && edge.to === id) visitData(edge.from);
+    for (const edge of graph.edges) if (edge.kind === 'data' && edge.to === id)
+      visitData(edge.op === 'assign' ? logicAssignmentSource(graph, edge.from) : edge.from);
     active.delete(id);
     done.add(id);
   };

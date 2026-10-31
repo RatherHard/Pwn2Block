@@ -46,6 +46,8 @@ export function pasteLogicSelection(
   graph: canvas.LogicGraph, fragment: canvas.LogicGraph, at: { x: number; y: number },
 ): { graph: canvas.LogicGraph; selected: string[] } {
   fragment = structuredClone(fragment);
+  if (fragment.nodes.some((node) => node.kind === 'envelope' && canvas.logicComponents(fragment, node.members, node.category).length > 1))
+    throw new Error('剪贴板中的包络包含多个独立结构，请先整理包络再复制');
   const boxes = fragment.nodes.filter((n) => !logicAttachmentHost(n)).map((n) => logicBox(fragment, n.id));
   const dx = at.x - Math.min(...boxes.map((b) => b.x)), dy = at.y - Math.min(...boxes.map((b) => b.y));
   const next: canvas.LogicGraph = { ...graph, nodes: [...graph.nodes], edges: [...graph.edges] };

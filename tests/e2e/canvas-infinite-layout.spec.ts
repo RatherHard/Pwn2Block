@@ -11,10 +11,13 @@ test('画布可越过原点和旧尺寸限制，负坐标节点保存刷新后�
   await stage.evaluate((e) => e.scrollIntoView({ block: 'center' }));
   const rect = (await stage.boundingBox())!;
   await panel.evaluate((e) => { (e as typeof e & { locate: (id: string) => void }).locate('far'); });
+  await stage.focus();
+  await page.keyboard.down('Space');
   await page.mouse.move(rect.x + 500, rect.y + 300);
   await page.mouse.down();
   await page.mouse.move(rect.x + 400, rect.y + 200, { steps: 8 });
   await page.mouse.up();
+  await page.keyboard.up('Space');
   await expect(panel.locator('.surface')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 200000, 300000)');
   await expect(panel.locator('.grid')).toBeVisible();
   await expect(panel.locator('pattern#logic-dots rect')).toHaveCount(1);

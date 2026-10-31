@@ -67,7 +67,7 @@ describe('unbounded coordinates and fixed data rows', () => {
     const detached = detachLogicData(initial, ['b']);
     expect(detached.edges).toEqual([]);
     expect(initial.edges).toHaveLength(2);
-    const moving = moveLogicNodes(detached, ['b'], 320, 300);
+    const moving = moveLogicNodes(detached, ['b'], 264, 300);
     const snap = nearestLogicSnap(moving, 'b', []);
     expect(snap?.target).toBe('d');
     expectFixed(snap!.graph, 'b', 'd', snap!.edge!.id);

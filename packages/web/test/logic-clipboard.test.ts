@@ -9,15 +9,17 @@ const value = (id: string, x: number, y = 200): canvas.LogicNode => ({
 });
 const graph = (): canvas.LogicGraph => ({ version: 1, nodes: [
   { id: 'start', kind: 'start', x: 0, y: 0 }, value('a', 100), value('b', 368), value('outside', 900),
-  { id: 'data', kind: 'envelope', category: 'data', title: '表达式', members: ['a', 'b'], x: 100, y: 200 },
+  { id: 'v', kind: 'variable', name: 'v', x: -168, y: 200 },
+  { id: 'data', kind: 'envelope', category: 'data', title: '表达式', members: ['v', 'a', 'b'], x: 100, y: 200 },
   { id: 'convert', kind: 'convert', input: 'data', target: 'int', value: { type: 'int', text: '0' }, width: '8', endian: 'little', signed: false, x: 100, y: 200 },
   { id: 'branch', kind: 'branch', x: 700, y: 200 },
   { id: 'outer', kind: 'envelope', category: 'flow', title: '流程', members: ['data', 'branch'], x: 0, y: 0 },
   { id: 'loop', kind: 'loop', count: '3', body: 'outer', x: 0, y: 0 },
 ], edges: [
   { id: 'sum', kind: 'data', from: 'a', to: 'b', op: '+' },
+  { id: 'assign', kind: 'data', from: 'a', to: 'v', op: 'assign' },
   { id: 'ref', kind: 'reference', from: 'data', to: 'branch', port: 'condition' },
-  { id: 'flow', kind: 'flow', from: 'branch', to: 'outer', outlet: 'then', points: [{ x: 600, y: 450 }] },
+  { id: 'flow', kind: 'flow', from: 'data', to: 'branch', outlet: 'next', points: [{ x: 600, y: 450 }] },
   { id: 'incoming', kind: 'flow', from: 'start', to: 'outer', outlet: 'next' },
   { id: 'external', kind: 'reference', from: 'outside', to: 'branch', port: 'condition' },
 ] });
@@ -26,8 +28,8 @@ describe('logic selection clipboard', () => {
   it('copies nested envelopes, attachments and internal edges, excluding external links and the start node', () => {
     const original = graph();
     const copied = copyLogicSelection(original, ['start', 'outer'])!;
-    expect(copied.nodes.map((n) => n.id).sort()).toEqual(['a', 'b', 'branch', 'convert', 'data', 'loop', 'outer']);
-    expect(copied.edges.map((e) => e.id)).toEqual(['sum', 'ref', 'flow']);
+    expect(copied.nodes.map((n) => n.id).sort()).toEqual(['a', 'b', 'branch', 'convert', 'data', 'loop', 'outer', 'v']);
+    expect(copied.edges.map((e) => e.id)).toEqual(['sum', 'assign', 'ref', 'flow']);
     expect(parseLogicSelection(serializeLogicSelection(copied))).toEqual(copied);
     const a = original.nodes.find((n) => n.id === 'a')!;
     if (a.kind === 'constant') a.value.text = 'changed';
@@ -44,7 +46,7 @@ describe('logic selection clipboard', () => {
     expect(logicBox(pasted.graph, ids.get('outer')!)).toMatchObject({ x: -1000, y: -2000 });
     expect(added.find((n) => n.kind === 'loop')).toMatchObject({ body: ids.get('outer') });
     expect(added.find((n) => n.kind === 'convert')).toMatchObject({ input: ids.get('data') });
-    expect(added.find((n) => n.id === ids.get('data'))).toMatchObject({ members: [ids.get('a'), ids.get('b')] });
+    expect(added.find((n) => n.id === ids.get('data'))).toMatchObject({ members: [ids.get('v'), ids.get('a'), ids.get('b')] });
     expect(logicBox(pasted.graph, ids.get('b')!).x - logicBox(pasted.graph, ids.get('a')!).x).toBe(268);
     const dx = added[0]!.x - fragment.nodes[0]!.x, dy = added[0]!.y - fragment.nodes[0]!.y;
     expect(pasted.graph.edges.slice(original.edges.length)).toEqual(fragment.edges.map((e, i) => ({

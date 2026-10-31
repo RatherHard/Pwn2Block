@@ -24,7 +24,7 @@ const graph = (nodes: canvas.LogicNode[], edges: canvas.LogicEdge[] = []): canva
 });
 describe('逻辑画布编辑：最近吸附与包络', () => {
   it('只选最近一个合法目标，远离后没有候选', () => {
-    const g = graph([constant('a', 100), constant('b', 310), constant('c', 550)]);
+    const g = graph([constant('a', 100), constant('b', 360), constant('c', 650)]);
     const snap = nearestLogicSnap(g, 'b', []);
     expect(snap?.target).toBe('a');
     expect(snap?.edge).toMatchObject({ kind: 'data', from: 'a', to: 'b' });
@@ -81,14 +81,15 @@ describe('逻辑画布编辑：最近吸附与包络', () => {
     expect(snap?.attachment).toBe('loop');
     expect(snap?.graph.nodes.find((n) => n.id === 'loop')).toMatchObject({ body: 'g' });
   });
-it('dragging a member of a nested envelope moves the outer structure instead of changing its bounds', () => {
+it('dragging a nested member carries only its same-level tail', () => {
   const g = graph([
     constant('a', 200),
     constant('b', 320),
     { id: 'inner', kind: 'envelope', category: 'data', members: ['a', 'b'], title: 'inner', x: 0, y: 0 },
     { id: 'outer', kind: 'envelope', category: 'data', members: ['inner'], title: 'outer', x: 0, y: 0 },
-  ]);
-  expect(logicDragIds(g, ['a'])).toEqual(['outer']);
+  ], [{ id: 'ab', kind: 'data', from: 'a', to: 'b', op: '+' }]);
+  expect(logicDragIds(g, ['a'])).toEqual(['a', 'b']);
+  expect(logicDragIds(g, ['b'])).toEqual(['b']);
   expect(logicDragIds(g, ['inner'])).toEqual(['inner']);
 });
 it('leaves a gap between an envelope header and its member border', () => {
@@ -100,7 +101,7 @@ it('leaves a gap between an envelope header and its member border', () => {
   const member = logicBox(g, 'a');
   expect(member.y - envelope.y).toBeGreaterThanOrEqual(58);
 });
-it('moves the whole data connection when dragging any connected data node', () => {
+it('moves the right tail from the dragged node', () => {
   const g = graph(
     [constant('a', 100), constant('b', 348), constant('c', 596)],
     [
@@ -108,8 +109,8 @@ it('moves the whole data connection when dragging any connected data node', () =
       { id: 'bc', kind: 'data', from: 'b', to: 'c', op: '+' },
     ],
   );
-  expect(logicDragIds(g, ['b'])).toEqual(expect.arrayContaining(['a', 'b', 'c']));
-  expect(logicDragIds(g, ['b'])).toHaveLength(3);
+  expect(logicDragIds(g, ['b'])).toEqual(['b', 'c']);
+  expect(logicDragIds(g, ['a'])).toEqual(['a', 'b', 'c']);
 });
 });
 
@@ -124,7 +125,9 @@ it('赋值包络和题目方法能一起组成流程包络', () => {
   );
   const first = wrapLogic(g, ['a', 'v']);
   const inner = first.nodes.find((n) => n.kind === 'envelope')!;
-  const outer = wrapLogic(first, [inner.id, 'm']);
+  expect(() => wrapLogic(first, [inner.id, 'm'])).toThrow(/整体/);
+  const outer = wrapLogic({ ...first, edges: [...first.edges,
+    { id: 'run', kind: 'flow', from: inner.id, to: 'm', outlet: 'next' }] }, [inner.id, 'm']);
   expect(outer.nodes.filter((n) => n.kind === 'envelope').at(-1)).toMatchObject({ category: 'flow' });
   expect(canvas.validateLogicGraph(outer)).toEqual([]);
 });

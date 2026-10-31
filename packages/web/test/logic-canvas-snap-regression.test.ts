@@ -7,10 +7,10 @@ const value = (id: string, x: number, y: number): canvas.LogicNode => ({
 });
 const base: canvas.LogicGraph = { version: 1, nodes: [
   { id: 'start', kind: 'start', x: 0, y: 0 },
-  value('old', 100, 400), value('moving', 300, 200), value('new', 510, 200),
+  value('old', 100, 400), value('moving', 300, 200), value('new', 568, 200),
 ], edges: [] };
 const attached: canvas.LogicGraph = { version: 1, edges: [], nodes: [
-  { id: 'start', kind: 'start', x: 0, y: 0 }, value('member', 200, 200), value('moving', 300, 100),
+  { id: 'start', kind: 'start', x: 0, y: 0 }, value('member', 200, 200), value('moving', 492, 169),
   { id: 'z-env', kind: 'envelope', category: 'data', members: ['member'], title: 'data', x: 200, y: 200 },
   { id: 'a-convert', kind: 'convert', input: 'z-env', value: { type: 'int', text: '0' }, target: 'int',
     width: '8', endian: 'little', signed: false, x: 900, y: 900 },

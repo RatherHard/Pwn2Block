@@ -219,6 +219,11 @@ export const logicCanvasStyles = css`
     outline: 1px solid var(--p2b-focus);
     outline-offset: 3px;
   }
+  .drag-member { outline: 1px dashed var(--p2b-focus); outline-offset: 3px; }
+  .snap-feedback { color: var(--p2b-focus); }
+  .cut-marker, .drag-cleanup { position: absolute; pointer-events: none; z-index: 10000; color: var(--p2b-focus); background: var(--p2b-bg); }
+  .cut-marker { transform: translate(-50%, -50%); border: 1px dashed var(--p2b-focus); padding: 2px 5px; }
+  .drag-cleanup { left: 0; top: 0; padding: 4px; }
   .node-title {
     font-weight: bold;
     display: block;

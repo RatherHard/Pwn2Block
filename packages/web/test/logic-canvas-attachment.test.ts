@@ -57,8 +57,11 @@ describe('共享附着操作的结构边界', () => {
     const graph = fixture(kind);
     expect(attachLogic(graph, 'attach', 'missing').ok).toBe(false);
     expect(attachLogic(graph, 'attach', 'member').ok).toBe(false);
-    const recursive = {
+    const recursive: canvas.LogicGraph = {
       ...graph,
+      edges: [kind === 'convert'
+        ? { id: 'link', kind: 'data', from: 'member', to: 'attach', op: '+' }
+        : { id: 'link', kind: 'flow', from: 'member', to: 'attach', outlet: 'next' }],
       nodes: graph.nodes.map((n) =>
         n.kind === 'envelope' ? { ...n, members: [...n.members, 'attach'] } : n,
       ),

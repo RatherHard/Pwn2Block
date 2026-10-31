@@ -1,6 +1,6 @@
 import { test } from './helpers';
 import { expect, type Page } from '@playwright/test';
-import { openChallenge, panelOf } from './helpers';
+import { openChallenge, panelOf, originView } from './helpers';
 import type { canvas } from '../../packages/shared/src';
 
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要真实后端');
@@ -20,6 +20,7 @@ async function install(page: Page, nodes: canvas.LogicNode[], edges: canvas.Logi
     },
     { version: 1 as const, nodes: [{ id: 'start', kind: 'start' as const, x: 70, y: 50 }, ...nodes], edges },
   );
+  await originView(page);
 }
 async function graph(page: Page): Promise<canvas.LogicGraph> {
   return panelOf(page).evaluate((panel) => {
@@ -66,14 +67,14 @@ test('最近吸附虚化预览、远离消失、松开实体化、右侧换运�
   await openChallenge(page);
   await install(page, [constant('a', 80, 220), constant('b', 500, 400), constant('c', 800, 220)]);
   const panel = panelOf(page);
-  await drag(page, 'b', 300, 220, false);
+  await drag(page, 'b', 348, 220, false);
   await expect(panel.locator('.relation.ghost')).toHaveCount(1);
   expect((await graph(page)).edges).toHaveLength(0);
   const stage = await panel.locator('.stage').boundingBox();
   if (!stage) throw new Error('stage');
   await page.mouse.move(stage.x + 550, stage.y + 450, { steps: 6 });
   await expect(panel.locator('.relation.ghost')).toHaveCount(0);
-  await page.mouse.move(stage.x + 350, stage.y + 240, { steps: 6 });
+  await page.mouse.move(stage.x + 398, stage.y + 240, { steps: 6 });
   await expect(panel.locator('.relation.ghost')).toHaveCount(1);
   await page.mouse.up();
   await expect(panel.locator('.relation:not(.ghost)')).toHaveCount(1);
@@ -115,7 +116,7 @@ test('内部吸附纳入包络、转换附着与解除、刷新保留结构', as
     },
   ]);
   const panel = panelOf(page);
-  await drag(page, 'b', 220, 240);
+  await drag(page, 'b', 260, 258);
   await expect
     .poll(async () => (await graph(page)).nodes.find((n) => n.id === 'g'))
     .toMatchObject({ members: ['a', 'b'] });

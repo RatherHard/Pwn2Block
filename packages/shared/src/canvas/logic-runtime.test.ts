@@ -47,6 +47,20 @@ function failure(g: LogicGraph, pattern: RegExp): void {
 }
 
 describe('节点功能逻辑基准：数据、赋值与包络', () => {
+  it('赋值框连接首项时读取完整右式，包络返回相同结果', () => {
+    const g = graph([variable('v'), value('x', '2'), value('a', '3'), envelope('e', ['v', 'x', 'a'])],
+      [data('x', 'v'), data('x', 'a', '+')]);
+    expect(validateLogicGraph(g)).toEqual([]);
+    expect(previewLogicGraph(g).get('v')).toEqual({ kind: 'int', value: 5n });
+    expect(previewLogicGraph(g).get('e')).toEqual({ kind: 'int', value: 5n });
+  });
+  it('完整右式中的后续变量参与派生依赖与环检测', () => {
+    const g = graph([variable('v'), value('x', '2'), variable('read', 'base'), variable('base'), value('n', '3')],
+      [data('x', 'v'), data('x', 'read', '+'), data('n', 'base')]);
+    expect(previewLogicGraph(g).get('v')).toEqual({ kind: 'int', value: 5n });
+    const cyclic = { ...g, nodes: g.nodes.map((node) => node.id === 'read' ? variable('read', 'v') : node) };
+    failure(cyclic, /环/);
+  });
   it('新文档只有唯一开始，存档往返保留独立连接模型', () => {
     const document = newLogicDocument();
     expect(document.logic?.nodes.map((n) => n.kind)).toEqual(['start']);
@@ -489,7 +503,8 @@ describe('节点逻辑审查回归：附着循环次数依赖', () => {
         ...(nested ? [envelope('middle', ['inc'])] : []),
         value('three', '3'),
         variable('count'),
-        envelope('outer', [nested ? 'middle' : 'inc', 'three', 'count']),
+        envelope('count-init', ['three', 'count']),
+        envelope('outer', ['count-init', nested ? 'middle' : 'inc'], 'flow'),
         method('m'),
       ],
       [
@@ -497,6 +512,7 @@ describe('节点逻辑审查回归：附着循环次数依赖', () => {
         data('read', 'one', '+'),
         data('one', 'write'),
         data('three', 'count'),
+        flow('count-init', nested ? 'middle' : 'inc'),
         ref('count', 'loop', 'count'),
         flow('start', 'outer'),
         flow('outer', 'm'),
@@ -509,7 +525,7 @@ describe('节点逻辑审查回归：附着循环次数依赖', () => {
     if (!result.ok) return;
     expect(result.sequence.actions).toEqual([{ type: 'block', id: 'emit', args: { n: '0x3' } }]);
     expect(result.sequence.steps.filter((step) => step.kind === 'assign')).toMatchObject([
-      { nodeId: 'outer', rounds: {}, inputs: [{ name: 'count', value: { kind: 'int', value: 3n } }] },
+      { nodeId: 'count-init', rounds: {}, inputs: [{ name: 'count', value: { kind: 'int', value: 3n } }] },
       { nodeId: 'inc', rounds: { loop: 0 }, inputs: [{ name: 'x', value: { kind: 'int', value: 1n } }] },
       { nodeId: 'inc', rounds: { loop: 1 }, inputs: [{ name: 'x', value: { kind: 'int', value: 2n } }] },
       { nodeId: 'inc', rounds: { loop: 2 }, inputs: [{ name: 'x', value: { kind: 'int', value: 3n } }] },

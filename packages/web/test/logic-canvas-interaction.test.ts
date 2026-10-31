@@ -14,6 +14,7 @@ async function mount(nodes: canvas.LogicNode[], edges: canvas.LogicEdge[] = []) 
   document.body.append(ui);
   mounted.push(ui);
   await ui.updateComplete;
+  ui.shadowRoot!.querySelector('.stage')!.getBoundingClientRect = () => new DOMRect(0, 0, 2000, 2000);
   return ui;
 }
 async function press(ui: LogicCanvasElement, selector: string) {
@@ -22,6 +23,13 @@ async function press(ui: LogicCanvasElement, selector: string) {
   target!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
   window.dispatchEvent(new MouseEvent('pointerup', { clientX: 10, clientY: 10 }));
   await ui.updateComplete;
+}
+function pointer(ui: LogicCanvasElement, type: string, x: number, y: number, selector?: string, altKey = false) {
+  const transform = ui.shadowRoot!.querySelector<HTMLElement>('.surface')!.style.transform;
+  const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(transform)!;
+  const event = new MouseEvent(type, { bubbles: true, button: 0, altKey,
+    clientX: Number(match[1]) + x * Number(match[3]), clientY: Number(match[2]) + y * Number(match[3]) });
+  (selector ? ui.shadowRoot!.querySelector(selector)! : window).dispatchEvent(event);
 }
 
 describe('canvas connection and expression interaction', () => {
@@ -103,5 +111,51 @@ describe('canvas connection and expression interaction', () => {
     ui.graph = { ...ui.graph, nodes: ui.graph.nodes.map((node) => node.id === 'b' ? constant('b', 268, '3') : node) };
     await ui.updateComplete;
     expect(ui.shadowRoot!.querySelector('[data-node="group"] .envelope-summary')?.textContent).toContain('int 5');
+  });
+
+  it('previews the final inserted row without publishing it, then publishes exactly once on release', async () => {
+    const ui = await mount([constant('a', 100), constant('b', 368),
+      { ...constant('x', 100), y: 450 }, { ...constant('y', 368), y: 450 }], [
+      { id: 'ab', kind: 'data', from: 'a', to: 'b', op: '*' },
+      { id: 'xy', kind: 'data', from: 'x', to: 'y', op: '+' },
+    ]);
+    const original = ui.graph;
+    let edits = 0;
+    ui.addEventListener('logic-edit', () => edits++);
+    pointer(ui, 'pointerdown', 110, 460, '[data-node="x"]');
+    pointer(ui, 'pointermove', 324, 258);
+    await ui.updateComplete;
+    expect(ui.graph).toBe(original);
+    expect(edits).toBe(0);
+    expect(ui.shadowRoot!.querySelectorAll('.relation.ghost')).toHaveLength(2);
+    expect(ui.shadowRoot!.querySelector('.snap-feedback')?.textContent).toContain('插入');
+    const positions = ['a', 'x', 'y', 'b'].map((id) => ui.shadowRoot!.querySelector<HTMLElement>(`[data-node="${id}"]`)!.style.left);
+    expect(positions).toEqual(['100px', '368px', '636px', '904px']);
+    pointer(ui, 'pointerup', 324, 258);
+    await ui.updateComplete;
+    expect(edits).toBe(1);
+    expect(ui.shadowRoot!.querySelectorAll('.relation.ghost')).toHaveLength(0);
+    expect(['a', 'x', 'y', 'b'].map((id) => ui.shadowRoot!.querySelector<HTMLElement>(`[data-node="${id}"]`)!.style.left)).toEqual(positions);
+  });
+
+  it('cancels tail extraction with Esc, while a relation never initiates dragging', async () => {
+    const ui = await mount([constant('a', 100), constant('b', 368), constant('c', 636)], [
+      { id: 'ab', kind: 'data', from: 'a', to: 'b', op: '+' }, { id: 'bc', kind: 'data', from: 'b', to: 'c', op: '*' },
+    ]);
+    const original = ui.graph;
+    pointer(ui, 'pointerdown', 380, 230, '[data-node="b"]');
+    pointer(ui, 'pointermove', 380, 430);
+    await ui.updateComplete;
+    expect(ui.shadowRoot!.querySelectorAll('.relation')).toHaveLength(1);
+    ui.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await ui.updateComplete;
+    expect(ui.graph).toBe(original);
+    expect(ui.shadowRoot!.querySelectorAll('.relation')).toHaveLength(2);
+    pointer(ui, 'pointerdown', 324, 258, '[data-edge="ab"]');
+    pointer(ui, 'pointermove', 324, 500);
+    pointer(ui, 'pointerup', 324, 500);
+    await ui.updateComplete;
+    expect(ui.graph).toBe(original);
+    expect(ui.shadowRoot!.querySelector('.marquee')).toBeNull();
   });
 });

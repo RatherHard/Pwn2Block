@@ -28,7 +28,8 @@ test('拖动空白区域不产生连接，坐标可撤销', async ({ page }) => 
 });
 test('空白框选同类节点并创建包络', async ({ page }) => {
   await openChallenge(page);
-  await installGraph(page, [constant('a', 80, 220), constant('b', 328, 220)]);
+  await installGraph(page, [constant('a', 80, 220), constant('b', 348, 220)],
+    [{ id: 'ab', kind: 'data', from: 'a', to: 'b', op: '+' }]);
   const stage = stageOf(page);
   await stage.evaluate((e) => e.scrollIntoView({ block: 'start' }));
   const box = await stage.boundingBox();

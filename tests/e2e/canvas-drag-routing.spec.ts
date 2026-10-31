@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { test, openChallenge, panelOf, editorOf } from './helpers';
+import { test, openChallenge, panelOf, editorOf, originView } from './helpers';
 import type { canvas } from '../../packages/shared/src';
 
 test.skip(process.env.PWN2BLOCK_E2E !== '1', '需要真实后端');
@@ -10,6 +10,7 @@ async function install(page: Page, nodes: canvas.LogicNode[], edges: canvas.Logi
     panel.setDocument({ format: 'pwn2block.canvas', version: 2, nodes: [], layout: {}, main: [], logic });
   }, { version: 1 as const, nodes: [{ id: 'start', kind: 'start' as const, x: 70, y: 50 }, ...nodes], edges });
   await panelOf(page).locator('.stage').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await originView(page);
 }
 async function graph(page: Page): Promise<canvas.LogicGraph> {
   return panelOf(page).evaluate((element) => (element as typeof element & { document: canvas.CanvasDocument }).document.logic!);
@@ -28,7 +29,7 @@ test('从库拖拽预览左向赋值，单次撤销恢复，取消或放到库�
   await install(page, [{ id: 'v', kind: 'variable', name: 'x', x: 120, y: 220 }]);
   const panel = panelOf(page);
   await panel.locator('[data-category="data"]').click();
-  await libraryDrag(page, '+ 常量', 450, 258);
+  await libraryDrag(page, '+ 常量', 478, 258);
   await expect(panel.locator('.relation.ghost')).toHaveText('← 赋值');
   expect((await graph(page)).nodes).toHaveLength(2);
   await page.mouse.up();
@@ -107,6 +108,7 @@ test('直线双击添加转折点，拖动成曲线，撤销、保存恢复及�
   await openChallenge(page, 'ret2win');
   await expect(panel.locator('[data-edge="flow"] .flow-line')).toHaveAttribute('d', /C.*440 210 C/);
   await panel.locator('.stage').evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await originView(page);
   await panel.locator('.stage').evaluate((e) => { e.scrollLeft = 0; e.scrollTop = 0; });
   const restoredStage = (await panel.locator('.stage').boundingBox())!;
   await page.mouse.click(restoredStage.x + 440, restoredStage.y + 210);
@@ -125,7 +127,6 @@ test('普通拖动框选，Space 加拖动平移，Escape 取消交互', async (
   const before = await graph(page);
   const start = panel.locator('[data-node="start"]');
   const original = (await start.boundingBox())!;
-  await expect(panel.locator('.minimap')).toBeVisible();
 
   // Blank-canvas drag is a marquee selection.
   await page.mouse.move(rect.x + original.x - rect.x - 10, rect.y + original.y - rect.y - 10);
@@ -160,7 +161,7 @@ test('普通拖动框选，Space 加拖动平移，Escape 取消交互', async (
   await expect(stage).toHaveClass('stage');
 });
 
-test('空白拖动画布双向平移，取消恢复视图，Shift 框选，平移后库拖入坐标准确', async ({ page }) => {
+test('Space 拖动画布双向平移，取消恢复视图，Shift 框选，平移后库拖入坐标准确', async ({ page }) => {
   await openChallenge(page, 'ret2win');
   await install(page, []);
   const panel = panelOf(page), stage = panel.locator('.stage');
@@ -170,6 +171,8 @@ test('空白拖动画布双向平移，取消恢复视图，Shift 框选，平�
   const undoDisabled = await panel.getByRole('button', { name: '撤销', exact: true }).isDisabled();
   const start = panel.locator('[data-node="start"]');
   const original = (await start.boundingBox())!;
+  await stage.focus();
+  await page.keyboard.down('Space');
   await page.mouse.move(rect.x + 500, rect.y + 350);
   await page.mouse.down();
   await page.mouse.move(rect.x + 620, rect.y + 410, { steps: 6 });
@@ -194,6 +197,7 @@ test('空白拖动画布双向平移，取消恢复视图，Shift 框选，平�
   await page.mouse.up();
   expect((await start.boundingBox())!.x).toBeCloseTo(box.x, 0);
   await expect(stage).toHaveClass('stage');
+  await page.keyboard.up('Space');
   await page.keyboard.down('Shift');
   await page.mouse.move(box.x - 10, box.y - 10);
   await page.mouse.down();
@@ -227,7 +231,7 @@ test('数据节点拖动预脱离旧连接，松手按新吸附结果排列', as
   const node = (await panel.locator('[data-node="b"]').boundingBox())!;
   await page.mouse.move(node.x + 40, node.y + 20);
   await page.mouse.down();
-  await page.mouse.move(stage.x + 540, stage.y + 370, { steps: 8 });
+  await page.mouse.move(stage.x + 472, stage.y + 370, { steps: 8 });
   await expect(panel.locator('.relation:not(.ghost)')).toHaveCount(0);
   await expect(panel.locator('.relation.ghost')).toHaveCount(1);
   expect((await graph(page)).edges[0].id).toBe('existing');
@@ -250,7 +254,7 @@ test('隐藏附件不出现在连接目标中，拖近标题只连接到包络',
   await panel.locator('[data-attachment="a-convert"]').click();
   await expect(panel.getByLabel('连接到').locator('option[value="a-convert"], option[value="z-env"]')).toHaveCount(0);
   await panel.locator('[data-category="data"]').click();
-  await libraryDrag(page, '+ 常量', 580, 208);
+  await libraryDrag(page, '+ 常量', 786, 318);
   await expect(panel.locator('.relation.ghost')).toHaveCount(1);
   await page.mouse.up();
   const updated = await graph(page);
@@ -269,10 +273,13 @@ test('画布平移后双击连线和拖动转折点仍使用画布坐标', async
   const panel = panelOf(page);
   await panel.locator('.stage').evaluate((e) => { e.scrollLeft = 0; e.scrollTop = 0; });
   const stage = (await panel.locator('.stage').boundingBox())!;
+  await panel.locator('.stage').focus();
+  await page.keyboard.down('Space');
   await page.mouse.move(stage.x + 500, stage.y + 300);
   await page.mouse.down();
   await page.mouse.move(stage.x + 580, stage.y + 340, { steps: 5 });
   await page.mouse.up();
+  await page.keyboard.up('Space');
   await page.mouse.dblclick(stage.x + 505, stage.y + 128);
   await expect(panel.locator('.bend-handle')).toHaveCount(1);
   const edge = (await graph(page)).edges[0];

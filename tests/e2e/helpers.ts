@@ -34,6 +34,26 @@ export async function installGraph(
     },
     { version: 1 as const, nodes: [{ id: 'start', kind: 'start' as const, x: 70, y: 50 }, ...nodes], edges },
   );
+  await originView(page);
+}
+/** 固定夹具使用世界原点视图；通过真实平移消除初始居中，保留应用相机逻辑。 */
+export async function originView(page: Page): Promise<void> {
+  const stage = stageOf(page);
+  await stage.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  const transform = await stage.locator('.surface').evaluate((e) => {
+    const matrix = e.ownerDocument.defaultView!.getComputedStyle(e).transform.slice(7, -1).split(',').map(Number);
+    return { x: matrix[4]!, y: matrix[5]! };
+  });
+  if (!transform.x && !transform.y) return;
+  const rect = (await stage.boundingBox())!;
+  const x = rect.x + rect.width - 30, y = rect.y + rect.height - 30;
+  await stage.focus();
+  await page.keyboard.down('Space');
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - transform.x, y - transform.y, { steps: 2 });
+  await page.mouse.up();
+  await page.keyboard.up('Space');
 }
 export async function waitForSave(page: Page, id: string): Promise<void> {
   const graph = await readGraph(page);

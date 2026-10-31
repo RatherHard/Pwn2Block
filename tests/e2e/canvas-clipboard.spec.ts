@@ -100,7 +100,7 @@ test('流程线覆盖节点时可添加和拖动转折点，线外节点仍可�
   const panel = panelOf(page), stage = stageOf(page);
   await stage.evaluate((e) => e.scrollIntoView({ block: 'center' }));
   const rect = (await stage.boundingBox())!;
-  await expect(panel.locator('.flow-wires')).toHaveCSS('z-index', '6');
+  await expect(panel.locator('.flow-wires')).toHaveCSS('z-index', '1000');
   await page.mouse.dblclick(rect.x + 500, rect.y + 238);
   await expect(panel.locator('.bend-handle')).toHaveCount(1);
   const handle = (await panel.locator('.bend-handle').boundingBox())!;

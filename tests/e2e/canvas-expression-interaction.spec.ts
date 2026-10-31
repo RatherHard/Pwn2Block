@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import { test, constant, installGraph, openChallenge, panelOf, readGraph, dragNode } from './helpers';
 
 test.skip(process.env.PWN2BLOCK_E2E !== '1', 'Requires real backend');
+test.use({ viewport: { width: 1920, height: 1080 } });
 
 test('branch text occupies a separate column from outlet labels', async ({ page }) => {
   await openChallenge(page);
@@ -68,7 +69,7 @@ test('assignment dragging carries nested expressions, displays their result and 
   }
   const summary = await panel.locator('[data-node="inner"] .envelope-summary').boundingBox();
   const member = await panel.locator('[data-node="a"]').boundingBox();
-  expect(summary!.y).toBeGreaterThanOrEqual(member!.y + member!.height);
+  expect(summary!.y + summary!.height).toBeLessThanOrEqual(member!.y);
   await panel.getByRole('button', { name: '撤销', exact: true }).click();
   expect(await readGraph(page)).toEqual(before);
   await panel.getByRole('button', { name: '重做', exact: true }).click();

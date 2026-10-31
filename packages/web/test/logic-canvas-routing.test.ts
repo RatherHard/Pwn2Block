@@ -34,7 +34,7 @@ describe('flow routing and leftward assignment', () => {
   });
   it('assigns the right value into the left variable during snapping and explicit connection', () => {
     const variable: canvas.LogicNode = { id: 'v', kind: 'variable', name: 'x', x: 100, y: 300 };
-    const value: canvas.LogicNode = { id: 'value', kind: 'constant', value: { type: 'int', text: '42' }, x: 330, y: 300 };
+    const value: canvas.LogicNode = { id: 'value', kind: 'constant', value: { type: 'int', text: '42' }, x: 368, y: 300 };
     const graph: canvas.LogicGraph = { ...flow, nodes: [...flow.nodes, variable, value] };
     expect(createLogicEdge(graph, variable, value, [])).toMatchObject({ from: 'value', to: 'v', op: 'assign' });
     const snap = nearestLogicSnap(graph, 'value', []);
